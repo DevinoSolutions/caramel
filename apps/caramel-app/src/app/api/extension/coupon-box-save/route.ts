@@ -34,6 +34,11 @@ import { NextResponse, type NextRequest } from 'next/server'
 //   429 { saved: false, reason: 'user_budget' | 'store_budget' |
 //                              'global_budget' }      a 24-hour write cap
 //   200 { saved: true, store, status: 'pending' }     recorded, NOT served yet
+//   200 { saved: true, store, status: 'uncorroborated' }
+//                                                     recorded, but this user
+//                                                     has no `worked` report at
+//                                                     the store from the minutes
+//                                                     before: it never counts
 //   200 { saved: true, store, status: 'published' }   corroborated and served
 // withRoute answers a non-extension Origin (403) and the rate limit (429).
 
@@ -43,7 +48,11 @@ const MAX_BODY_BYTES = 4 * 1024
 const NO_STORE = { 'Cache-Control': 'private, no-store' } as const
 
 type SaveAnswer =
-    | { saved: true; store: string; status: 'pending' | 'published' }
+    | {
+          saved: true
+          store: string
+          status: 'pending' | 'uncorroborated' | 'published'
+      }
     | {
           saved: false
           reason:
@@ -167,17 +176,19 @@ async function handleSave(
         if (outcome.kind === 'has_config') {
             return json({ saved: false, reason: 'has_config' }, 409)
         }
-        // The cache is NOT reset here: it reaches the new row within its TTL
-        // (minutes), installed extensions cache the store list for an hour
-        // anyway, and a reset per accepted save would let callers force one
-        // full rebuild of the list (seconds of blocked event loop) per
-        // request.
+        // A promotion has already dropped the supported-stores cache
+        // (recordBoxProposal, once per store); a pending save never does, or
+        // callers could force a full rebuild of the list per request.
+        const status =
+            outcome.kind === 'pending' && !outcome.corroborated
+                ? 'uncorroborated'
+                : outcome.kind
         console.info('[coupon-box-save] recorded a coupon box proposal', {
             store,
             host,
-            status: outcome.kind,
+            status,
         })
-        return json({ saved: true, store, status: outcome.kind }, 200)
+        return json({ saved: true, store, status }, 200)
     } catch (error) {
         console.error('[coupon-box-save] save failed', error, { host })
         return handleRouteError(error, {

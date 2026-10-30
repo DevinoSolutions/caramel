@@ -205,8 +205,10 @@ const serverObjectSchema = z.object({
     // the same box for the same store (couponBoxSave.recordBoxProposal); only
     // then does it become a served store_configs row. Minimum 2 on purpose:
     // 1 would put a single account back in control of what other installs
-    // click. Default 5, not 3: this counts ESTABLISHED accounts (older than
-    // COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS), so an attacker needs aged signups.
+    // click. Default 2 (T-10535): this counts ESTABLISHED accounts (older than
+    // COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS), and each one's proposal counts only
+    // when the same user reported a code at that store as `worked` in the
+    // minutes before (couponBoxCorroboration.ts).
     // The three caps count NEW proposals in the last 24 hours: per
     // user, per store, and across all callers; over a cap the route answers
     // 429 and nothing is written. Non-negative integers; 0 = refuse every
@@ -214,7 +216,7 @@ const serverObjectSchema = z.object({
     // into 0 and silently switch saving off); garbage fails boot.
     COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS: z.preprocess(
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
-        z.coerce.number().int().min(2).default(5),
+        z.coerce.number().int().min(2).default(2),
     ),
     COUPON_BOX_SAVE_USER_DAILY_CAP: z.preprocess(
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),

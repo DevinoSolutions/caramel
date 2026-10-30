@@ -14,9 +14,12 @@
 //     'session'` takes the extension's bearer, so a forged Origin alone is 401.
 //   - A save is a PROPOSAL, not a config (recordBoxProposal): the box becomes
 //     the store's store_configs row, and so is served, only once
-//     COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS distinct users proposed the same
-//     box for the same store. Until then nothing is served and nothing blocks
-//     a different box from being corroborated later.
+//     COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS distinct established users proposed
+//     the same box for the same store, each backed by their own `worked`
+//     report of a code at that store (couponBoxCorroboration.ts). Until then
+//     nothing is served and nothing blocks a different box from being
+//     corroborated later. A promotion drops the in-process supported-stores
+//     cache, so this server serves the new row at once.
 //   - A write budget (recordBoxProposal): per user, per store and across all
 //     callers per 24 hours; over a cap the route answers 429.
 //   - Selectors only, each inside the grammar in couponBoxSelector.ts, and an
@@ -38,6 +41,7 @@ import {
     insertAutoDetectedStoreConfig,
     type AutoDetectedStoreConfig,
 } from '@/lib/catalog/applyCatalogRows'
+import { corroboratedAgreement } from '@/lib/couponBoxCorroboration'
 import { couponBoxDomainSchema } from '@/lib/couponBoxPick'
 import {
     isCouponBoxSelector,
@@ -48,6 +52,7 @@ import { findCatalogStoreNames } from '@/lib/couponsRepo'
 import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
 import { resolveStoreDomain } from '@/lib/storeDomain'
+import { resetSupportedStoresCache } from '@/lib/supportedStoresCache'
 import * as Sentry from '@sentry/nextjs'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
@@ -223,8 +228,15 @@ export type BoxBudgetScope = 'user' | 'store' | 'global'
 
 export type BoxProposalOutcome =
     | { kind: 'over_budget'; scope: BoxBudgetScope }
-    /** Recorded, not served: fewer than the required distinct users agree. */
-    | { kind: 'pending'; agreeing: number; needed: number }
+    /** Recorded, not served: fewer than the required distinct users agree.
+     * `corroborated` says whether THIS user's proposal counts at all (a
+     * `worked` report of their own backs it). */
+    | {
+          kind: 'pending'
+          agreeing: number
+          needed: number
+          corroborated: boolean
+      }
     /** Corroborated and written as the store's served config. */
     | { kind: 'published' }
     /** Corroborated, but the store already has a row (a racing or earlier save). */
@@ -280,8 +292,9 @@ function reportCapHit(
 /**
  * Record one signed-in install's save of `box` for `storeName` and, once
  * COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS distinct users proposed the same box
- * within AUTO_DETECT_CONFIG_MAX_AGE_DAYS, write it as the store's served
- * config (insertAutoDetectedStoreConfig). Until then NOTHING reaches
+ * within AUTO_DETECT_CONFIG_MAX_AGE_DAYS, each backed by a `worked` report of
+ * their own at that store (couponBoxCorroboration.ts), write it as the store's
+ * served config (insertAutoDetectedStoreConfig). Until then NOTHING reaches
  * store_configs, so a forged or mistaken box is never served and a squatter
  * cannot hold a store against the box real installs agree on.
  *
@@ -299,8 +312,10 @@ function reportCapHit(
  * RESIDUAL RISK (T-6221): corroboration counts distinct ESTABLISHED accounts
  * (isEstablishedAccount, COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS old), so an
  * attacker needs aged accounts — a fresh batch of signups cannot meet the
- * quorum. The selector gates and the on-page control guard limit what even
- * an aged-account attacker can click.
+ * quorum, and each of them must also have a `worked` report at the store from
+ * the minutes before its save (a report anyone signed in can send, so it is a
+ * cost, not proof). The selector gates and the on-page control guard limit
+ * what even an aged-account attacker can click.
  */
 export async function recordBoxProposal(args: {
     storeName: string
@@ -363,21 +378,31 @@ export async function recordBoxProposal(args: {
     }
 
     const needed = env.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS
-    const establishedCutoff = new Date(
-        Date.now() - env.COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS * DAY_MS,
-    )
-    const agreeing = await prisma.couponBoxProposal.count({
-        where: {
-            storeName,
-            boxHash: hash,
-            createdAt: { gt: new Date(Date.now() - PROPOSAL_WINDOW_MS) },
-            user: { createdAt: { lte: establishedCutoff } },
-        },
+    const { agreeing, ownCorroborated } = await corroboratedAgreement({
+        storeName,
+        boxHash: hash,
+        userId,
+        proposedAfter: new Date(Date.now() - PROPOSAL_WINDOW_MS),
+        establishedBy: new Date(
+            Date.now() - env.COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS * DAY_MS,
+        ),
     })
-    if (agreeing < needed) return { kind: 'pending', agreeing, needed }
+    if (agreeing < needed) {
+        return {
+            kind: 'pending',
+            agreeing,
+            needed,
+            corroborated: ownCorroborated,
+        }
+    }
 
     const { inserted } = await insertAutoDetectedStoreConfig(config)
-    return inserted ? { kind: 'published' } : { kind: 'has_config' }
+    if (!inserted) return { kind: 'has_config' }
+    // Once per store (the insert never overwrites a row), so a caller cannot
+    // force rebuilds with it. Installed extensions still keep their own copy
+    // of the list for up to an hour, and the edge for its s-maxage.
+    resetSupportedStoresCache()
+    return { kind: 'published' }
 }
 
 type ProposalSweepResult =

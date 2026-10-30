@@ -24,6 +24,12 @@ import {
 // COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS distinct users proposed the same box.
 // `save` is one user's POST; `publish` is enough distinct users' POSTs to
 // reach that quorum. Test users are `cbsave-<uuid>@example.com`.
+//
+// T-10535: a proposal counts only when the same user reported a code at the
+// store as `worked` in the minutes before it (couponBoxCorroboration.ts), the
+// report the extension sends right before its save. `save` writes that
+// coupon_reports row first, as the report route does for a signed-in user,
+// unless told not to (`worked: false`).
 
 // MOCK (announced): env (the save switch on, the caps adjustable per test; the
 // env singleton is parsed once at import), the rate limiter (the concurrency
@@ -139,12 +145,37 @@ async function newUser(): Promise<string> {
     return user.id
 }
 
-/** One signed-in user's POST (`userId` null = no credential at all). */
-function save(
+/** `userId`'s `worked` report of a test coupon of the most specific store
+ * the host belongs to, `minutesAgo` before now, as the report route keeps it.
+ * Nothing when the catalog has no coupon for the host. */
+async function reportWorked(userId: string, host: string, minutesAgo = 1) {
+    const coupons = await prisma.coupon.findMany({
+        where: { id: { startsWith: '8100' } },
+        select: { id: true, site: true },
+    })
+    const mine = coupons
+        .filter(c => c.site && (host === c.site || host.endsWith(`.${c.site}`)))
+        .sort((a, b) => (b.site ?? '').length - (a.site ?? '').length)[0]
+    if (!mine) return
+    await prisma.couponReport.create({
+        data: {
+            couponId: mine.id,
+            userId,
+            outcome: 'worked',
+            createdAt: new Date(Date.now() - minutesAgo * 60_000),
+        },
+    })
+}
+
+/** One signed-in user's POST (`userId` null = no credential at all), right
+ * after their `worked` report at the store unless `worked` is false. */
+async function save(
     host: string,
     box: Record<string, unknown> = BOX,
     userId: string | null = defaultUserId,
+    { worked = true }: { worked?: boolean } = {},
 ) {
+    if (userId && worked) await reportWorked(userId, host)
     const headers: Record<string, string> = {
         'content-type': 'application/json',
         origin: EXT_ORIGIN,
@@ -185,6 +216,9 @@ async function supportedEntry(storeName: string) {
 let defaultUserId = ''
 
 async function cleanup() {
+    await prisma.couponReport.deleteMany({
+        where: { couponId: { startsWith: '8100' } },
+    })
     await prisma.couponBoxProposal.deleteMany({
         where: { storeName: { contains: 'cbsave-' } },
     })
@@ -203,6 +237,7 @@ beforeEach(() => {
     envMock.COUPON_BOX_SAVE_USER_DAILY_CAP = 10
     envMock.COUPON_BOX_SAVE_STORE_DAILY_CAP = 20
     envMock.COUPON_BOX_SAVE_GLOBAL_DAILY_CAP = 500
+    envMock.COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS = 7
 })
 afterEach(cleanup)
 afterAll(async () => {
@@ -373,6 +408,7 @@ describe('coupon-box save: a store with a config refuses it', () => {
         const users = await Promise.all(
             Array.from({ length: QUORUM }, () => newUser()),
         )
+        for (const userId of users) await reportWorked(userId, store)
 
         const outcomes = await Promise.all(
             users.map(userId =>
@@ -797,6 +833,117 @@ describe('coupon-box save: the daily write budget (T-6221)', () => {
         expect(await over.json()).toEqual({
             saved: false,
             reason: 'store_budget',
+        })
+    })
+})
+
+describe('coupon-box save: a proposal counts only behind its own win (T-10535)', () => {
+    it('PAIR: a proposal with no `worked` report is recorded, answered uncorroborated, and never counts; the same user after a report does', async () => {
+        const store = newStore()
+        await knownStore(store)
+        for (let i = 0; i < QUORUM - 1; i++)
+            await save(store, BOX, await newUser())
+        const late = await newUser()
+
+        const bare = await save(store, BOX, late, { worked: false })
+        expect(await bare.json()).toEqual({
+            saved: true,
+            store,
+            status: 'uncorroborated',
+        })
+        expect(
+            await prisma.couponBoxProposal.count({
+                where: { storeName: store },
+            }),
+        ).toBe(QUORUM)
+        expect(await storedRow(store)).toBeNull()
+
+        const backed = await save(store, BOX, late)
+        expect(await backed.json()).toMatchObject({ status: 'published' })
+    })
+
+    it('a report older than 30 minutes, or at another store, does not back a proposal', async () => {
+        const store = newStore()
+        const other = newStore()
+        await knownStore(store)
+        await knownStore(other)
+        for (let i = 0; i < QUORUM - 1; i++)
+            await save(store, BOX, await newUser())
+
+        const stale = await newUser()
+        await reportWorked(stale, store, 31)
+        expect(
+            await (await save(store, BOX, stale, { worked: false })).json(),
+        ).toMatchObject({ status: 'uncorroborated' })
+
+        const elsewhere = await newUser()
+        await reportWorked(elsewhere, other)
+        expect(
+            await (await save(store, BOX, elsewhere, { worked: false })).json(),
+        ).toMatchObject({ status: 'uncorroborated' })
+        expect(await storedRow(store)).toBeNull()
+    })
+
+    it('a report that lands just after its save counts from the next save on', async () => {
+        const store = newStore()
+        await knownStore(store)
+        envMock.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS = 2
+        const first = await newUser()
+        expect(
+            await (await save(store, BOX, first, { worked: false })).json(),
+        ).toMatchObject({ status: 'uncorroborated' })
+        await reportWorked(first, store, -1)
+
+        const res = await save(store, BOX, await newUser())
+        expect(await res.json()).toMatchObject({ status: 'published' })
+    })
+
+    it('two established accounts with a win each promote the box', async () => {
+        envMock.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS = 2
+        const store = newStore()
+        await knownStore(store)
+
+        expect(
+            await (await save(store, BOX, await newUser())).json(),
+        ).toMatchObject({ status: 'pending' })
+        expect(
+            await (await save(store, BOX, await newUser())).json(),
+        ).toMatchObject({ status: 'published' })
+    })
+
+    it('a 3-day-old account does not count, even with a win', async () => {
+        envMock.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS = 2
+        envMock.COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS = 7
+        const store = newStore()
+        await knownStore(store)
+        const young = await prisma.user.create({
+            data: {
+                email: `cbsave-${randomUUID()}@example.com`,
+                createdAt: new Date(Date.now() - 3 * 86_400_000),
+            },
+        })
+        userIds.push(young.id)
+
+        await save(store, BOX, await newUser())
+        expect(await (await save(store, BOX, young.id)).json()).toMatchObject({
+            status: 'pending',
+        })
+        expect(await storedRow(store)).toBeNull()
+    })
+
+    it('a promotion drops the in-process supported-stores cache: the new box is served at once', async () => {
+        envMock.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS = 2
+        const store = newStore()
+        await knownStore(store)
+        await save(store, BOX, await newUser())
+        // Warm the cache while the store has no config.
+        expect(await supportedEntry(store)).toBeUndefined()
+
+        await save(store, BOX, await newUser())
+
+        expect(await supportedEntry(store)).toMatchObject({
+            domain: store,
+            savedBox: true,
         })
     })
 })
