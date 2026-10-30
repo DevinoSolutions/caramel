@@ -13,7 +13,11 @@ import {
     logError,
     recordTiming,
 } from '../caramel-base.js'
-import { getDomainRecord } from '../store-detect.js'
+import {
+    _packStoreList,
+    _unpackStoreList,
+    getDomainRecord,
+} from '../store-detect.js'
 
 // Pins for the fleet-silence root cause (measured live 2026-08-07): the
 // service worker's fetch of the 1.14 MB supported-stores payload lost a race
@@ -203,7 +207,9 @@ describe('store-detect.js getDomainRecord — "we could not ask" is not "not sup
         expect(rec).toEqual(REC)
         expect(sendMessageCalls).toBe(2)
         // The good answer must land in the persistent cache like any load.
-        expect(storedData.caramel_supported_stores?.data).toEqual([REC])
+        expect(_unpackStoreList(storedData.caramel_supported_stores)).toEqual([
+            REC,
+        ])
     })
 
     it('failure on every attempt is recorded loudly and falls back to the expired cache', async () => {
@@ -271,5 +277,97 @@ describe('store-detect.js getDomainRecord — "we could not ask" is not "not sup
                 error: expect.stringContaining('port closed'),
             }),
         )
+    })
+})
+
+describe('store-detect.js store cache — kept packed so Safari accepts it (T-10681, CARAMEL-1D)', () => {
+    // The shape of the served list: most rows are Shopify stores sharing the
+    // same selectors, a few carry their own, one has a boolean.
+    const shopify = {
+        couponInput: 'input[name="reductions"]',
+        couponSubmit: 'button[aria-label="Apply Discount Code"]',
+        successIndicator: '#reduction-tags [role="group"]',
+        errorIndicator: '[id^="error-for-Reductions"]',
+        couponRemove: '#reduction-tags button[aria-label^="Remove"]',
+    }
+    const LIST = Array.from({ length: 3000 }, (_, i) => ({
+        domain: `store${i}.example`,
+        ...shopify,
+        ...(i % 7 === 0 ? { showInput: `#show-${i}` } : {}),
+        ...(i === 5 ? { savedBox: true } : {}),
+    }))
+
+    it('round-trips every row exactly, key order and booleans included', () => {
+        const back = _unpackStoreList(_packStoreList(LIST))
+        expect(back).toEqual(LIST)
+        expect(Object.keys(back[0])).toEqual(Object.keys(LIST[0]))
+        expect(back[5].savedBox).toBe(true)
+    })
+
+    it('stores well under half the bytes of the plain list', () => {
+        const plain = JSON.stringify({ data: LIST }).length
+        const packed = JSON.stringify(_packStoreList(LIST)).length
+        expect(packed).toBeLessThan(plain / 2)
+    })
+
+    it('still reads a cache written in the old { data } shape', () => {
+        expect(_unpackStoreList({ data: LIST, ts: 1 })).toBe(LIST)
+    })
+
+    it('reads an unknown future format as no cache, not as garbage rows', () => {
+        expect(_unpackStoreList({ v: 99, rows: [[0, 0]] })).toBeUndefined()
+        expect(_unpackStoreList(undefined)).toBeUndefined()
+    })
+
+    it('a cache written packed is served back by the next page load', async () => {
+        responses = [{ supported: LIST.slice(0, 3) }]
+        await callThroughRetry('store1.example')
+        expect(storedData.caramel_supported_stores.v).toBe(2)
+        getDomainRecord.cache = null
+        sendMessageCalls = 0
+        const rec = await getDomainRecord('store2.example')
+        expect(rec).toEqual(LIST[2])
+        expect(sendMessageCalls).toBe(0)
+    })
+
+    it('a write Safari refuses (rejected promise) is recorded with its size, not left unhandled', async () => {
+        const unhandled = vi.fn()
+        process.on('unhandledRejection', unhandled)
+        globalThis.currentBrowser.storage.local.set = () =>
+            Promise.reject(
+                new Error(
+                    'Invalid call to browser.storage.local.set(). Exceeded storage quota.',
+                ),
+            )
+        responses = [{ supported: LIST.slice(0, 3) }]
+        const rec = await callThroughRetry('store1.example')
+        await new Promise(r => setTimeout(r, 0))
+        process.off('unhandledRejection', unhandled)
+        expect(rec).toEqual(LIST[1]) // the page still gets its config
+        expect(unhandled).not.toHaveBeenCalled()
+        expect(recordTiming).toHaveBeenCalledWith(
+            'STORE_CACHE_WRITE_FAILED',
+            expect.objectContaining({
+                error: expect.stringContaining('quota'),
+                bytes: expect.any(Number),
+            }),
+        )
+    })
+
+    it('a write Chrome refuses (lastError on the callback) is recorded once', async () => {
+        globalThis.currentBrowser.storage.local.set = (_items, cb) => {
+            globalThis.currentBrowser.runtime.lastError = {
+                message: 'QUOTA_BYTES quota exceeded',
+            }
+            cb()
+            globalThis.currentBrowser.runtime.lastError = undefined
+        }
+        responses = [{ supported: LIST.slice(0, 3) }]
+        await callThroughRetry('store1.example')
+        const calls = recordTiming.mock.calls.filter(
+            c => c[0] === 'STORE_CACHE_WRITE_FAILED',
+        )
+        expect(calls).toHaveLength(1)
+        expect(calls[0][1].error).toContain('QUOTA_BYTES')
     })
 })

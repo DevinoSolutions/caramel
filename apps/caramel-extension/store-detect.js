@@ -81,6 +81,81 @@ function _getCacheTtl() {
     return CARAMEL_ENV.isProduction ? STORE_CACHE_PROD_TTL : STORE_CACHE_DEV_TTL
 }
 
+/* The list is cached packed (2026-10-30, T-10681). Served as JSON it is 1.5 MB
+ * for 3,008 stores, and Safari refused to keep that ("Exceeded storage quota",
+ * Sentry CARAMEL-1D on a fresh install): the extension has no unlimitedStorage
+ * and Safari's cap is far below Chrome's. Most rows share their selectors
+ * (6,880 distinct values across 3,008 rows), so each distinct value is kept
+ * once and a row is a flat list of [key index, value index] pairs, about 0.6
+ * MB. An entry without `v` is the old { data } shape and is still read. */
+const STORE_CACHE_FORMAT = 2
+
+function _indexIn(at, list, x) {
+    if (!at.has(x)) {
+        at.set(x, list.length)
+        list.push(x)
+    }
+    return at.get(x)
+}
+
+export function _packStoreList(rows) {
+    const keys = []
+    const vals = []
+    const keyAt = new Map()
+    const valAt = new Map()
+    return {
+        v: STORE_CACHE_FORMAT,
+        keys,
+        vals,
+        rows: rows.map(r =>
+            Object.entries(r).flatMap(([k, val]) => [
+                _indexIn(keyAt, keys, k),
+                _indexIn(valAt, vals, val),
+            ]),
+        ),
+    }
+}
+
+export function _unpackStoreList(entry) {
+    if (entry?.v === undefined) return entry?.data
+    if (entry.v !== STORE_CACHE_FORMAT || !Array.isArray(entry.rows)) return
+    return entry.rows.map(pairs => {
+        const row = {}
+        for (let i = 0; i < pairs.length; i += 2)
+            row[entry.keys[pairs[i]]] = entry.vals[pairs[i + 1]]
+        return row
+    })
+}
+
+// A refused write used to be an unhandled rejection on the shopper's page.
+// Chrome reports it through lastError on the callback, Safari by rejecting
+// the promise set() returns, so both are watched and reported once.
+function _writeStoreCache(list) {
+    const entry = { ..._packStoreList(list), ts: Date.now() }
+    let reported = false
+    const refused = err => {
+        if (reported) return
+        reported = true
+        logError('storeCacheWrite', err)
+        recordTiming('STORE_CACHE_WRITE_FAILED', {
+            error: String(err?.message || err),
+            bytes: JSON.stringify(entry).length,
+        })
+    }
+    try {
+        const pending = currentBrowser.storage.local.set(
+            { [STORE_CACHE_KEY]: entry },
+            () => {
+                const err = currentBrowser.runtime?.lastError
+                if (err) refused(err)
+            },
+        )
+        if (typeof pending?.catch === 'function') pending.catch(refused)
+    } catch (err) {
+        refused(err)
+    }
+}
+
 export async function getDomainRecord(domain) {
     if (!getDomainRecord.cache) {
         const ttl = _getCacheTtl()
@@ -96,8 +171,9 @@ export async function getDomainRecord(domain) {
                       )
                     : null
             const entry = stored?.[STORE_CACHE_KEY]
-            if (ttl > 0 && entry?.data?.length && Date.now() - entry.ts < ttl) {
-                getDomainRecord.cache = entry.data
+            const list = _unpackStoreList(entry)
+            if (ttl > 0 && list?.length && Date.now() - entry.ts < ttl) {
+                getDomainRecord.cache = list
                 log('Loaded supported domains from local cache')
             }
         } catch {
@@ -142,12 +218,7 @@ export async function getDomainRecord(domain) {
                         resp.supported.length > 0
                     ) {
                         getDomainRecord.cache = resp.supported
-                        currentBrowser.storage.local.set({
-                            [STORE_CACHE_KEY]: {
-                                data: resp.supported,
-                                ts: Date.now(),
-                            },
-                        })
+                        _writeStoreCache(resp.supported)
                         log('Loaded supported domains from API')
                     }
                     break
@@ -170,9 +241,9 @@ export async function getDomainRecord(domain) {
                 const stored = await new Promise(r =>
                     currentBrowser.storage.local.get([STORE_CACHE_KEY], r),
                 )
-                const entry = stored?.[STORE_CACHE_KEY]
-                if (entry?.data?.length) {
-                    getDomainRecord.cache = entry.data
+                const list = _unpackStoreList(stored?.[STORE_CACHE_KEY])
+                if (list?.length) {
+                    getDomainRecord.cache = list
                     log('Loaded supported domains from expired cache')
                 }
             } catch {

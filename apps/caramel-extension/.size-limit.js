@@ -173,7 +173,11 @@ module.exports = [
         // keeps waiting after its total re-draws with the same number, so a
         // Shopify discount that lands 2-4 s later is read as a saving.
         // Measured 96.05 kB.
-        limit: '96.5 KB',
+        // 2026-10-30 (T-10681), raised 96.5 -> 97 kB: the supported-store
+        // cache is written packed (each selector once) so Safari's
+        // storage.local quota accepts it, and a refused write is reported.
+        // Measured 96.74 kB.
+        limit: '97 KB',
         brotli: false,
     },
     {
