@@ -648,6 +648,24 @@ export function caramelCodeOnOrder(rec, codes) {
     return null
 }
 
+// The finder's total read after `code` was submitted. caramelFinderTotalNow
+// reads a $0.00 total as NaN, since zero is what a half-drawn summary shows.
+// It counts as 0 only when the order names the code, the same rule as the
+// late credit in coupon-runner.js: neweracap.com's "Free" took the order to
+// $0.00 in its own attempt and was ruled out (T-11045). The row read is the
+// one caramelFinderTotalNow kept marked, and only while it is shown.
+function _caramelFinderTotalAfter(rec, code) {
+    const now = caramelFinderTotalNow(rec)
+    if (!Number.isNaN(now) || !code) return now
+    const el = qOne(rec.priceContainer)
+    return el &&
+        _isVisible(el) &&
+        getPrice(rec.priceContainer, { returnLargest: true }) === 0 &&
+        caramelCodeOnOrder(rec, [code])
+        ? 0
+        : now
+}
+
 function _caramelRejectionSentences(scope) {
     const tidy = t => (t || '').trim().replace(/\s+/g, ' ')
     // The shown text of el without its controls ("Code <b>X</b> is not
@@ -1173,7 +1191,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                 const startedAt = performance.now()
                 while (performance.now() - startedAt < APPLY_WAIT_MS) {
                     await sleep(250)
-                    const now = caramelFinderTotalNow(rec)
+                    const now = _caramelFinderTotalAfter(rec, code)
                     if (Number.isFinite(now) && now !== original)
                         return 'total-moved'
                 }
@@ -1215,11 +1233,11 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                     return via
                 const redrawAt = performance.now()
                 for (;;) {
-                    const now = caramelFinderTotalNow(rec)
-                    // Zero or less is a placeholder caught mid-render, as in
-                    // the verdict below (rec.caramelFound && !(newTotal > 0)).
-                    if (Number.isFinite(now) && now > 0 && now !== original)
-                        return via
+                    // Zero or less is a placeholder caught mid-render, unless
+                    // the order names the code (_caramelFinderTotalAfter);
+                    // `now >= 0` also turns away an unreadable NaN.
+                    const now = _caramelFinderTotalAfter(rec, code)
+                    if (now >= 0 && now !== original) return via
                     const said = detectCouponError(
                         rec,
                         errorBaseline,
@@ -1253,7 +1271,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         while (performance.now() - startedAt < CARAMEL_ANSWER_GRACE_MS) {
             await sleep(250)
             const now = rec.caramelFound
-                ? caramelFinderTotalNow(rec)
+                ? _caramelFinderTotalAfter(rec, code)
                 : getPrice(rec.priceContainer, { returnLargest: true })
             if (Number.isFinite(now) && now !== original) break
         }
@@ -1270,11 +1288,11 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // box as a proven one for every later shopper on the store. An unmoved
     // total settles as before, so a refused code costs nothing more.
     if (rec.caramelFound && hasPriceCfg) {
-        let last = caramelFinderTotalNow(rec)
+        let last = _caramelFinderTotalAfter(rec, code)
         let held = 0
         for (let t = 0; t < CARAMEL_FINDER_SETTLE_READS; t++) {
             await sleep(CARAMEL_FINDER_READ_MS)
-            const now = caramelFinderTotalNow(rec)
+            const now = _caramelFinderTotalAfter(rec, code)
             if (!Number.isFinite(now) || now !== last) {
                 held = 0
                 last = now
@@ -1341,9 +1359,10 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     let priceDropped = false
     if (hasPriceCfg) {
         // A finder record reads through the same guards as its waiters: the
-        // same row, a positive amount. A refused read leaves no prices.
+        // same row, a positive amount (or a zero the order names the code
+        // for). A refused read leaves no prices.
         const afterLargest = rec.caramelFound
-            ? caramelFinderTotalNow(rec)
+            ? _caramelFinderTotalAfter(rec, code)
             : getPrice(rec.priceContainer, { returnLargest: true })
         const afterPrices =
             rec.caramelFound && isNaN(afterLargest)
@@ -1376,8 +1395,15 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         newTotal = moved.length ? Math.max(...moved) : afterLargest
         priceDropped = !isNaN(newTotal) && newTotal < original
         // A finder-read total of zero or less is a placeholder caught mid-
-        // render (see caramelFinderTotalNow), never a measured saving.
-        if (rec.caramelFound && !(newTotal > 0)) priceDropped = false
+        // render (see caramelFinderTotalNow), never a measured saving, unless
+        // it is a $0.00 the order names this code for (afterLargest is 0 only
+        // then, see _caramelFinderTotalAfter).
+        if (
+            rec.caramelFound &&
+            !(newTotal > 0) &&
+            !(newTotal === 0 && afterLargest === 0)
+        )
+            priceDropped = false
         // A drop read off a new deduction line, beside the store's own fresh
         // rejection of the code, is not a saving (see finderTotal).
         if (rec.caramelNetted && errorIsNew) priceDropped = false
