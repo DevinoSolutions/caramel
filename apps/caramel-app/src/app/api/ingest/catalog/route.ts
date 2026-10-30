@@ -23,7 +23,11 @@ import { NextResponse } from 'next/server'
 // carries force:true. Personal referral codes are kept out of the catalog (new
 // ones skipped, stored ones expired; `skippedReferral` in the response). A row
 // whose id is stored with a DIFFERENT coupon (site or code) is never written
-// (`skippedIdMismatch`, ids logged). A 1-row push and a 23k-row push take the identical path.
+// (`skippedIdMismatch`, ids logged). A store config whose stored row is newer
+// than the pushed `updated_at` is not written; the response names it
+// (`applied.storeConfigs.skippedOlder` / `skippedOlderStoreNames`) so the
+// pipeline can resend it with a fresh `updated_at`. A 1-row push and a 23k-row
+// push take the identical path.
 //
 // NO CORS / NO OPTIONS / NO rate-limit: this is server-to-server (no browser
 // Origin, no preflight), the bearer gate is the access control, and the trusted

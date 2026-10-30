@@ -49,7 +49,7 @@ const NON_GATED = {
         skippedReferral: 0,
         skippedIdMismatch: 0,
     },
-    storeConfigs: { upserted: 0 },
+    storeConfigs: { upserted: 0, skippedOlder: 0, skippedOlderStoreNames: [] },
     sources: { upserted: 0 },
 }
 
@@ -105,6 +105,33 @@ describe('POST /api/ingest/catalog — auth (apiKey:ingest bearer)', () => {
         expect(await res.json()).toEqual({ ok: true, applied: NON_GATED })
         expect(applyCatalogRows).toHaveBeenCalledOnce()
     })
+
+    it('a store config kept out by only-if-newer → still 200, and the body names it so the pipeline can resend', async () => {
+        vi.mocked(applyCatalogRows).mockResolvedValue({
+            ...NON_GATED,
+            storeConfigs: {
+                upserted: 2,
+                skippedOlder: 1,
+                skippedOlderStoreNames: ['gorjana.com'],
+            },
+        })
+        const res = await POST(
+            authed({
+                storeConfigs: [
+                    { store_name: 'gorjana.com' },
+                    { store_name: 'ebay.com' },
+                ],
+            }),
+        )
+        expect(res.status).toBe(200)
+        const json = await res.json()
+        expect(json.ok).toBe(true)
+        expect(json.applied.storeConfigs).toEqual({
+            upserted: 2,
+            skippedOlder: 1,
+            skippedOlderStoreNames: ['gorjana.com'],
+        })
+    })
 })
 
 describe('POST /api/ingest/catalog — body validation + gate mapping', () => {
@@ -143,7 +170,11 @@ describe('POST /api/ingest/catalog — body validation + gate mapping', () => {
                 skippedReferral: 0,
                 skippedIdMismatch: 0,
             },
-            storeConfigs: { upserted: 0 },
+            storeConfigs: {
+                upserted: 0,
+                skippedOlder: 0,
+                skippedOlderStoreNames: [],
+            },
             sources: { upserted: 0 },
         })
         const res = await POST(authed({ coupons: [VALID_COUPON] }))

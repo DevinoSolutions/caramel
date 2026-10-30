@@ -131,7 +131,7 @@ async function main(): Promise<void> {
                     `${result.coupons.skippedReferral} skipped (referral), ` +
                     `${result.coupons.skippedIdMismatch} skipped (id holds a different coupon), ` +
                     `${result.coupons.tombstoned} tombstoned; storeConfigs: ` +
-                    `${result.storeConfigs.upserted} upserted; sources: ` +
+                    `${result.storeConfigs.upserted} upserted, ${result.storeConfigs.skippedOlder} skipped (older); sources: ` +
                     `${result.sources.upserted} upserted.`,
             )
             exitCode = 0

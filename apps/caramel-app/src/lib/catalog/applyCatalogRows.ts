@@ -94,6 +94,18 @@ export interface CatalogCounts {
     skippedIdMismatch: number
 }
 
+/** store_configs outcome. `upserted` is the number of rows offered after
+ * dedupe (its meaning predates `skippedOlder` and is kept as is). `skippedOlder`
+ * counts the offered rows the only-if-newer guard kept out: the stored row has a
+ * newer `updated_at`, so the pushed selectors were NOT written. The producer can
+ * resend those with a fresh `updated_at`. `skippedOlderStoreNames` names them,
+ * at most STORE_CONFIG_SKIPPED_NAME_LIMIT; `skippedOlder` is the full count. */
+export interface StoreConfigCounts {
+    upserted: number
+    skippedOlder: number
+    skippedOlderStoreNames: string[]
+}
+
 // Discriminated on `gated` so callers (the route) can read `.gate` after a
 // `if (result.gated)` narrow without a non-null assertion. A gated result
 // applied NOTHING (the transaction rolled back), hence the zeroed counts.
@@ -102,14 +114,14 @@ export type ApplyResult =
           gated: true
           gate: CatalogGate
           coupons: CatalogCounts
-          storeConfigs: { upserted: number }
+          storeConfigs: StoreConfigCounts
           sources: { upserted: number }
       }
     | {
           gated: false
           gate?: undefined
           coupons: CatalogCounts
-          storeConfigs: { upserted: number }
+          storeConfigs: StoreConfigCounts
           sources: { upserted: number }
       }
 
@@ -239,6 +251,29 @@ function logUnservedStoreConfigs(
     )
 }
 
+/** At most this many skipped store names are logged and returned. */
+export const STORE_CONFIG_SKIPPED_NAME_LIMIT = 20
+
+/**
+ * Store configs in this push that the only-if-newer guard kept out: the stored
+ * row is newer, so the pushed selectors were not written. Without this line the
+ * push answered ok and the skip was only visible in the database (2026-10-30: a
+ * corrected config stayed unapplied for about an hour). Store names only.
+ */
+function logStoreConfigsSkippedOlder(skippedNames: readonly string[]) {
+    if (skippedNames.length === 0) return
+    const named = skippedNames
+        .slice(0, STORE_CONFIG_SKIPPED_NAME_LIMIT)
+        .join(',')
+    const more =
+        skippedNames.length > STORE_CONFIG_SKIPPED_NAME_LIMIT
+            ? `… (+${skippedNames.length - STORE_CONFIG_SKIPPED_NAME_LIMIT} more)`
+            : ''
+    console.warn(
+        `[ingest/catalog] storeConfigsSkippedOlder=${skippedNames.length}: the stored config is newer than the pushed updated_at, so these were not written (resend with a fresh updated_at): ${named}${more}`,
+    )
+}
+
 function chunk<T>(items: readonly T[], size: number): T[][] {
     const out: T[][] = []
     for (let i = 0; i < items.length; i += size) {
@@ -312,7 +347,8 @@ function pgTextArray(values: readonly string[]): Prisma.Sql {
  *     `force` is false, throw (rolls back) BEFORE any write; otherwise bulk
  *     upsert the applying rows only-if-newer.
  *  2. store_configs, then sources (same transaction): dedupe, bulk upsert
- *     only-if-newer.
+ *     only-if-newer. store_configs rows the guard kept out are counted and
+ *     named (`storeConfigs.skippedOlder`) and logged once the push commits.
  *
  * Concurrency caveat: the tombstone count is computed from a snapshot read, so
  * under two SIMULTANEOUS pushes it can be marginally stale — it is a safety
@@ -406,6 +442,7 @@ export async function applyCatalogRows(
     const { force } = payload
     // Filled inside the transaction, logged only once it commits.
     const mismatchedIds: string[] = []
+    const skippedStoreConfigNames: string[] = []
 
     try {
         const result = await prisma.$transaction(
@@ -585,12 +622,18 @@ export async function applyCatalogRows(
                     s => s.store_name,
                     s => s.updated_at,
                 )
+                // RETURNING lists the rows actually inserted or updated; a row
+                // the ON CONFLICT WHERE kept out (stored row newer) is absent,
+                // which is how the skipped ones are found.
+                const writtenStoreNames = new Set<string>()
                 for (const scChunk of chunk(storeConfigs, WRITE_CHUNK)) {
                     const tuples = scChunk.map(
                         s =>
                             Prisma.sql`(${s.store_name}, ${s.show_input_xpath ?? null}, ${s.dismiss_button_xpath ?? null}, ${s.coupon_input_xpath ?? null}, ${s.apply_button_xpath ?? null}, ${s.price_container_xpath ?? null}, ${s.success_indicator_xpath ?? null}, ${s.error_indicator_xpath ?? null}, ${s.coupon_remove_xpath ?? null}, ${s.created_at}, ${s.updated_at})`,
                     )
-                    await tx.$executeRaw(
+                    const written = await tx.$queryRaw<
+                        Array<{ store_name: string }>
+                    >(
                         Prisma.sql`
                             INSERT INTO store_configs (store_name, show_input_xpath, dismiss_button_xpath, coupon_input_xpath, apply_button_xpath, price_container_xpath, success_indicator_xpath, error_indicator_xpath, coupon_remove_xpath, created_at, updated_at)
                             VALUES ${Prisma.join(tuples)}
@@ -600,8 +643,17 @@ export async function applyCatalogRows(
                                 origin = NULL
                             WHERE excluded.updated_at >= store_configs.updated_at
                                 OR store_configs.origin = ${AUTO_DETECT_ORIGIN}
+                            RETURNING store_name
                         `,
                     )
+                    for (const row of written) {
+                        writtenStoreNames.add(row.store_name)
+                    }
+                }
+                for (const s of storeConfigs) {
+                    if (!writtenStoreNames.has(s.store_name)) {
+                        skippedStoreConfigNames.push(s.store_name)
+                    }
                 }
 
                 // ---- sources -------------------------------------------------
@@ -637,7 +689,15 @@ export async function applyCatalogRows(
                     // a failure, so counting the offered rows is the honest,
                     // simple measure (rows-affected would under-count an
                     // idempotent re-push of unchanged configs).
-                    storeConfigs: { upserted: storeConfigs.length },
+                    // skippedOlder is the exception the producer must act on.
+                    storeConfigs: {
+                        upserted: storeConfigs.length,
+                        skippedOlder: skippedStoreConfigNames.length,
+                        skippedOlderStoreNames: skippedStoreConfigNames.slice(
+                            0,
+                            STORE_CONFIG_SKIPPED_NAME_LIMIT,
+                        ),
+                    },
                     sources: { upserted: sources.length },
                 }
             },
@@ -652,6 +712,7 @@ export async function applyCatalogRows(
         )
         logCouponOutcome(result.coupons, mismatchedIds)
         logUnservedStoreConfigs(payload.storeConfigs)
+        logStoreConfigsSkippedOlder(skippedStoreConfigNames)
         return result
     } catch (error) {
         if (error instanceof TombstoneGateError) {
@@ -666,7 +727,11 @@ export async function applyCatalogRows(
                     skippedReferral: 0,
                     skippedIdMismatch: 0,
                 },
-                storeConfigs: { upserted: 0 },
+                storeConfigs: {
+                    upserted: 0,
+                    skippedOlder: 0,
+                    skippedOlderStoreNames: [],
+                },
                 sources: { upserted: 0 },
             }
         }
