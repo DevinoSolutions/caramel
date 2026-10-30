@@ -584,4 +584,116 @@ describe('couponBoxDiscoveryEnabled — always answered, and in time (T-10668)',
             ts: 1_800_000_000_000,
         })
     })
+
+    // A hard "off" at the deadline is still a reply: the page's own fallback
+    // never ran, and the finder stayed off (review of #621).
+    describe('a read that fails answers the last flag the server gave', () => {
+        const NOW = 1_800_000_000_000
+        const MIN = 60 * 1000
+        beforeEach(() => {
+            vi.setSystemTime(NOW)
+        })
+
+        it('cut off at the deadline, remembered "on" from 10 minutes ago: on', async () => {
+            localData.caramel_finder_flag = { on: true, ts: NOW - 10 * MIN }
+            responses.push({ ok: true, status: 200, json: never })
+
+            expect(await answerWithin(8000)).toEqual({ enabled: true })
+            expect(bgErrors()).toEqual(['features'])
+        })
+
+        it('a 500 with a remembered "on": on', async () => {
+            localData.caramel_finder_flag = { on: true, ts: NOW - MIN }
+            responses.push(refused(500, null))
+
+            expect(await answerWithin(0)).toEqual({ enabled: true })
+        })
+
+        it('remembered "on" 31 minutes old: off, so the kill switch still holds', async () => {
+            localData.caramel_finder_flag = { on: true, ts: NOW - 31 * MIN }
+            responses.push({ ok: true, status: 200, json: never })
+
+            expect(await answerWithin(8000)).toEqual({ enabled: false })
+        })
+
+        it('remembered "off": off', async () => {
+            localData.caramel_finder_flag = { on: false, ts: NOW - MIN }
+            responses.push(refused(500, null))
+
+            expect(await answerWithin(0)).toEqual({ enabled: false })
+        })
+
+        it('nothing remembered: off', async () => {
+            responses.push(refused(500, null))
+
+            expect(await answerWithin(0)).toEqual({ enabled: false })
+            expect(bgErrors()).toEqual(['features'])
+        })
+
+        // Read alongside the features, so a slow storage.local does not
+        // stack on top of the 8s deadline; bounded at 9s from the question.
+        it('a memory read that never answers: off 9s after the question, and recorded', async () => {
+            const realGet = chrome.storage.local.get
+            chrome.storage.local.get = (keys, cb) =>
+                [].concat(keys).includes('caramel_finder_flag')
+                    ? undefined
+                    : realGet(keys, cb)
+            responses.push(refused(500, null))
+            let answer = 'unanswered'
+            handler({ action: 'couponBoxDiscoveryEnabled' }, {}, resp => {
+                answer = resp
+            })
+
+            await vi.advanceTimersByTimeAsync(8999)
+            expect(answer).toBe('unanswered')
+            await vi.advanceTimersByTimeAsync(1)
+            expect(answer).toEqual({ enabled: false })
+            expect(bgErrors()).toEqual(['features', 'finderFlagMemoryRead'])
+        })
+
+        it('a memory slower than the features read still answers at the deadline, not after it', async () => {
+            const realGet = chrome.storage.local.get
+            let deliver
+            chrome.storage.local.get = (keys, cb) =>
+                [].concat(keys).includes('caramel_finder_flag')
+                    ? (deliver = () =>
+                          cb({
+                              caramel_finder_flag: {
+                                  on: true,
+                                  ts: NOW - MIN,
+                              },
+                          }))
+                    : realGet(keys, cb)
+            responses.push({ ok: true, status: 200, json: never })
+            let answer = 'unanswered'
+            handler({ action: 'couponBoxDiscoveryEnabled' }, {}, resp => {
+                answer = resp
+            })
+
+            // The memory arrives 5s in, while the features read still runs.
+            await vi.advanceTimersByTimeAsync(5000)
+            deliver()
+            await vi.advanceTimersByTimeAsync(2999)
+            expect(answer).toBe('unanswered')
+            await vi.advanceTimersByTimeAsync(1)
+            expect(answer).toEqual({ enabled: true })
+        })
+
+        it('an answer from a fresh cache reads no memory', async () => {
+            responses.push(
+                ok({ shopperCodeCapture: false, couponBoxDiscovery: true }),
+            )
+            expect(await answerWithin(0)).toEqual({ enabled: true })
+            const realGet = chrome.storage.local.get
+            const memoryReads = []
+            chrome.storage.local.get = (keys, cb) => {
+                if ([].concat(keys).includes('caramel_finder_flag'))
+                    memoryReads.push(keys)
+                return realGet(keys, cb)
+            }
+
+            expect(await answerWithin(0)).toEqual({ enabled: true })
+            expect(memoryReads).toEqual([])
+        })
+    })
 })

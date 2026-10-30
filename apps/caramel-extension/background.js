@@ -24,6 +24,7 @@ import {
 } from './code-sharing-consent.js'
 import {
     FINDER_FLAG_MEMORY_KEY,
+    finderFlagFromMemory,
     finderFlagMemoryEntry,
 } from './finder-flag-memory.js'
 import { saveInstallId } from './install-attribution.js'
@@ -412,16 +413,63 @@ function _shopperCaptureEnabled() {
     return _features().then(e => e.shopperCodeCapture)
 }
 
-// Answers the content script's couponBoxDiscoveryEnabled message. Any failure
-// to read the flag is answered as off: the finder is an addition, never a
-// requirement.
+/* Answers the content script's couponBoxDiscoveryEnabled message. A failed or
+ * late features read (FEATURES_READ_DEADLINE_MS included) is answered with the
+ * last flag the server gave, under its 30-minute rule (finder-flag-memory.js),
+ * and as off when there is none: the finder is an addition, never a
+ * requirement. Answering a hard "off" here instead was T-10668's symptom
+ * again: the page got a reply, so its own fallback never ran.
+ *
+ * The remembered flag is read from storage.local only. The in-memory cache
+ * holds the same flag and timestamp (_fetchFeatures writes both), and while
+ * the finder is on that cache is fresh for exactly the 30 minutes the memory
+ * is, so whenever the memory would answer, _features() already has.
+ *
+ * The memory is read alongside the features, not after them: under load a
+ * storage.local read alone took over 2s (measured 2026-10-30), and waiting
+ * for it only after the 8s deadline pushed the answer past what the page
+ * still waits for. It is read only when the cache is not fresh, so the usual
+ * answer costs no storage read, and it may run 1s past the deadline. */
+const FINDER_FLAG_MEMORY_READ_MS = FEATURES_READ_DEADLINE_MS + 1000
 async function couponBoxDiscoveryEnabled() {
+    const remembered = _featuresFresh(_featuresMemo)
+        ? null
+        : _rememberedFinderFlag()
     try {
         return (await _features()).couponBoxDiscovery === true
     } catch (err) {
         logError('features', err)
-        return false
+        const { on, error } = await (remembered ?? _rememberedFinderFlag())
+        if (error) logError('finderFlagMemoryRead', error)
+        return on === true
     }
+}
+
+// { on } with the remembered finder flag (null for none or stale), or
+// { error } when it could not be read in time. Never rejects: an answer
+// that did not need it simply ignores it.
+function _rememberedFinderFlag() {
+    const read = new Promise((resolve, reject) => {
+        currentBrowser.storage.local.get([FINDER_FLAG_MEMORY_KEY], res => {
+            const err = currentBrowser.runtime.lastError
+            if (err) reject(new Error(err.message || String(err)))
+            else
+                resolve(
+                    finderFlagFromMemory(
+                        res?.[FINDER_FLAG_MEMORY_KEY],
+                        Date.now(),
+                    ),
+                )
+        })
+    })
+    return withDeadline(
+        read,
+        FINDER_FLAG_MEMORY_READ_MS,
+        'finder flag memory read',
+    ).then(
+        on => ({ on }),
+        error => ({ error }),
+    )
 }
 
 // Answers the content script's couponBoxLlmEnabled message, the same way.
