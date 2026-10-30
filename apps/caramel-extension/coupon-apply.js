@@ -546,6 +546,10 @@ const CARAMEL_FINDER_HOLD_MS = 1500
 const CARAMEL_FINDER_HOLD_READS =
     CARAMEL_FINDER_HOLD_MS / CARAMEL_FINDER_READ_MS
 const CARAMEL_FINDER_SETTLE_READS = 12
+// How long a finder-picked box keeps waiting after its total area re-draws
+// with the same number (T-10533): Shopify checkouts land the discount 2-4 s
+// after that re-draw.
+const CARAMEL_REDRAW_WAIT_MS = 4000
 // How long a disabled Apply button gets to be enabled after the code is typed.
 const CARAMEL_APPLY_ENABLE_WAIT_MS = 1500
 
@@ -1120,36 +1124,47 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // summary row right after Apply ended the wait there, the unchanged total
     // ruled the code out, and the discount landed a moment later
     // (kipling-usa.com 2026-10-30, T-10533: the order carried -$11.24 while
-    // the shopper was told nothing worked). So the wait goes on until the
-    // number moves, the store refuses the code, or the window ends. A refusal
-    // drawn inside the total's container ends it at once, as before (no extra
-    // wait on a refused code), and so does a total the finder cannot read.
+    // the shopper was told nothing worked). So after such a re-draw the wait
+    // goes on, for at most CARAMEL_REDRAW_WAIT_MS, until the total reads as a
+    // different number or the store refuses THIS code (a sentence that was not
+    // on the page before we submitted). A reading the finder cannot parse (a
+    // skeleton row mid re-draw) is not an answer either. The cap bounds what a
+    // refused code costs when its refusal is not recognised.
     if (priceEl && rec.caramelFound)
         waiters.push(
             (async () => {
                 const startedAt = performance.now()
-                let startText = priceEl.textContent
+                const left = () =>
+                    APPLY_WAIT_MS - (performance.now() - startedAt)
+                const via = await waitForTotalChange(
+                    findPriceEl,
+                    priceEl.textContent,
+                    left(),
+                )
+                if (via !== 'text-changed' || !Number.isFinite(original))
+                    return via
+                const redrawAt = performance.now()
                 for (;;) {
-                    const left = APPLY_WAIT_MS - (performance.now() - startedAt)
-                    if (left <= 0) return 'price-nochange'
-                    const via = await waitForTotalChange(
-                        findPriceEl,
-                        startText,
-                        left,
+                    const now = caramelFinderTotalNow(rec)
+                    // Zero or less is a placeholder caught mid-render, as in
+                    // the verdict below (rec.caramelFound && !(newTotal > 0)).
+                    if (Number.isFinite(now) && now > 0 && now !== original)
+                        return via
+                    const said = detectCouponError(
+                        rec,
+                        errorBaseline,
+                        code,
+                        priorAreaText,
+                        alertsBefore,
                     )
-                    if (via !== 'text-changed') return via
-                    if (caramelFinderTotalNow(rec) !== original) return via
+                    if (said && caramelQuoteIsAttributable(said, priorAreaText))
+                        return via
                     if (
-                        detectCouponError(
-                            rec,
-                            errorBaseline,
-                            code,
-                            priorAreaText,
-                            alertsBefore,
-                        )
+                        left() <= 0 ||
+                        performance.now() - redrawAt >= CARAMEL_REDRAW_WAIT_MS
                     )
                         return via
-                    startText = findPriceEl()?.textContent
+                    await sleep(200)
                 }
             })(),
         )
