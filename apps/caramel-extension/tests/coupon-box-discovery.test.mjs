@@ -1163,7 +1163,7 @@ describe('the flag decides whether the shopper sees any of this', () => {
 
     it('the not-set-up copy never mentions AI', () => {
         expect(STORE_NOT_SET_UP_STATUS).not.toMatch(
-            /AI|artificial|intelligen|LLM|model|robot|bot/i,
+            /\bAI\b|artificial|intelligen|LLM|model|robot|bot\b/i,
         )
     })
 

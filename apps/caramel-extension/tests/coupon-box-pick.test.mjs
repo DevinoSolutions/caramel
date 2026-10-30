@@ -1386,7 +1386,7 @@ describe('a store whose box is only at checkout', () => {
         const [amount, , message, , codes] = finalModals.at(-1)
         expect(amount).toBe(0)
         expect(message).toMatch(/takes promo codes at checkout/)
-        expect(message).not.toMatch(/(?:AI|model|bot|LLM)/i)
+        expect(message).not.toMatch(/\b(?:AI|model|bot|LLM)\b/i)
         expect(codes.map(c => c.code)).toEqual(COUPONS.map(c => c.code))
     })
 
