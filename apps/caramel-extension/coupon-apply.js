@@ -1114,7 +1114,46 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // once misread by the loop as a cart "signal" (sawSignal=true), defeating
     // the no-signal early-exit and making dead checkouts churn all 8 codes
     // (~80-100s) instead of bailing after ~2 (~20s).
-    if (priceEl)
+    //
+    // For a box the finder picked, new text that still reads as the SAME total
+    // is a re-draw, not the store's answer: a checkout that re-draws its
+    // summary row right after Apply ended the wait there, the unchanged total
+    // ruled the code out, and the discount landed a moment later
+    // (kipling-usa.com 2026-10-30, T-10533: the order carried -$11.24 while
+    // the shopper was told nothing worked). So the wait goes on until the
+    // number moves, the store refuses the code, or the window ends. A refusal
+    // drawn inside the total's container ends it at once, as before (no extra
+    // wait on a refused code), and so does a total the finder cannot read.
+    if (priceEl && rec.caramelFound)
+        waiters.push(
+            (async () => {
+                const startedAt = performance.now()
+                let startText = priceEl.textContent
+                for (;;) {
+                    const left = APPLY_WAIT_MS - (performance.now() - startedAt)
+                    if (left <= 0) return 'price-nochange'
+                    const via = await waitForTotalChange(
+                        findPriceEl,
+                        startText,
+                        left,
+                    )
+                    if (via !== 'text-changed') return via
+                    if (caramelFinderTotalNow(rec) !== original) return via
+                    if (
+                        detectCouponError(
+                            rec,
+                            errorBaseline,
+                            code,
+                            priorAreaText,
+                            alertsBefore,
+                        )
+                    )
+                        return via
+                    startText = findPriceEl()?.textContent
+                }
+            })(),
+        )
+    else if (priceEl)
         waiters.push(
             waitForTotalChange(findPriceEl, priceEl.textContent, APPLY_WAIT_MS),
         )
