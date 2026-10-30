@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * background.js `submitShopperCode` — the gate between a captured code and the
@@ -469,5 +469,119 @@ describe('couponBoxDiscoveryEnabled — the promo-box finder switch', () => {
         expect(await invoke(ASK)).toEqual({ enabled: false })
         expect(featureCalls()).toHaveLength(2)
         now.mockRestore()
+    })
+})
+
+// T-10668: on a loaded machine the content script's finder-flag question went
+// unanswered for its whole 15s wait, and the page took the finder for off.
+// The worker's read had no bound of its own: an unbounded storage.session
+// read, then a body read that fetchWithTimeout's clock (stopped at the
+// headers) no longer covered. Every one of these must now be ANSWERED, within
+// the 8s the read is given, and the reason recorded.
+const never = () => new Promise(() => {})
+const bgErrors = () => (localData.caramel_bg_errors || []).map(e => e.where)
+
+describe('couponBoxDiscoveryEnabled — always answered, and in time (T-10668)', () => {
+    const ASK = { action: 'couponBoxDiscoveryEnabled' }
+
+    // The answer, or 'unanswered' if none came within `ms` of fake time.
+    async function answerWithin(ms) {
+        let answer = 'unanswered'
+        handler(ASK, {}, resp => {
+            answer = resp
+        })
+        await vi.advanceTimersByTimeAsync(ms)
+        return answer
+    }
+
+    beforeEach(() => {
+        vi.useFakeTimers()
+    })
+    afterEach(() => {
+        vi.useRealTimers()
+    })
+
+    it('a features body that never arrives: answered off at the 8s deadline, and recorded', async () => {
+        responses.push({ ok: true, status: 200, json: never })
+        let answer = 'unanswered'
+        handler(ASK, {}, resp => {
+            answer = resp
+        })
+
+        await vi.advanceTimersByTimeAsync(7999)
+        expect(answer).toBe('unanswered')
+        await vi.advanceTimersByTimeAsync(1)
+        expect(answer).toEqual({ enabled: false })
+        expect(localData.caramel_bg_errors.at(-1)).toMatchObject({
+            where: 'features',
+            message: 'features read: no answer within 8000ms',
+        })
+    })
+
+    it('a session cache read that never answers is skipped: the flag is still fetched and answered', async () => {
+        chrome.storage.session.get = () => {}
+        responses.push(
+            ok({ shopperCodeCapture: false, couponBoxDiscovery: true }),
+        )
+
+        expect(await answerWithin(3000)).toEqual({ enabled: true })
+        expect(bgErrors()).toEqual(['featuresSessionRead'])
+    })
+
+    it('after a read the deadline cut off, the next question asks the server again', async () => {
+        responses.push(
+            { ok: true, status: 200, json: never },
+            ok({ shopperCodeCapture: false, couponBoxDiscovery: true }),
+        )
+
+        expect(await answerWithin(8000)).toEqual({ enabled: false })
+        expect(await answerWithin(10)).toEqual({ enabled: true })
+        expect(featureCalls()).toHaveLength(2)
+    })
+
+    it('a read that fails after its callers were answered is still recorded', async () => {
+        let failLate
+        responses.push(
+            () =>
+                new Promise((_, reject) => {
+                    failLate = reject
+                }),
+        )
+
+        expect(await answerWithin(8000)).toEqual({ enabled: false })
+        failLate(new Error('network gone'))
+        await vi.advanceTimersByTimeAsync(0)
+        expect(bgErrors()).toEqual(['features', 'featuresLateFailure'])
+        expect(localData.caramel_bg_errors.at(-1).message).toBe('network gone')
+    })
+
+    for (const [name, response] of [
+        ['the request fails', new Error('offline')],
+        ['the server answers 500', refused(500, null)],
+        [
+            'the body is not JSON',
+            { ok: true, status: 200, json: async () => JSON.parse('<') },
+        ],
+        ['the body has no capture flag', ok({ couponBoxDiscovery: true })],
+        ['the request never answers', never],
+    ])
+        it(`${name}: an answer within 8s, never silence`, async () => {
+            responses.push(response)
+
+            expect(await answerWithin(8000)).toEqual({ enabled: false })
+            expect(bgErrors()).toContain('features')
+        })
+
+    it('a flag read from the server is remembered for the content script', async () => {
+        vi.setSystemTime(1_800_000_000_000)
+        responses.push(
+            ok({ shopperCodeCapture: false, couponBoxDiscovery: true }),
+        )
+
+        expect(await answerWithin(0)).toEqual({ enabled: true })
+        expect(localData.caramel_finder_flag).toEqual({
+            on: true,
+            ts: 1_800_000_000_000,
+        })
     })
 })

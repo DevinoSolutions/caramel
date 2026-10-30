@@ -177,7 +177,12 @@ module.exports = [
         // cache is written packed (each selector once) so Safari's
         // storage.local quota accepts it, and a refused write is reported.
         // Measured 96.74 kB.
-        limit: '97 KB',
+        // 2026-10-30 (T-10668), raised 97 -> 97.5 kB: a finder flag question
+        // the background leaves unanswered is asked once more, then answered
+        // from the last flag the server gave (under 30 minutes old,
+        // finder-flag-memory.js), instead of turning the finder off for the
+        // page. Measured 97.34 kB.
+        limit: '97.5 KB',
         brotli: false,
     },
     {

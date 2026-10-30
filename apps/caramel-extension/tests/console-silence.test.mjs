@@ -49,6 +49,7 @@ const SHIPPED_TO_STRANGERS = [
     'prompt-placement.js',
     'final-modal.js',
     'code-sharing-prompt.js',
+    'finder-flag-memory.js',
     'inject.js',
     'install-attribution.js',
     'permissions-api.js',
