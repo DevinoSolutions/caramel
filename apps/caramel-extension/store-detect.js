@@ -815,9 +815,9 @@ async function _finderSeesBox(domain) {
 /* The prompt's half of the finder: a box the rules can see, or, while the
  * couponBoxLlm flag is on, a cart the server could still find one on once the
  * shopper taps (caramelFinderMayAsk). The reload chain (_caramelContinueRun)
- * keeps asking _finderSeesBox alone: the server is asked once per store per
- * tab session, so a page after the ask continues only on a box the rules see
- * or the pick it kept. */
+ * keeps asking _finderSeesBox alone: the server is asked once per store and
+ * kind of page (cart, checkout) per tab session, so a page after the ask
+ * continues only on a box the rules see or the pick it kept. */
 async function _finderMayOffer(domain) {
     if (await _finderSeesBox(domain)) return true
     if (!caramelStoreListKnown() || !_caramelCartIntentSignal()) return false

@@ -317,6 +317,14 @@ ${noLoading ? '' : loadingHTML}`
 export const STORE_NOT_SET_UP_STATUS =
     "This store isn't set up yet, we're figuring out how it works…"
 
+/* Said on the copy-a-code card when the finder looked for the promo box on the
+ * CART of a store no config describes and found none (T-10535). Many stores
+ * take a code only at checkout, and their cart says so; the finder looks again
+ * there (one more server ask, coupon-box-discovery.js askKey) and the prompt
+ * comes back when it may. The codes stay listed to copy. */
+export const CODES_AT_CHECKOUT_MESSAGE =
+    'This store takes promo codes at checkout. Caramel will look for the box there and offer to try these codes. Copy one below to paste it yourself.'
+
 /* Replaces the testing card's status line, nothing else. A no-op when the card
  * is not up. */
 // Called from coupon-runner.js.

@@ -77,6 +77,7 @@ import {
     tryInitialize,
 } from './store-detect.js'
 import {
+    CODES_AT_CHECKOUT_MESSAGE,
     hideTestingModal,
     setTestingModalStatus,
     showFinalModal,
@@ -668,6 +669,7 @@ export async function startApplyingCoupons(rec, options) {
     // answer. A store with a config never runs it, even when its box is not
     // on this page: its config is the only box we act on. Never while the
     // store list is unknown either: this may be a configured store.
+    let codesAtCheckout = false
     if (
         (!_box || !_isVisible(_box)) &&
         rec.caramelNoConfig === true &&
@@ -684,6 +686,10 @@ export async function startApplyingCoupons(rec, options) {
         if (finder)
             try {
                 found = await finder.caramelDiscoveredRecord(rec)
+                // Looked on the cart and found nothing: the codes go in at
+                // checkout, where the finder looks again.
+                codesAtCheckout =
+                    !found && finder.caramelFinderPageKind() === 'cart'
             } catch (e) {
                 log('FINDER_FAILED', { error: String(e) })
             }
@@ -695,12 +701,15 @@ export async function startApplyingCoupons(rec, options) {
     if (!_box || !_isVisible(_box)) {
         log('AUTO_INSERT_STOP', {
             result: 'no-coupon-box',
+            codesAtCheckout,
             t: performance.now(),
         })
         showFinalModal(
             0,
             null,
-            "We couldn't find the promo box on this page — copy a code below and paste it where the store asks for a promo code.",
+            codesAtCheckout
+                ? CODES_AT_CHECKOUT_MESSAGE
+                : "We couldn't find the promo box on this page — copy a code below and paste it where the store asks for a promo code.",
             false,
             coupons,
         )

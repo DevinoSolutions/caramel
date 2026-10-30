@@ -1158,7 +1158,7 @@ describe('the flag decides whether the shopper sees any of this', () => {
 
         expect(statuses).toEqual([STORE_NOT_SET_UP_STATUS])
         expect(appliedWith).toHaveLength(0)
-        expect(finalModals.at(-1)[2]).toMatch(/couldn't find the promo box/)
+        expect(finalModals.at(-1)[2]).toMatch(/takes promo codes at checkout/)
     })
 
     it('the not-set-up copy never mentions AI', () => {
@@ -1299,7 +1299,7 @@ describe('the server pick needs a prompt to be reached', () => {
         // The tap: the pick is asked (and misses here), the codes are handed
         // over to copy.
         await startApplyingCoupons(promptedWith[0])
-        expect(finalModals.at(-1)[2]).toMatch(/couldn't find the promo box/)
+        expect(finalModals.at(-1)[2]).toMatch(/takes promo codes at checkout/)
 
         promptedWith = []
         await tryInitialize()

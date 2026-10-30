@@ -1972,7 +1972,8 @@ export function caramelFinderSeesBox(doc = document) {
  * readable total is offered the prompt too.
  *
  * Detection still never asks the server or clicks anything: the pick runs
- * after the tap (caramelPickedRecord), once per store per tab session, and a
+ * after the tap (caramelPickedRecord), once per store and kind of page (cart,
+ * checkout) per tab session, and a
  * "no box" answer ends with the codes handed over to copy. A store already
  * asked this session is not offered again on the strength of this rule. */
 //
@@ -1985,7 +1986,7 @@ export function caramelFinderSeesBox(doc = document) {
 export async function caramelFinderMayAsk(domain, doc = document) {
     if (!(await caramelCouponBoxLlmOn())) return false
     if (ORDER_PLACED_PATH_RE.test(doc.location?.pathname || '')) return false
-    if (await pickAsked(domain || doc.location?.hostname)) return false
+    if (await pickAsked(domain || doc.location?.hostname, doc)) return false
     if (!shownPositiveTotal(doc)) return false
     log('FINDER_MAY_ASK', {})
     return true
@@ -2254,7 +2255,8 @@ function finderRecord(rec, found, totalRow, opened) {
 // Any other answer, a refusal or a failure to ask leaves the page exactly as
 // the rules left it: no box, and the codes handed over to copy.
 //
-// At most one ask per store per tab session, whatever came back. A usable
+// At most one ask per store per tab session, whatever came back, and one more
+// on the store's checkout (askKey). A usable
 // pick is also kept, by name (keptPick), for the next page in the tab: a cart
 // that reloads to show the store's answer gets its box found again there.
 // Both are held by the background for this tab and site (tab-handoff.js),
@@ -2291,19 +2293,26 @@ const pickKey = domain =>
 const pickMemo = async () =>
     (await caramelTabHandoff('get', PICK_KEY))?.value || {}
 
-async function pickAsked(domain) {
-    domain = pickKey(domain)
-    if (_pickAsked.has(domain)) return true
+// One ask per store per KIND of page (caramelFinderPageKind): a store whose
+// cart only says codes go in at checkout gets one more ask on its checkout,
+// and no more. The cart keeps the plain store key it always had.
+const askKey = (domain, doc) =>
+    pickKey(domain) +
+    (caramelFinderPageKind(doc) === 'checkout' ? ' checkout' : '')
+
+async function pickAsked(domain, doc) {
+    const key = askKey(domain, doc)
+    if (_pickAsked.has(key)) return true
     // A background that could not answer leaves this page's own memory.
-    return Object.hasOwn(await pickMemo(), domain)
+    return Object.hasOwn(await pickMemo(), key)
 }
 
-async function rememberPick(domain, kept = 1) {
-    domain = pickKey(domain)
-    _pickAsked.add(domain)
+async function rememberPick(domain, doc, kept = 1) {
+    const key = askKey(domain, doc)
+    _pickAsked.add(key)
     await caramelTabHandoff('set', PICK_KEY, {
         ...(await pickMemo()),
-        [domain]: kept,
+        [key]: kept,
     })
 }
 
@@ -2312,8 +2321,28 @@ async function rememberPick(domain, kept = 1) {
 // form-POST cart comes back to its own path; a checkout page with a "code"
 // field of its own is not that page.
 async function keptPick(domain, doc) {
-    const k = (await pickMemo())[pickKey(domain)]
+    const k = (await pickMemo())[askKey(domain, doc)]
     return k?.i && k.p === doc.location?.pathname ? k : null
+}
+
+/* Which page of the store this is: 'checkout' or 'cart'. Decides what the
+ * server may be asked here (askKey) and what the shopper is told when no box
+ * is found: many stores take a code only at checkout, and say so on the cart.
+ * A cart word outranks a checkout word, because Magento keeps its cart under
+ * /checkout/cart/; a page that names neither (a cart drawer, /order) counts as
+ * the cart. A checkout on its own host (checkout.store.com) is one too. */
+const CART_WORD_RE =
+    /(?:^|[/\-_])(?:cart|carts|basket|bag|warenkorb|winkelwagen|winkelmand|carrito|carrello|carrinho|koszyk|varukorg|ostoskori|handlekurv|panier|cesta|kurv)(?:[/.]|$)/i
+const CHECKOUT_WORD_RE =
+    /(?:^|[/\-_])(?:checkouts?|kasse|afrekenen|finalizar-compra|kassa|kassan|caisse|commande|pagamento|zamowienie|onepage)(?:[/.]|$)/i
+// Called from coupon-runner.js.
+export function caramelFinderPageKind(doc = document) {
+    const path = doc.location?.pathname || ''
+    if (CART_WORD_RE.test(path)) return 'cart'
+    return CHECKOUT_WORD_RE.test(path) ||
+        /^checkouts?\./i.test(doc.location?.hostname || '')
+        ? 'checkout'
+        : 'cart'
 }
 
 // What an element is and what it is called: its tag, then its stable name
@@ -2613,8 +2642,8 @@ async function caramelPickedRecord(rec, doc, clicked = null) {
     let picked
     if (kept) picked = { ...refindPick(doc, kept), enterOnly: !!kept.e }
     else {
-        if (await pickAsked(domain)) return null
-        await rememberPick(domain)
+        if (await pickAsked(domain, doc)) return null
+        await rememberPick(domain, doc)
         picked = await askPick(domain, doc)
         if (!picked) return null
     }
@@ -2647,7 +2676,7 @@ async function caramelPickedRecord(rec, doc, clicked = null) {
         again.button === (k.b ? found.button : null) &&
         again.toggle === (k.t ? opened : null)
     )
-        await rememberPick(domain, k)
+        await rememberPick(domain, doc, k)
     return savable(
         finderRecord(rec, found, total, opened),
         found,
