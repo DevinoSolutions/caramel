@@ -78,8 +78,10 @@ import {
 } from './store-detect.js'
 import {
     hideTestingModal,
+    setTestingModalStatus,
     showFinalModal,
     showTestingModal,
+    STORE_NOT_SET_UP_STATUS,
     updateTestingModal,
 } from './UI-helpers.js'
 import {
@@ -672,6 +674,9 @@ export async function startApplyingCoupons(rec, options) {
         caramelStoreListKnown() &&
         (await caramelCouponBoxDiscoveryOn())
     ) {
+        // The look can take a few seconds (the server may be asked), so the
+        // card says what is happening instead of sitting on "Checking…".
+        setTestingModalStatus(STORE_NOT_SET_UP_STATUS)
         // A finder that did not load, or that fails, found nothing: the codes
         // to copy.
         const finder = await caramelLoadFinder()

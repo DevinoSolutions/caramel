@@ -14,7 +14,9 @@ import { initCaramelBase } from '../caramel-base.js'
 import {
     caramelCopyText,
     hideTestingModal,
+    setTestingModalStatus,
     showTestingModal,
+    STORE_NOT_SET_UP_STATUS,
     updateTestingModal,
 } from '../UI-helpers.js'
 import { trustedClick, trustedKey } from './_trusted-events.mjs'
@@ -261,6 +263,43 @@ describe('the testing overlay — progress', () => {
 
     it('is a no-op, not an error, when no card is showing', async () => {
         await expect(updateTestingModal(1, 3, 'A')).resolves.toBeUndefined()
+        expect(overlay()).toBeNull()
+    })
+})
+
+describe('the testing overlay — the store-not-set-up step (T-10535)', () => {
+    it('changes only the status line of the same card', async () => {
+        await showTestingModal()
+        const root = overlayRoot()
+        const before = root.querySelector('#caramel-testing-modal').innerHTML
+
+        setTestingModalStatus(STORE_NOT_SET_UP_STATUS)
+
+        expect(root.querySelector('#caramel-test-status').textContent).toBe(
+            "This store isn't set up yet, we're figuring out how it works…",
+        )
+        // Same card: same heading, same progress bar, nothing added.
+        const after = root.querySelector('#caramel-testing-modal').innerHTML
+        expect(
+            after.replace(/<p id="caramel-test-status">[^<]*<\/p>/, ''),
+        ).toBe(before.replace(/<p id="caramel-test-status">[^<]*<\/p>/, ''))
+    })
+
+    it('then gives way to the normal progress line', async () => {
+        await showTestingModal()
+        setTestingModalStatus(STORE_NOT_SET_UP_STATUS)
+
+        await updateTestingModal(1, 2, 'A')
+
+        expect(
+            overlayRoot().querySelector('#caramel-test-status').textContent,
+        ).toBe('Trying coupon 1 of 2 (A)...')
+    })
+
+    it('is a no-op when no card is showing', () => {
+        expect(() =>
+            setTestingModalStatus(STORE_NOT_SET_UP_STATUS),
+        ).not.toThrow()
         expect(overlay()).toBeNull()
     })
 })
