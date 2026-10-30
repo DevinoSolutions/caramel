@@ -34,8 +34,9 @@ import { NextResponse } from 'next/server'
 //
 // couponBoxSave: may the extension save a promo box it found and proved on a
 // store with no config as that store's config (POST
-// /api/extension/coupon-box-save)? Mirrors COUPON_BOX_SAVE_ENABLED, false by
-// default; the route answers 404 while it is off. Older builds ignore the key.
+// /api/extension/coupon-box-save)? Mirrors COUPON_BOX_SAVE_ENABLED, true by
+// default ('false' switches it off and the route answers 404). Older builds
+// ignore the key.
 //
 // withRoute: public read like extension/supported-stores (rate-limited, no
 // auth/origin gate); cors 'extension' + the OPTIONS preflight mirror

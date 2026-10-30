@@ -193,12 +193,14 @@ const serverObjectSchema = z.object({
     // Served to the extension as `couponBoxSave` by GET
     // /api/extension/features. On, a promo box the extension found and proved
     // on a store with no config may be saved as that store's config through
-    // POST /api/extension/coupon-box-save (couponBoxSave.ts). Off, the route
-    // answers 404 and the extension never calls it. Same strict two-value
-    // enum as SHOPPER_CODE_CAPTURE_ENABLED.
+    // POST /api/extension/coupon-box-save (couponBoxSave.ts). On by default:
+    // a saved box only becomes a served config once established accounts
+    // agree on it (see the quorum below). 'false' is the kill switch: the
+    // route answers 404 and the extension never calls it. Same strict
+    // two-value enum as SHOPPER_CODE_CAPTURE_ENABLED.
     COUPON_BOX_SAVE_ENABLED: z
         .enum(['true', 'false'])
-        .default('false')
+        .default('true')
         .transform(value => value === 'true'),
     // Quarantine + write budget of the same route (T-6221). A saved box is a
     // PROPOSAL until MIN_AGREEING_INSTALLS distinct signed-in users proposed

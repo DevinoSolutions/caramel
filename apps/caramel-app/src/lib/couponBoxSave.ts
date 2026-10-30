@@ -8,8 +8,8 @@
 // serves, so the next shopper's extension uses it as a config.
 //
 // The rules (the route applies them in this order):
-//   - Off unless COUPON_BOX_SAVE_ENABLED (the extension reads it as
-//     `couponBoxSave` on GET /api/extension/features).
+//   - On unless COUPON_BOX_SAVE_ENABLED is 'false', the kill switch (the
+//     extension reads it as `couponBoxSave` on GET /api/extension/features).
 //   - A signed-in extension only (T-6221): the route's withRoute `auth:
 //     'session'` takes the extension's bearer, so a forged Origin alone is 401.
 //   - A save is a PROPOSAL, not a config (recordBoxProposal): the box becomes

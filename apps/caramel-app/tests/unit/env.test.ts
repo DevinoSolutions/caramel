@@ -303,16 +303,16 @@ describe('parseServerEnv', () => {
         ).toThrow(/COUPON_BOX_DISCOVERY_ENABLED/)
     })
 
-    it('COUPON_BOX_SAVE_ENABLED is a strict boolean (default off) and a typo fails boot', () => {
+    it('COUPON_BOX_SAVE_ENABLED is a strict boolean (default on, false is the kill switch) and a typo fails boot', () => {
         expect(parseServerEnv(validServerFixture).COUPON_BOX_SAVE_ENABLED).toBe(
-            false,
+            true,
         )
         expect(
             parseServerEnv({
                 ...validServerFixture,
-                COUPON_BOX_SAVE_ENABLED: 'true',
+                COUPON_BOX_SAVE_ENABLED: 'false',
             }).COUPON_BOX_SAVE_ENABLED,
-        ).toBe(true)
+        ).toBe(false)
         expect(() =>
             parseServerEnv({
                 ...validServerFixture,
