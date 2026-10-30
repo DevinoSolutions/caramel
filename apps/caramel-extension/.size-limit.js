@@ -186,7 +186,10 @@ module.exports = [
         // for the discount already on the order credits the earlier code that
         // landed late, read off the order's applied-code tags, with the
         // refusal matched in six languages. Measured 99.45 kB.
-        limit: '99.5 KB',
+        // 2026-10-30 (T-10544), raised 99.5 -> 99.8 kB: those tags are also
+        // read on Shopify's current checkout (a tag group whose button removes
+        // a discount code), which has no #reduction-tags. Measured 99.61 kB.
+        limit: '99.8 KB',
         brotli: false,
     },
     {

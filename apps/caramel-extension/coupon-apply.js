@@ -613,15 +613,32 @@ export function caramelRefusedForExistingDiscount(text) {
 // Which of `codes` the order shows as applied, the most recent first: a word
 // of an applied row (the config's, or the generic ones) or of a Shopify
 // checkout's reduction tag ("ADRIANR15 AdrianR15") equal to the code, any case.
+// Shopify's current checkout has no #reduction-tags: each code is a tag group
+// (<div id="tag-0" role="group">FREE FREE<button aria-label="Remove FREE"
+// data-event-name="remove_discount_code">) in the "Discount code or gift
+// card" list (neweracap.com, live 2026-10-30). Only a group whose button
+// removes a discount code counts, so an applied gift card names nothing; the
+// button's label is read too, as it names the code on its own.
+const _CARAMEL_SHOPIFY_REMOVE_CODE =
+    'button[data-event-name="remove_discount_code"]'
 export function caramelCodeOnOrder(rec, codes) {
     const words = new Set(
         [
             ...qAll(findAppliedSelector(rec)),
             ...qAll('#reduction-tags li, [id^="reduction-tag-"]'),
+            ...qAll(_CARAMEL_SHOPIFY_REMOVE_CODE).map(b =>
+                b.closest('[role="group"]'),
+            ),
         ]
-            .filter(el => _isVisible(el) && !caramelRowReadsRejected(el))
+            .filter(el => el && _isVisible(el) && !caramelRowReadsRejected(el))
             .flatMap(el =>
-                ((el.innerText ?? el.textContent) || '')
+                [
+                    el.innerText ?? el.textContent,
+                    el
+                        .querySelector(_CARAMEL_SHOPIFY_REMOVE_CODE)
+                        ?.getAttribute('aria-label'),
+                ]
+                    .join(' ')
                     .toUpperCase()
                     .split(/[^\p{L}\p{N}_-]+/u),
             ),
