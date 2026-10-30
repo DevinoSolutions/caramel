@@ -169,7 +169,11 @@ module.exports = [
         // APPLIED" row is its answer) and #595 (the cart's "remove this
         // coupon?" dialog is confirmed after its fade-in, so a refused code
         // really comes off) used up the headroom. Measured 95.56 kB.
-        limit: '96 KB',
+        // 2026-10-30 (T-10533), raised 96 -> 96.5 kB: a finder-picked box
+        // keeps waiting after its total re-draws with the same number, so a
+        // Shopify discount that lands 2-4 s later is read as a saving.
+        // Measured 96.05 kB.
+        limit: '96.5 KB',
         brotli: false,
     },
     {
