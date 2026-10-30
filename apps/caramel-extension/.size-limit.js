@@ -182,7 +182,11 @@ module.exports = [
         // from the last flag the server gave (under 30 minutes old,
         // finder-flag-memory.js), instead of turning the finder off for the
         // page. Measured 97.34 kB.
-        limit: '97.5 KB',
+        // 2026-10-30 (T-10544), raised 97.5 -> 99.5 kB: a code refused
+        // for the discount already on the order credits the earlier code that
+        // landed late, read off the order's applied-code tags, with the
+        // refusal matched in six languages. Measured 99.45 kB.
+        limit: '99.5 KB',
         brotli: false,
     },
     {

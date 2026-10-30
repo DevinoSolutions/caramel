@@ -578,6 +578,59 @@ export function _caramelRefusesTheCode(text, code) {
     })
 }
 
+// A store refusing a code because a discount is already on the order ("X
+// couldn't be used with your existing discounts", "Cannot be combined with
+// other offers", "Ein Rabatt wurde bereits angewendet"). The runner reads it as
+// a sign that an earlier code landed after its own wait (T-10544).
+// Sentences arrive with their whitespace collapsed (_caramelSentencesOf), so a
+// space is a space. "cumulab" is French, Spanish and Italian at once.
+// The words for a discount; "code" is only in the second, because "try other
+// codes" is a plain refusal.
+const _CARAMEL_DISCOUNT_WORDS =
+    '(discount|offer|promo|coupon|voucher|deal|reduction)'
+const _CARAMEL_CODE_WORDS = '(discount|offer|promo|coupon|voucher|code)'
+const CARAMEL_EXISTING_DISCOUNT_RE = new RegExp(
+    String.raw`\b(existing|current|other) ${_CARAMEL_DISCOUNT_WORDS}|already (been )?applied(?! to (an?|another|a previous|a prior) order)|already (has|have|contains?) an? ${_CARAMEL_DISCOUNT_WORDS}|n.?t (be )?(combined|stacked|used (together )?with [^.!?]{0,30}${_CARAMEL_CODE_WORDS})|(not |non-?)(combin|stack)able|only one ${_CARAMEL_CODE_WORDS}|one ${_CARAMEL_CODE_WORDS}s? per order|nicht (mit (anderen|bestehenden|weiteren)|kombinierbar)|kombiniert werden|bereits (ein (rabatt|gutschein)|angewendet)|cumulab|ne peut (pas )?.tre (combin|cumul)|autres? (r.duction|remise|promotion|offre)|d.j. appliqu|no (se )?pueden? (combinar|acumular)|otr[oa]s? (descuento|cup|promoci|oferta)|ya (est. |se ha |ha sido )?aplicad|non (pu.|possono) essere (combinat|cumulat)|altri (sconti|codici|coupon|buoni)|gi. applicat|niet (te )?(combineren|stapelen)|niet (worden )?gecombineerd|andere (korting|actie|aanbieding)|\bal toegepast`,
+    'i',
+)
+// Every sentence is either that refusal or neutral: a sentence that also calls
+// the code invalid or expired, or one that accepts it ("Promo code applied.
+// Cannot be combined with other offers."), is not this answer.
+export function caramelRefusedForExistingDiscount(text) {
+    const said = _caramelSentencesOf(String(text || ''))
+    return (
+        said.some(s => CARAMEL_EXISTING_DISCOUNT_RE.test(s)) &&
+        !said.some(
+            s =>
+                !CARAMEL_EXISTING_DISCOUNT_RE.test(s) &&
+                (_CARAMEL_REFUSES_CODE_RE.test(s) ||
+                    (_CARAMEL_ACCEPTED_RE.test(s) &&
+                        !_CARAMEL_NEGATION_RE.test(s))),
+        )
+    )
+}
+
+// Which of `codes` the order shows as applied, the most recent first: a word
+// of an applied row (the config's, or the generic ones) or of a Shopify
+// checkout's reduction tag ("ADRIANR15 AdrianR15") equal to the code, any case.
+export function caramelCodeOnOrder(rec, codes) {
+    const words = new Set(
+        [
+            ...qAll(findAppliedSelector(rec)),
+            ...qAll('#reduction-tags li, [id^="reduction-tag-"]'),
+        ]
+            .filter(el => _isVisible(el) && !caramelRowReadsRejected(el))
+            .flatMap(el =>
+                ((el.innerText ?? el.textContent) || '')
+                    .toUpperCase()
+                    .split(/[^\p{L}\p{N}_-]+/u),
+            ),
+    )
+    for (let i = codes.length - 1; i >= 0; i--)
+        if (words.has(String(codes[i]).toUpperCase())) return codes[i]
+    return null
+}
+
 function _caramelRejectionSentences(scope) {
     const tidy = t => (t || '').trim().replace(/\s+/g, ' ')
     // The shown text of el without its controls ("Code <b>X</b> is not

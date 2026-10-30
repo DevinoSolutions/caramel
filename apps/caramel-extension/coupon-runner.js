@@ -23,6 +23,8 @@ import {
     _unmarkTriedCode,
     applyCoupon,
     applyViaDiscountLink,
+    caramelCodeOnOrder,
+    caramelRefusedForExistingDiscount,
     caramelRowReadsRejected,
     caramelSinkTriedCodes,
     findAppliedSelector,
@@ -753,6 +755,11 @@ export async function startApplyingCoupons(rec, options) {
     let lastStoreReason = null // last real error text the store showed us
     let lastFailId = null // coupon id paired with lastStoreReason
     const triedCodes = []
+    // Each failed code, whether it can still be on the order (not taken off,
+    // not refused in the store's words), and whether the total had already
+    // left the starting total when it was submitted (T-10544, below).
+    const failedTries = []
+    let lastVerdictTotal = original
     // Codes the store turned down IN ITS OWN WORDS. The manual fallback sinks
     // these below the untried ones so we never lead with codes the user just
     // watched fail. Only real rejection text counts — a timeout or a silent
@@ -820,6 +827,15 @@ export async function startApplyingCoupons(rec, options) {
     // that has not gone after this long cancelled the navigation.
     const PAGE_LEAVE_GRACE_MS = 20000
     const loopStart = performance.now()
+    // Read like applyCoupon does: the number that MOVED, so a static MSRP or
+    // fee in the price box can't hide a drop.
+    const movedTotalNow = () => {
+        const largest = getPrice(rec.priceContainer, { returnLargest: true })
+        const moved = _caramelLastPrices.filter(
+            p => !isNaN(p) && p < original && !originalPrices.includes(p),
+        )
+        return moved.length ? Math.max(...moved) : largest
+    }
 
     // A store whose submit navigates may send it late (T-9245, see
     // caramelWatchPageLeaving): once this page is leaving, the code in flight
@@ -893,6 +909,8 @@ export async function startApplyingCoupons(rec, options) {
             lastAttempt.finder,
         )
         const res = await applyCoupon(code, rec)
+        const totalAtSubmit = lastVerdictTotal
+        lastVerdictTotal = res.newTotal
         // The store's submit is taking this page away: this code's answer is on
         // the page it loads, which reads the record we are still holding.
         if (leaving.isLeaving()) await holdForNavigation({ recordHeld: true })
@@ -917,6 +935,68 @@ export async function startApplyingCoupons(rec, options) {
             !Number.isFinite(res.newTotal)
         ) {
             _unmarkTriedCode(code)
+        }
+
+        /* A code refused because a discount is already on the order, over a
+         * total below the one the run started from: an earlier code landed
+         * after its own wait, and that earlier code is the win (T-10544).
+         *
+         * neweracap.com (2026-10-30): the order carried -$38.99 from an
+         * earlier code, the next one was refused "couldn't be used with your
+         * existing discounts", its drop was rightly not its own
+         * (AUTO_INSERT_DROP_BESIDE_REFUSAL), and the card said nothing worked.
+         * kipling-usa.com and oofos.com showed it too; CARAMEL_REDRAW_WAIT_MS
+         * (T-10533) covers most stores, this covers the slower ones.
+         *
+         * The code credited is the one the order names (a Shopify reduction
+         * tag or an applied row, matched exactly), else, on a cart that
+         * arrived without a discount, the last failed code that can still be
+         * on the order and was submitted while the total still read the
+         * starting total. The total must hold for two reads; a zero total
+         * counts only when the order names the code. Nothing else credits a
+         * code: a total that dropped with no such refusal, or beside a plain
+         * "invalid code", is left as it was. */
+        let landed = null
+        if (
+            !res.success &&
+            hasPriceCfg &&
+            !isNaN(original) &&
+            res.errorIsNew &&
+            caramelRefusedForExistingDiscount(res.errorMsg)
+        ) {
+            const totalNow = () => {
+                const t = rec.caramelFound
+                    ? caramelLoadedFinder()?.caramelFinderTotalNow(rec)
+                    : NaN
+                return Number.isFinite(t) ? t : movedTotalNow()
+            }
+            const first = totalNow()
+            await sleep(500)
+            const cur = totalNow()
+            const named = caramelCodeOnOrder(rec, triedCodes.slice(0, -1))
+            let candidate = named ? coupons.find(c => c.code === named) : null
+            // The last such code wins: failedTries is in submission order.
+            if (!named && !preExistingDiscount)
+                for (const t of failedTries)
+                    if (t.onOrder && !(t.totalAtSubmit < original - 0.01))
+                        candidate = t
+            if (
+                candidate &&
+                Math.abs(cur - first) < 0.01 &&
+                cur < original - 0.01 &&
+                (cur > 0 || named)
+            ) {
+                log('AUTO_INSERT_LATE_CODE_CREDITED', {
+                    code: candidate.code,
+                    refused: code,
+                    total: cur,
+                    named: !!named,
+                    reason: 'an earlier code landed late',
+                })
+                landed = candidate
+                res.success = true
+                res.newTotal = cur
+            }
         }
 
         // Late-total safety net: some checkouts (erincondren-class) flash their
@@ -980,18 +1060,7 @@ export async function startApplyingCoupons(rec, options) {
             }
             for (let t = 0; t < 4 && movedNothing(); t++) {
                 await sleep(400)
-                // Read like applyCoupon does: the number that MOVED, so a
-                // static MSRP or fee in the price box can't hide a drop.
-                const largest = getPrice(rec.priceContainer, {
-                    returnLargest: true,
-                })
-                const moved = _caramelLastPrices.filter(
-                    p =>
-                        !isNaN(p) &&
-                        p < original &&
-                        !originalPrices.includes(p),
-                )
-                const cur = moved.length ? Math.max(...moved) : largest
+                const cur = movedTotalNow()
                 if (Number.isFinite(cur)) res.newTotal = cur
             }
             if (movedNothing()) {
@@ -1039,15 +1108,17 @@ export async function startApplyingCoupons(rec, options) {
                     reason: 'price container held more than one number — used the tightest defensible baseline',
                 })
             }
-            log(`✓ ${code} saved ${diff || '(unknown — no priceContainer)'}`)
+            bestCode = landed ? landed.code : code
+            bestId = landed ? landed.id : coupons[i].id
+            log(
+                `✓ ${bestCode} saved ${diff || '(unknown — no priceContainer)'}`,
+            )
             bestSave = believable ? diff : 0
             // Worked, but no defensible baseline existed (the total didn't drop
             // below anything the container showed). Don't invent a number — and
             // don't blame a minimum spend either.
             bestSaveUnmeasurable =
                 hasPriceCfg && !isNaN(res.newTotal) && isNaN(baseline)
-            bestCode = code
-            bestId = coupons[i].id
             break
         }
 
@@ -1061,6 +1132,15 @@ export async function startApplyingCoupons(rec, options) {
         log(`✗ ${code} failed`, {
             committed: res.committed,
             errorMsg: res.errorMsg,
+        })
+        failedTries.push({
+            code,
+            id: coupons[i].id,
+            onOrder:
+                !res.committed &&
+                !res.answeredByRow &&
+                !(res.errorMsg && res.errorIsNew),
+            totalAtSubmit,
         })
         // Keep the store's own words (login-required, min-spend, expired…) so
         // the final modal can say the REAL reason instead of a generic line.
