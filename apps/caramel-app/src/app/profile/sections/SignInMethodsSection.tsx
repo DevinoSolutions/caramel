@@ -176,7 +176,7 @@ export default function SignInMethodsSection() {
                     <button
                         type="button"
                         onClick={() => void load()}
-                        className="min-h-[44px] font-semibold text-caramel hover:underline"
+                        className="text-caramel min-h-[44px] font-semibold hover:underline"
                     >
                         Try again
                     </button>
