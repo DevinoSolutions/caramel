@@ -189,7 +189,11 @@ module.exports = [
         // 2026-10-30 (T-10544), raised 99.5 -> 99.8 kB: those tags are also
         // read on Shopify's current checkout (a tag group whose button removes
         // a discount code), which has no #reduction-tags. Measured 99.61 kB.
-        limit: '99.8 KB',
+        // 2026-10-30, raised 99.8 -> 101 kB: a cart with no promo box says
+        // the codes go in at checkout and the finder asks once more there,
+        // and on the discount-link path a total that falls because the cart
+        // emptied is not credited as a saving. Measured 100.7 kB.
+        limit: '101 KB',
         brotli: false,
     },
     {

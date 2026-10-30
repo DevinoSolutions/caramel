@@ -163,6 +163,28 @@ export function caramelStoreWords(text) {
         .trim()
 }
 
+/* Does a cart read on the discount-link path show a saving the code made?
+ *
+ * The total alone cannot say. A cart that empties mid-run (the store drops
+ * the items, the session expires) or that the shopper empties reads a total
+ * of 0, and "the total fell" then credited the whole order to whichever code
+ * was probed: a live card said "You saved £65.00" for a code that does
+ * nothing when typed by hand. So the cart has to still hold items, and a
+ * total of 0 counts only when the cart names the code as applied (a code
+ * that makes the order free). A cart with no items is never a saving, even
+ * when a discount is still attached to the session. */
+function _linkCartHoldsTheSaving(cart, code) {
+    if (!cart || !(cart.item_count > 0)) return false
+    if (cart.total_price > 0) return true
+    const want = String(code).toUpperCase()
+    return (Array.isArray(cart.discount_codes) ? cart.discount_codes : []).some(
+        e =>
+            e &&
+            String(e.code ?? '').toUpperCase() === want &&
+            e.applicable !== false,
+    )
+}
+
 export async function startApplyingCoupons(rec, options) {
     log('=== Starting coupon flow ===')
     // A resumed run is the SAME click continuing on a new page, so the overlay
@@ -322,6 +344,19 @@ export async function startApplyingCoupons(rec, options) {
             // unreadable — we learned nothing about this code, so don't leave
             // it blacklisted for the rest of the session (see _unmarkTriedCode).
             if (!after) _unmarkTriedCode(code)
+            if (
+                after &&
+                after.total_price < bestTotal &&
+                !_linkCartHoldsTheSaving(after, code)
+            ) {
+                log('AUTO_INSERT_DROP_ON_EMPTY_CART', {
+                    code,
+                    total: after.total_price,
+                    items: after.item_count,
+                    reason: 'the total fell because the cart holds nothing the code could discount — not a saving',
+                })
+                continue
+            }
             if (after && after.total_price < bestTotal) {
                 bestTotal = after.total_price
                 bestCode = code
@@ -355,7 +390,11 @@ export async function startApplyingCoupons(rec, options) {
             // decides the verdict, so this can only turn a lost win into a
             // measured one.
             confirmed = await _caramelPutCodeOnCart(bestCode)
-            if (!confirmed || confirmed.total_price >= _cart0.total_price) {
+            if (
+                !confirmed ||
+                confirmed.total_price >= _cart0.total_price ||
+                !_linkCartHoldsTheSaving(confirmed, bestCode)
+            ) {
                 // Nothing is riding on the cart now. Say so rather than claim a
                 // win, and let the no-win branch below hand over the codes.
                 log('AUTO_INSERT_REAPPLY_LOST', {
