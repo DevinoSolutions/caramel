@@ -4,6 +4,7 @@ import {
     _caramelResetDiscoveryFlag,
     caramelDiscoverCouponBox,
     caramelFindOrderTotal,
+    caramelFinderSeesBox,
 } from '../coupon-box-discovery.js'
 import {
     installChromeStub,
@@ -16,7 +17,9 @@ import {
 //     on desktop, then the copy the shopper sees): the shown copy is the box
 //     and its button, never the hidden twin;
 //   · a summary that draws the net total ("Gesamtnettosumme", "Total excl.
-//     VAT") beside the gross one: the gross total is the total.
+//     VAT") beside the gross one: the gross total is the total;
+//   · a bag that works out sales tax only at checkout and so draws no total
+//     but "Total excluding tax" (ikea.com/us): that row is its subtotal.
 
 beforeAll(() => {
     installChromeStub()
@@ -188,6 +191,113 @@ describe('a summary that shows the net total beside the gross one', () => {
         document.body.innerHTML =
             '<div class="row"><span>Gesamtnettosumme</span><span>5,07 €</span></div>' +
             '<div class="row"><span>zzgl. 19 % MwSt.</span><span>0,97 €</span></div>'
+
+        expect(caramelFindOrderTotal()).toBeNull()
+    })
+})
+
+// ikea.com/us/en/shoppingcart (2026-10-31, one item in the bag): the summary
+// is "Products" and "Total excluding tax", tax is added at checkout, and the
+// promo box is folded under an "Apply discount code" accordion. Trimmed from
+// the live page; the closed region is drawn display:none, as the harness
+// reads a fold. Before T-11710 the finder read no total here, so the prompt
+// never showed on a bag with codes for it.
+// The screen-reader copy's computed style, as measured on the live page.
+const SR_ONLY =
+    'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(1px,1px,1px,1px)'
+const price = (amount, sr) =>
+    '<span class="cart-ingka-price"><span aria-hidden="true" class="notranslate">' +
+    '<span class="cart-ingka-price__nowrap"><span class="cart-ingka-price__currency">$</span>' +
+    `<span class="cart-ingka-price__integer">${amount.split('.')[0]}</span></span>` +
+    '<span class="cart-ingka-price__decimal"><span class="cart-ingka-price__separator">.</span>' +
+    `${amount.split('.')[1]}</span></span>` +
+    `<span class="cart-ingka-price__sr-text" style="${SR_ONLY}">${sr}</span></span>`
+const ikeaSummary = (totalLabel = 'Total excluding tax') =>
+    '<h2>Order summary</h2><table><tbody>' +
+    `<tr><th scope="row"><span>Products</span></th><td>${price('79.99', '$ 79.99')}</td></tr>` +
+    '<tr><td colspan="2"><span>Shipping costs are calculated at checkout</span></td></tr>' +
+    '</tbody><tfoot><tr id="order-summary-total" aria-live="polite">' +
+    `<th scope="row"><span>${totalLabel}</span></th>` +
+    `<td>${price('79.99', `${totalLabel} $ 79.99`)}</td></tr></tfoot></table>`
+const IKEA_FOLD =
+    '<ul class="cart-ingka-accordion"><li id="cart-coupon"><div role="heading" aria-level="2">' +
+    '<button type="button" id="fold" class="cart-ingka-accordion__heading" aria-controls="SEC_cart-coupon" aria-expanded="false">' +
+    '<span><span id="SEC_cart-coupon_title"><div class="cart-ingka-ssr-label">Apply discount code</div></span></span>' +
+    '</button></div>' +
+    '<div id="SEC_cart-coupon" role="region" style="display:none" aria-labelledby="SEC_cart-coupon_title">' +
+    '<form novalidate=""><input id="discountcode-input" aria-label="Discount code" type="text" value="">' +
+    '<button type="submit"><span>Apply</span></button></form></div></li></ul>'
+
+describe('a bag that shows only a total before sales tax', () => {
+    beforeEach(() => setPath('/us/en/shoppingcart/'))
+
+    it('reads "Total excluding tax" as the total of the bag (ikea.com)', () => {
+        document.body.innerHTML = ikeaSummary() + IKEA_FOLD
+
+        expect(totalText()).toContain('Total excluding tax')
+        expect(totalText()).toContain('79')
+    })
+
+    it('so the finder sees the folded promo box and the prompt can show', () => {
+        document.body.innerHTML = ikeaSummary() + IKEA_FOLD
+
+        expect(caramelDiscoverCouponBox().toggle?.id).toBe('fold')
+        expect(caramelFinderSeesBox()).toBe(true)
+    })
+
+    it.each([
+        'Total excluding tax',
+        'Total excl. tax',
+        'Total before tax',
+        'Total (excluding tax)',
+        'Estimated total before tax',
+        'Order total excluding sales tax',
+    ])('"%s" is read when the bag shows nothing else', label => {
+        document.body.innerHTML = ikeaSummary(label)
+
+        expect(totalText()).toContain(label)
+    })
+
+    it('a subtotal on the same bag is still read first', () => {
+        document.body.innerHTML =
+            '<div class="row"><span>Subtotal</span><span>$70.00</span></div>' +
+            '<div class="row"><span>Total excluding tax</span><span>$79.99</span></div>'
+
+        expect(totalText()).toContain('70.00')
+    })
+
+    it('a gross total on the same bag is still the total', () => {
+        document.body.innerHTML =
+            '<div class="row"><span>Total excluding tax</span><span>$79.99</span></div>' +
+            '<div class="row"><span>Total</span><span>$86.39</span></div>'
+
+        expect(totalText()).toContain('86.39')
+    })
+
+    it.each([
+        'Total excluding shipping',
+        'Total excluding tax and shipping',
+        'Total savings before tax',
+        'Total (excl. VAT)',
+        'Total HT',
+    ])('"%s" alone is still no total', label => {
+        document.body.innerHTML = `<div class="row"><span>${label}</span><span>$79.99</span></div>`
+
+        expect(caramelFindOrderTotal()).toBeNull()
+    })
+
+    it('a row whose cell repeats it for a screen reader is one amount', () => {
+        document.body.innerHTML =
+            '<div class="row"><span>Total</span><span>$79.99' +
+            `<span style="${SR_ONLY}">Total $ 79.99</span></span></div>`
+
+        expect(caramelFindOrderTotal()).not.toBeNull()
+    })
+
+    it('...but the same copy drawn for the eye is a second amount', () => {
+        document.body.innerHTML =
+            '<div class="row"><span>Total</span><span>$79.99' +
+            '<span>Total $ 79.99</span></span></div>'
 
         expect(caramelFindOrderTotal()).toBeNull()
     })

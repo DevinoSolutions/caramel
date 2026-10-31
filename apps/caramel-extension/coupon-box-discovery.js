@@ -1362,6 +1362,19 @@ const TOTAL_NOT =
 const SUB_LABEL =
     /^(order |cart |merchandise |product |est\.? |estimated )?sub[- ]?total( \(.*\))?:?$|^product total:?$|^zwischensumme|^sous-total|^subtota(al|le)\b|^del ?summ?a?\b|^välisumma|^suma częściowa|^totale parziale|^total parcial|^小[计計]|^mezisoučet|^medzisúčet|^ara toplam|^részösszeg|^υποσύνολο|^tạm tính|^المجموع الفرعي|^ยอดรวมย่อย/i
 const SUB_NOT = /sav(ed?|ings?)\b|discount|shipping|tax|points/i
+// A total the store draws before SALES tax because tax is worked out at
+// checkout (ikea.com/us "Total excluding tax", the only total on its bag). It
+// is the bag's subtotal under another name, so it is read as one, and only
+// when the cart shows no total and no subtotal at all (subtotalRows). A VAT or
+// HT net total is not this: a European cart that draws one shows the VAT too,
+// and a cart that shows only that net total still shows no total.
+const PRETAX_LABEL =
+    /^(?:(?:order|cart|bag|basket|estimated|est\.?) )?total ?\(?(?:excluding|excl\.?|before|pre-?) ?(?:sales )?tax(?:es)?\)?:?$/i
+const PRETAX_NOT = /sav(ed?|ings?)\b|discount|shipping|points/i
+function subtotalRows(doc) {
+    const hits = scanTotalRows(doc, SUB_LABEL, SUB_NOT)
+    return hits.length ? hits : scanTotalRows(doc, PRETAX_LABEL, PRETAX_NOT)
+}
 // The words a total or subtotal label is made of: a text node holding none of
 // them is no label, and scanTotalRows never looks at it.
 const TOTAL_WORDS =
@@ -1400,6 +1413,29 @@ const moneyCount = t =>
 // (a struck-through price, a "free shipping over $150" line) is not a total
 // we can read honestly, because its largest number need not be the total.
 const ROW_MAX = 90
+
+// A row's text without the copy a screen reader is given: a 1px box with its
+// overflow hidden (ikea.com draws "$79.99" for the eye and "Total excluding
+// tax $ 79.99" in one, inside the same cell). That copy is the same amount
+// again, and counting it made every such row hold two amounts and be no row.
+// Only leaves holding a digit are looked at, so a row costs a few style reads.
+function srOnly(el) {
+    const cs = styleOf(el)
+    return (
+        cs.position === 'absolute' &&
+        parseFloat(cs.width) <= 1 &&
+        parseFloat(cs.height) <= 1 &&
+        /hidden|clip/.test(cs.overflow)
+    )
+}
+function shownRowText(el) {
+    let t = textOf(el)
+    for (const leaf of el.querySelectorAll('*')) {
+        if (leaf.children.length || !/\d/.test(leaf.textContent)) continue
+        if (srOnly(leaf)) t = t.replace(textOf(leaf), ' ')
+    }
+    return t
+}
 
 // An element's own words, and the same with amount and parentheses cut: a
 // label may carry its own amount ("Bag total: £32.00 (1 Item)").
@@ -1468,11 +1504,11 @@ function scanTotalRows(
             // that took $6 off the total never counted.
             // Only the hidden LABEL is put back: the row's other hidden text
             // (a compare-at price, a screen-reader amount) stays out.
-            let t = norm(textOf(p))
+            let t = norm(shownRowText(p))
             if (!t.includes(own)) t = norm(own + ' ' + t)
             if (t.length > ROW_MAX || moneyCount(t) > 1) {
                 const sib = (prev || el).nextElementSibling
-                const st = sib ? norm(textOf(sib)) : ''
+                const st = sib ? norm(shownRowText(sib)) : ''
                 if (
                     st.length <= 40 &&
                     AMOUNT_ONLY.test(st) &&
@@ -1533,7 +1569,7 @@ function findTotalRow(doc, kind) {
     let hits =
         kind === 'subtotal' ? [] : scanTotalRows(doc, TOTAL_LABEL, TOTAL_NOT)
     if (!hits.length && kind !== 'total') {
-        hits = scanTotalRows(doc, SUB_LABEL, SUB_NOT)
+        hits = subtotalRows(doc)
         found = 'subtotal'
     }
     const shown = hits.filter(h => h.visible)
@@ -1558,7 +1594,7 @@ function findSameTotalRow(doc, was) {
     const kind = was.kind === 'subtotal' ? 'subtotal' : 'total'
     const hits =
         kind === 'subtotal'
-            ? scanTotalRows(doc, SUB_LABEL, SUB_NOT)
+            ? subtotalRows(doc)
             : scanTotalRows(doc, TOTAL_LABEL, TOTAL_NOT)
     if (hits.length < was.rows) return null
     const same = hits.filter(h => h.label === was.label)
@@ -2007,6 +2043,7 @@ function shownPositiveTotal(doc) {
     for (const [label, not] of [
         [TOTAL_LABEL, TOTAL_NOT],
         [SUB_LABEL, SUB_NOT],
+        [PRETAX_LABEL, PRETAX_NOT],
     ]) {
         const shown = scanTotalRows(doc, label, not).filter(h => h.visible)
         if (!shown.length) continue

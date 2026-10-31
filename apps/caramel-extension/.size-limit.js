@@ -391,9 +391,12 @@ module.exports = [
         // own close control, Escape, or the toggle again), and the server's
         // pick never clicks the toggle the rules already tried. Measured
         // 38.36 -> 40.59 kB.
+        // 2026-10-31 (T-11710), raised 41.3 -> 42.3 kB: a bag total drawn
+        // before sales tax is read as its subtotal, and a row's screen-reader
+        // copy of its amount is not counted (ikea.com/us). Measured 41.69 kB.
         // It is written only here: tests/finder-module-build.test.mjs reads
         // it.
-        limit: '41.3 KB',
+        limit: '42.3 KB',
         brotli: false,
     },
     {
