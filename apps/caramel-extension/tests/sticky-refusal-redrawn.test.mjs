@@ -1,4 +1,12 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from 'vitest'
 import { initCaramelBase } from '../caramel-base.js'
 import { applyCoupon } from '../coupon-apply.js'
 import {
@@ -281,4 +289,91 @@ describe('words the store does not draw again for this code', () => {
         expect(third.res.errorIsNew).toBe(false)
         expect(third.ms).toBeGreaterThan(9000)
     }, 30000)
+})
+
+describe('a code that works after a refused one, on a store that re-draws its whole promo section', () => {
+    // kipling-usa.com (Shopify checkout) on the #633 build, 2026-10-31: TREAT,
+    // the code that works ($74.99 -> $63.75), took 8-9 s instead of 6 s, and
+    // once was judged "didn't stick" while it was on the order. A checkout
+    // like it re-draws the promo section several times while it works, the
+    // last code's refusal still in it, and lands the discount seconds later.
+    // That re-drawn refusal must not end the wait before the total moves.
+    const SHOPIFY_NO = 'Enter a valid discount code or gift card'
+    const section = (said, total) =>
+        '<div class="promo"><label for="CouponCodeInput">Discount code</label>' +
+        '<input id="CouponCodeInput" name="CouponCode" type="text">' +
+        '<button id="ap" type="button">Apply</button>' +
+        `<div id="msg" class="error">${said}</div></div>` +
+        `<div class="row"><span>Total</span><span id="tot">${total}</span></div>`
+    const draw = (said, total) => {
+        const code = document.getElementById('CouponCodeInput')?.value ?? ''
+        document.getElementById('sec').innerHTML = section(said, total)
+        document.getElementById('CouponCodeInput').value = code
+    }
+
+    beforeEach(() => {
+        document.body.innerHTML = `<div id="sec">${section('', '$74.99')}</div>`
+    })
+
+    // The first code is refused in place; the second is re-drawn three times
+    // with that refusal still showing, and its discount lands at 2.5 s.
+    let store = null
+    afterEach(() => document.removeEventListener('click', store))
+    function storeRefusesThenAppliesTreat() {
+        let clicks = 0
+        store = e => {
+            if (e.target?.id !== 'ap') return
+            clicks++
+            if (clicks === 1)
+                return later(() => (msg().textContent = SHOPIFY_NO))
+            for (const ms of [100, 400, 700])
+                later(() => draw(SHOPIFY_NO, '$74.99'), ms)
+            later(() => draw('', '$63.75'), 2500)
+        }
+        document.addEventListener('click', store)
+    }
+
+    async function treatAfterARefusal(rec) {
+        storeRefusesThenAppliesTreat()
+        const first = await applyCoupon('MV15', rec)
+        expect(first.errorIsNew).toBe(true)
+        const startedAt = performance.now()
+        const res = await applyCoupon('TREAT', rec)
+        return { res, ms: performance.now() - startedAt }
+    }
+
+    it(
+        'a saved box: the attempt ends on the drop, credited',
+        async () => {
+            const { res, ms } = await treatAfterARefusal({
+                domain: 'shop.test',
+                couponInput: '#CouponCodeInput',
+                couponSubmit: '#ap',
+                priceContainer: '#tot',
+                savedBox: true,
+            })
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(63.75)
+            // main ends on the total at 2.5 s
+            expect(ms).toBeLessThan(4500)
+        },
+        SLOW,
+    )
+
+    it(
+        'a finder-picked box: the attempt ends on the drop, credited',
+        async () => {
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
+            expect(rec?.caramelFound).toBe(true)
+
+            const { res, ms } = await treatAfterARefusal(rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(63.75)
+            // main: the total at 2.5 s, then the 1.5 s hold of a moved total
+            expect(ms).toBeLessThan(6000)
+        },
+        SLOW,
+    )
 })

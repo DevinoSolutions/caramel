@@ -204,7 +204,11 @@ module.exports = [
         // by a MutationObserver) is its answer to this code, so a refusal
         // that stays on the page no longer costs each later code the full
         // 10 s wait. Measured 103.9 kB.
-        limit: '104 KB',
+        // 2026-10-31 (T-11368), raised 104 -> 104.2 kB: no watch until the
+        // page has refused a code, and a refusal brought back by a re-drawn
+        // promo box gives the total the re-draw wait (kipling-usa.com).
+        // Measured 104.04 kB.
+        limit: '104.2 KB',
         brotli: false,
     },
     {

@@ -454,7 +454,19 @@ export function caramelQuoteIsAttributable(quote, priorText) {
  * Only words the store already gave as its answer count
  * (_caramelStoreAnswers): a store that re-draws its whole promo section brings
  * its standing hint along ("Enter a valid promo code to get free shipping"),
- * and that hint is furniture however often it is drawn. */
+ * and that hint is furniture however often it is drawn. Until the page has
+ * given one, nothing is watched: a code tried before any refusal (the first,
+ * or every one up to the code that works) costs the page nothing.
+ *
+ * A refusal read this way is weaker evidence than new words: a checkout that
+ * re-draws its promo section while it works (kipling-usa.com, Shopify, on the
+ * #633 build) brings the last code's refusal back with it, and the discount
+ * lands seconds later. So an answer that rested only on such a re-draw (the
+ * drawn node holds the promo box itself: watch.wholeBox) gives the total
+ * CARAMEL_REDRAW_WAIT_MS to move, not CARAMEL_ANSWER_GRACE_MS, while a refusal
+ * drawn on its own (its node, its text, its visibility: watch.own) keeps the
+ * short grace. The wait after a re-drawn total (T-10533) ends only on new
+ * words. */
 let _caramelRedraws = null
 // Every refusal this page gave as its answer to a code, normalised.
 const _caramelStoreAnswers = new Set()
@@ -473,21 +485,21 @@ const _CARAMEL_HIDDEN_BY = {
             .split(/\s+/)
             .some(c => /^(.*[-_])?(hidden|hide|invisible)$|^d-none$/i.test(c)),
 }
-function _caramelWatchRedraws(on) {
+function _caramelWatchRedraws(on, rec) {
     _caramelRedraws?.stop()
     _caramelRedraws = null
     if (
         !on ||
+        !_caramelStoreAnswers.size ||
         typeof MutationObserver === 'undefined' ||
         !document.documentElement
     )
         return null
     const touched = new Set()
+    // Kept cheap: this runs on every batch of the page's own re-renders.
     const note = node => {
         const el = node?.nodeType === 1 ? node : node?.parentElement
-        // Our own prompt and cards are never the store's answer.
-        if (el && touched.size < 1000 && !el.closest('[id^="caramel"]'))
-            touched.add(el)
+        if (el && touched.size < 1000) touched.add(el)
     }
     const take = records => {
         for (const r of records) {
@@ -513,6 +525,10 @@ function _caramelWatchRedraws(on) {
         attributeFilter: Object.keys(_CARAMEL_HIDDEN_BY),
     })
     const watch = {
+        // What the re-drawn refusals that answered for this code were drawn
+        // in: a node of their own, or one holding the promo box.
+        own: false,
+        wholeBox: false,
         arm() {
             observer.takeRecords()
             touched.clear()
@@ -530,17 +546,26 @@ function _caramelWatchRedraws(on) {
                     .replace(/\s/g, '')
                     .toLowerCase()
                     .includes(bare)
+            const box = pickBestMatch(rec.couponInput)
+            let said = false
             for (const el of touched)
                 if (
                     el.isConnected &&
                     holds(el) &&
+                    // Our own prompt and cards are never the store's answer.
+                    !el.closest('[id^="caramel"]') &&
                     _isVisible(el) &&
                     _caramelNormalizeQuote(
                         el.innerText ?? el.textContent,
                     ).includes(q)
-                )
-                    return true
-            return false
+                ) {
+                    said = true
+                    // No box to be found (a found box's marks went with the
+                    // re-draw) is read as the box re-drawn.
+                    if (!box || el.contains(box)) watch.wholeBox = true
+                    else return (watch.own = true)
+                }
+            return said
         },
         stop() {
             observer.disconnect()
@@ -1082,7 +1107,7 @@ export function caramelSnapshotCart(rec, code = '') {
         : null
     // Watched from here: the shopper's click (code-capture.js) is already the
     // submit. applyCoupon re-arms it at its own click.
-    const redraws = _caramelWatchRedraws(_caramelReadsLikeFound(rec))
+    const redraws = _caramelWatchRedraws(_caramelReadsLikeFound(rec), rec)
     return {
         hasPriceCfg,
         original,
@@ -1379,7 +1404,9 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                         priorAreaText,
                         alertsBefore,
                     )
-                    if (said && _caramelSaidSinceSubmit(said, priorAreaText))
+                    // New words only: a re-draw brings the last code's
+                    // refusal back with it (_caramelWatchRedraws).
+                    if (said && caramelQuoteIsAttributable(said, priorAreaText))
                         return via
                     if (
                         left() <= 0 ||
@@ -1399,10 +1426,16 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     log('Wait finished via', via)
     // A refusal-shaped sentence can come a moment before the total it
     // belongs with ("Limit one offer per order" printed as the code applies).
-    // Give the total a short grace to move before the verdict is read.
+    // Give the total a short grace to move before the verdict is read, and
+    // the longer re-draw wait when the answer was only a refusal brought back
+    // by a re-drawn promo box (_caramelWatchRedraws).
     if (via === 'answered' && _caramelReadsLikeFound(rec) && hasPriceCfg) {
         const startedAt = performance.now()
-        while (performance.now() - startedAt < CARAMEL_ANSWER_GRACE_MS) {
+        const grace =
+            snapshot.redraws?.wholeBox && !snapshot.redraws.own
+                ? CARAMEL_REDRAW_WAIT_MS
+                : CARAMEL_ANSWER_GRACE_MS
+        while (performance.now() - startedAt < grace) {
             await sleep(250)
             const now = rec.caramelFound
                 ? _caramelFinderTotalAfter(rec, code)
@@ -1476,11 +1509,9 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // Or the store drew it again for this code (_caramelWatchRedraws): the
     // last read of the watch, which ends here.
     const errorIsNew = _caramelSaidSinceSubmit(errorMsg, priorAreaText)
-    if (snapshot.redraws) {
-        snapshot.redraws.stop()
-        if (errorIsNew && !answeredByRow)
-            _caramelStoreAnswers.add(_caramelNormalizeQuote(errorMsg))
-    }
+    snapshot.redraws?.stop()
+    if (errorIsNew && !answeredByRow && _caramelReadsLikeFound(rec))
+        _caramelStoreAnswers.add(_caramelNormalizeQuote(errorMsg))
     if (errorMsg && !errorIsNew) {
         // opts.redact: a SHOPPER-typed code (code-capture.js) never reaches a
         // log line, and neither does the page text, which can quote it. The
