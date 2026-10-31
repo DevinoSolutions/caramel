@@ -445,8 +445,9 @@ export function caramelQuoteIsAttributable(quote, priorText) {
  *
  * Drawn again means: the node saying it (or one around it) was inserted, its
  * text was set (even to the same words), or it was shown after being hidden
- * (hidden, aria-hidden, display/visibility, a hiding class, a dialog's open).
- * Any other attribute change (a form's "loading" class) is not an answer.
+ * (hidden, aria-hidden, display/visibility, a hiding class, a dialog's open;
+ * watched on the nodes saying an earlier answer, _caramelAnswerNodes). Any
+ * other attribute change (a form's "loading" class) is not an answer.
  * Only what happens from arm() on counts: applyCoupon arms it right before its
  * click, so a store that re-draws the box as the code is typed does not answer
  * for it. One watch at a time: a new snapshot stops the last one.
@@ -485,6 +486,31 @@ const _CARAMEL_HIDDEN_BY = {
             .split(/\s+/)
             .some(c => /^(.*[-_])?(hidden|hide|invisible)$|^d-none$/i.test(c)),
 }
+// The smallest elements (a text node's parent, or up to two levels above it,
+// short enough to be one message) whose text holds an earlier answer, shown
+// or hidden.
+function _caramelAnswerNodes() {
+    const found = new Set()
+    if (!document.body) return found
+    const answers = [..._caramelStoreAnswers]
+    const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+    for (let t = tw.nextNode(); t; t = tw.nextNode()) {
+        if (!t.data.trim()) continue
+        for (
+            let el = t.parentElement, d = 0;
+            el && d < 3;
+            el = el.parentElement, d++
+        ) {
+            const text = _caramelNormalizeQuote(el.textContent)
+            if (text.length > 400) break
+            if (answers.some(a => text.includes(a))) {
+                found.add(el)
+                break
+            }
+        }
+    }
+    return found
+}
 function _caramelWatchRedraws(on, rec) {
     _caramelRedraws?.stop()
     _caramelRedraws = null
@@ -516,14 +542,28 @@ function _caramelWatchRedraws(on, rec) {
         }
     }
     const observer = new MutationObserver(take)
+    // Page-wide: nodes and text only. "Shown again" is watched only on the
+    // nodes now saying an earlier answer and the few levels around them: a
+    // page-wide watch of style and class changes with their old values is
+    // paid by every re-render and animation frame of the store's own page, and
+    // a successful code at kipling-usa.com took 1-3.5 s longer under it
+    // (2026-10-31, the first #633 build: 6.6-9.4 s against 5.9-6.1 s).
     observer.observe(document.documentElement, {
         subtree: true,
         childList: true,
         characterData: true,
-        attributes: true,
-        attributeOldValue: true,
-        attributeFilter: Object.keys(_CARAMEL_HIDDEN_BY),
     })
+    for (const said of _caramelAnswerNodes())
+        for (
+            let n = said, d = 0;
+            n && n !== document.body && d < 4;
+            n = n.parentElement, d++
+        )
+            observer.observe(n, {
+                attributes: true,
+                attributeOldValue: true,
+                attributeFilter: Object.keys(_CARAMEL_HIDDEN_BY),
+            })
     const watch = {
         // What the re-drawn refusals that answered for this code were drawn
         // in: a node of their own, or one holding the promo box.

@@ -208,7 +208,12 @@ module.exports = [
         // page has refused a code, and a refusal brought back by a re-drawn
         // promo box gives the total the re-draw wait (kipling-usa.com).
         // Measured 104.04 kB.
-        limit: '104.2 KB',
+        // 2026-10-31 (T-11368), raised 104.2 -> 104.5 kB: the page-wide part
+        // of that watch sees nodes and text only; style and class are watched
+        // on the nodes saying an earlier refusal (a successful kipling-usa.com
+        // code was 1-3.5 s slower with them watched page-wide). Measured
+        // 104.49 kB.
+        limit: '104.5 KB',
         brotli: false,
     },
     {
