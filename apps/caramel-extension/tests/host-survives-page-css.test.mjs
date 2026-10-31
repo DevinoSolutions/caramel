@@ -77,8 +77,26 @@ describe('an injected host a store’s CSS cannot switch off', () => {
         expect(CARAMEL_HOST_CSS['caramel-small-prompt']).toMatch(
             /cursor:\s*pointer/,
         )
+        // The page's maximum, so a store panel at that maximum cannot cover
+        // it: knix.com's cart drawer sits at 2147483647 and, at one below,
+        // took every tap meant for the prompt (2026-10-31). An equal value
+        // goes to whichever comes later in the page, which is the prompt.
         expect(CARAMEL_HOST_CSS['caramel-small-prompt']).toMatch(
-            /z-index:\s*2147483646/,
+            /z-index:\s*2147483647;/,
         )
+    })
+
+    it('keeps the light-DOM backup at the same z-index as the inline host', () => {
+        const sheet = read('caramel-content.css').replace(
+            /\/\*[\s\S]*?\*\//g,
+            '',
+        )
+        const idx = sheet.indexOf('#caramel-small-prompt')
+        const body = sheet.slice(idx, sheet.indexOf('}', idx))
+        const inline =
+            CARAMEL_HOST_CSS['caramel-small-prompt'].match(
+                /z-index:\s*(\d+)/,
+            )[1]
+        expect(body).toMatch(new RegExp(`z-index:\\s*${inline};`))
     })
 })
