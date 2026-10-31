@@ -198,7 +198,17 @@ module.exports = [
         // again before the card, the "worked" report or the box save (the DOM
         // loop, the late-code credit, the discount-link path and the page a
         // submit reloads to). Measured 102.35 kB.
-        limit: '102.5 KB',
+        // 2026-10-31 (T-11368), raised 102.5 -> 104 kB: a refusal a found or
+        // saved box's store gave an earlier code and draws again after this
+        // submit (node replaced, text set again, shown after hidden; watched
+        // by a MutationObserver) is its answer to this code, so a refusal
+        // that stays on the page no longer costs each later code the full
+        // 10 s wait. Measured 103.9 kB.
+        // 2026-10-31 (T-11368), raised 104 -> 104.2 kB: no watch until the
+        // page has refused a code, and a refusal brought back by a re-drawn
+        // promo box gives the total the re-draw wait (kipling-usa.com).
+        // Measured 104.04 kB.
+        limit: '104.2 KB',
         brotli: false,
     },
     {
