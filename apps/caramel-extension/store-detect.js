@@ -494,9 +494,12 @@ const CARAMEL_CART_FILE_RE =
  * last form is the capture group, at least three letters, and the caller
  * checks it against the start of one of the host's own labels: any other
  * prefix is an ordinary word (/workshop/, /giftshop/, /bishop/), and two
- * letters are too few to name a store (/restore/ on restorationhardware.com). */
+ * letters are too few to name a store (/restore/ on restorationhardware.com).
+ * A bare web is the server's own folder for the shop's pages, like app
+ * (halloweenexpress.com's cart is /web/shoppingcart, measured 2026-10-31
+ * with a promo box and a total in view). */
 const CARAMEL_CART_FILE_PARENT_RE =
-    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|(?:e|web|online|([a-z]{3,}))?(?:store|shop)|checkout|cart|basket|secure|orders?|app)$/i
+    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|(?:e|web|online|([a-z]{3,}))?(?:store|shop)|checkout|cart|basket|secure|orders?|app|web)$/i
 
 /* A path segment that is an action on the cart, written as one word
  * (/app/manageCart/showManageOrder, the hosted order form of a checkout
