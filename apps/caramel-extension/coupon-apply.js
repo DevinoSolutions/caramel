@@ -654,7 +654,7 @@ export function caramelCodeOnOrder(rec, codes) {
 // late credit in coupon-runner.js: neweracap.com's "Free" took the order to
 // $0.00 in its own attempt and was ruled out (T-11045). The row read is the
 // one caramelFinderTotalNow kept marked, and only while it is shown.
-function _caramelFinderTotalAfter(rec, code) {
+export function _caramelFinderTotalAfter(rec, code) {
     const now = caramelFinderTotalNow(rec)
     if (!Number.isNaN(now) || !code) return now
     const el = qOne(rec.priceContainer)

@@ -18,6 +18,7 @@ import {
     sleep,
 } from './caramel-base.js'
 import {
+    _caramelFinderTotalAfter,
     _getTriedCodes,
     _markTriedCode,
     _unmarkTriedCode,
@@ -175,7 +176,11 @@ export function caramelStoreWords(text) {
  * when a discount is still attached to the session. */
 function _linkCartHoldsTheSaving(cart, code) {
     if (!cart || !(cart.item_count > 0)) return false
-    if (cart.total_price > 0) return true
+    return cart.total_price > 0 || _linkCartNamesCode(cart, code)
+}
+
+// Does the cart list `code` among its applied discount codes?
+function _linkCartNamesCode(cart, code) {
     const want = String(code).toUpperCase()
     return (Array.isArray(cart.discount_codes) ? cart.discount_codes : []).some(
         e =>
@@ -183,6 +188,90 @@ function _linkCartHoldsTheSaving(cart, code) {
             String(e.code ?? '').toUpperCase() === want &&
             e.applicable !== false,
     )
+}
+
+/* A credited code is held until the store has settled (T-11366).
+ *
+ * A store can take a code, show it, and then take it back on its own.
+ * neweracap.com (1.4.30, 2026-10-31, timed from the click): "Free" was typed at
+ * 13.3 s; at 15.0 s the order showed a "FREE" tag, "Order discount FREE
+ * -$38.99" and a $0.00 total; the attempt was judged a success at 16.4 s and
+ * the run stopped there. At 20.6 s the tag was gone, and at 21.8-22.3 s the
+ * total was back at $38.99. The card still said "You saved $38.99". The store
+ * reversed the code 5.6 s after applying it, about 5.9 s after our verdict.
+ *
+ * So before a credit becomes a saving on the card, a "worked" report or a
+ * saved box, the total and the order's named code are read again. The full
+ * window covers that timeline with room to spare, and is spent only on a $0
+ * total or a drop of at least CARAMEL_SETTLE_LARGE_DROP of the total: an
+ * ordinary drop gets the short window, so most stores wait about a second
+ * more. A reversal must show on two reads in a row, so a summary caught
+ * mid-redraw is not taken for one; the window can run one read long for that. */
+export const CARAMEL_SETTLE_FULL_MS = 8000
+export const CARAMEL_SETTLE_SHORT_MS = 1000
+export const CARAMEL_SETTLE_READ_MS = 500
+export const CARAMEL_SETTLE_LARGE_DROP = 0.5
+
+// How long a credit from `from` down to `total` is held (see above).
+export function caramelSettleWindowMs(from, total) {
+    if (!Number.isFinite(from) || !Number.isFinite(total)) {
+        return CARAMEL_SETTLE_SHORT_MS
+    }
+    if (total <= 0) return CARAMEL_SETTLE_FULL_MS
+    return from > 0 && (from - total) / from >= CARAMEL_SETTLE_LARGE_DROP
+        ? CARAMEL_SETTLE_FULL_MS
+        : CARAMEL_SETTLE_SHORT_MS
+}
+
+/* Does a credited code still stand once the store has settled?
+ *
+ * `read()` (may be async) returns { total, named }: the total read the same way
+ * the attempt read it (NaN when it cannot be read), and whether the order still
+ * names the code. Null means nothing could be read this time. The drop is gone
+ * when the total is back at `from` (checked only when `checkTotal`); the code
+ * is gone when the order named it at the credit (`wasNamed`) and no longer
+ * does. Resolves { held, total }: with `checkTotal`, `total` is the last total
+ * read while the credit stood, which is what the saving is measured from. */
+export async function caramelCreditSettles({
+    code,
+    from,
+    total,
+    checkTotal,
+    wasNamed,
+    read,
+    windowMs,
+}) {
+    let last = total
+    let strikes = 0
+    let waited = 0
+    while (waited < windowMs || strikes > 0) {
+        // A cancelled run reports nothing and leaves the code where it is.
+        if (globalThis._caramelCancelled) break
+        await sleep(CARAMEL_SETTLE_READ_MS)
+        waited += CARAMEL_SETTLE_READ_MS
+        const now = await read()
+        if (!now) continue
+        const dropGone =
+            checkTotal && Number.isFinite(now.total) && now.total >= from - 0.01
+        const codeGone = wasNamed && !now.named
+        if (dropGone || codeGone) {
+            strikes++
+            if (strikes >= 2) {
+                log('AUTO_INSERT_CREDIT_REVERSED', {
+                    code,
+                    credited: total,
+                    total: now.total,
+                    waited,
+                    reason: dropGone ? 'total back up' : 'code gone',
+                })
+                return { held: false, total: now.total }
+            }
+        } else {
+            strikes = 0
+            if (checkTotal && Number.isFinite(now.total)) last = now.total
+        }
+    }
+    return { held: true, total: last }
 }
 
 export async function startApplyingCoupons(rec, options) {
@@ -462,6 +551,48 @@ export async function startApplyingCoupons(rec, options) {
                         got: confirmed.total_price,
                     })
                 }
+            }
+        }
+        /* The credit must still stand once the store settles (T-11366, see
+         * caramelCreditSettles). Here the confirmation above is already a
+         * second read of the cart, which is all the short window would add,
+         * so only a $0 order or a large drop is held for the full window. */
+        if (
+            bestCode &&
+            caramelSettleWindowMs(_cart0.total_price, confirmed.total_price) ===
+                CARAMEL_SETTLE_FULL_MS
+        ) {
+            const winner = bestCode
+            const settled = await caramelCreditSettles({
+                code: winner,
+                from: _cart0.total_price,
+                total: confirmed.total_price,
+                checkTotal: true,
+                wasNamed: _linkCartNamesCode(confirmed, winner),
+                read: async () => {
+                    const cart = await probeCartJson()
+                    if (!cart) return null
+                    return {
+                        total: _linkCartHoldsTheSaving(cart, winner)
+                            ? cart.total_price
+                            : _cart0.total_price,
+                        named: _linkCartNamesCode(cart, winner),
+                    }
+                },
+                windowMs: CARAMEL_SETTLE_FULL_MS,
+            })
+            if (settled.held) {
+                confirmed = { ...confirmed, total_price: settled.total }
+            } else {
+                // The same card as a winner that would not go back on: we
+                // watched it work, and the store did not keep it.
+                lostWinner = winner
+                lostWinnerSave = _caramelCartMoney(
+                    _cart0,
+                    _cart0.total_price - bestTotal,
+                )
+                bestCode = null
+                confirmed = null
             }
         }
         if (bestCode) {
@@ -1083,11 +1214,6 @@ export async function startApplyingCoupons(rec, options) {
             }
         }
 
-        // The total dropped through a box the finder found on a store with no
-        // config: that box is saved as the store's config
-        // (coupon-box-discovery.js; a no-op for any other box).
-        if (res.success) caramelLoadedFinder()?.caramelFinderConfirmed(rec)
-
         /* A code the store ACCEPTED that took nothing off a total we can read
          * is not the win that ends the run (T-9443).
          *
@@ -1132,6 +1258,59 @@ export async function startApplyingCoupons(rec, options) {
                 continue
             }
         }
+
+        // The credit must still stand once the store settles (T-11366, see
+        // caramelCreditSettles): nothing below, the box save, the "worked"
+        // report or the card, runs for a code the store took back.
+        if (res.success) {
+            const credited = landed ? landed.code : code
+            const from = hasPriceCfg
+                ? caramelBaselineFor(res.newTotal, originalPrices)
+                : NaN
+            const checkTotal =
+                Number.isFinite(res.newTotal) &&
+                Number.isFinite(from) &&
+                res.newTotal < from - 0.01
+            const wasNamed = !!caramelCodeOnOrder(rec, [credited])
+            if (checkTotal || wasNamed) {
+                const settled = await caramelCreditSettles({
+                    code: credited,
+                    from,
+                    total: res.newTotal,
+                    checkTotal,
+                    wasNamed,
+                    read: () => {
+                        const t = rec.caramelFound
+                            ? _caramelFinderTotalAfter(rec, credited)
+                            : NaN
+                        return {
+                            total: Number.isFinite(t)
+                                ? t
+                                : hasPriceCfg
+                                  ? movedTotalNow()
+                                  : NaN,
+                            named: !!caramelCodeOnOrder(rec, [credited]),
+                        }
+                    },
+                    windowMs: caramelSettleWindowMs(from, res.newTotal),
+                })
+                if (settled.held) {
+                    res.newTotal = settled.total
+                } else {
+                    // The store took it back: a failed attempt like any other,
+                    // and the loop goes on to the next code.
+                    res.success = false
+                    res.newTotal = settled.total
+                    lastVerdictTotal = settled.total
+                    landed = null
+                }
+            }
+        }
+
+        // The total dropped through a box the finder found on a store with no
+        // config, and stayed down: that box is saved as the store's config
+        // (coupon-box-discovery.js; a no-op for any other box).
+        if (res.success) caramelLoadedFinder()?.caramelFinderConfirmed(rec)
 
         if (res.success) {
             // Real success — keep this code applied, stop here.

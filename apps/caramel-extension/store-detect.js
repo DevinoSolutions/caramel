@@ -34,6 +34,7 @@ import {
 } from './code-capture.js'
 import {
     _getTriedCodes,
+    caramelCodeOnOrder,
     caramelPostNavigationVerdict,
     caramelSinkTriedCodes,
     probeCartJson,
@@ -44,7 +45,12 @@ import {
     caramelLoadFinder,
 } from './coupon-box-finder-loader.js'
 import { fetchCoupons } from './coupon-fetch.js'
-import { reportOutcome, startApplyingCoupons } from './coupon-runner.js'
+import {
+    caramelCreditSettles,
+    caramelSettleWindowMs,
+    reportOutcome,
+    startApplyingCoupons,
+} from './coupon-runner.js'
 import {
     caramelBaselineFor,
     caramelClaimRunHop,
@@ -979,21 +985,44 @@ async function _resumePendingSubmit() {
     // A finder that does not load reads no total, so no saving is measured.
     // The finder is loaded here whatever the flag says now: pending.finder is
     // set only when the page before this navigation ran the finder.
-    const now = pending.finder
-        ? ((await caramelLoadFinder())?.caramelFinderReadTotal(
-              document,
-              pending.finder,
-              pending.finderRow,
-          ) ?? NaN)
-        : rec && rec.priceContainer
-          ? getPrice(rec.priceContainer, { returnLargest: true })
-          : NaN
+    const finder = pending.finder ? await caramelLoadFinder() : null
+    const readTotal = () =>
+        pending.finder
+            ? (finder?.caramelFinderReadTotal(
+                  document,
+                  pending.finder,
+                  pending.finderRow,
+              ) ?? NaN)
+            : rec && rec.priceContainer
+              ? getPrice(rec.priceContainer, { returnLargest: true })
+              : NaN
+    let now = readTotal()
     // Same tightest-defensible-baseline rule the in-page path uses, against the
     // prices captured before the submit — it can never overstate a saving.
     const baseline = caramelBaselineFor(now, pending.prices)
-    const saved =
+    let saved =
         Number.isFinite(now) && Number.isFinite(baseline) ? baseline - now : NaN
-    const measured = Number.isFinite(saved) && saved > 0
+    let measured = Number.isFinite(saved) && saved > 0
+
+    // The saving must still stand once the store settles (T-11366, see
+    // caramelCreditSettles in coupon-runner.js) before the card, the "worked"
+    // report or the box save. A drop the store takes back is not a win, and
+    // the run goes on below as for any code that did not win.
+    if (measured) {
+        const orderNames = () => !!caramelCodeOnOrder(rec || {}, [pending.code])
+        const settled = await caramelCreditSettles({
+            code: pending.code,
+            from: baseline,
+            total: now,
+            checkTotal: true,
+            wasNamed: orderNames(),
+            read: () => ({ total: readTotal(), named: orderNames() }),
+            windowMs: caramelSettleWindowMs(baseline, now),
+        })
+        now = settled.total
+        saved = baseline - now
+        measured = settled.held && Number.isFinite(saved) && saved > 0
+    }
 
     log('AUTO_INSERT_RESUMED', {
         code: pending.code,

@@ -125,10 +125,16 @@ beforeEach(() => {
     carts = {}
     globalThis._caramelCancelled = false
     stubs.updateTestingModal = async () => {}
-    stubs.probeCartJson = async () => cart(BASE)
+    // The cart reads back whatever the last code sent left on it, so a code
+    // the store keeps is still there when the run reads the cart again
+    // (T-11366: a $0 order is read again before it is credited).
+    let held = cart(BASE)
+    stubs.probeCartJson = async () => held
     stubs.applyViaDiscountLink = async code => {
         linkCalls.push(code)
-        return carts[code] ?? null
+        const after = carts[code] ?? null
+        if (after) held = after
+        return after
     }
     // The metadata deliberately disagrees with reality, exactly as it did on
     // personalabs: the loud code is the weak one.

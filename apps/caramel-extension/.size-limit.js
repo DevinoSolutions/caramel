@@ -193,7 +193,12 @@ module.exports = [
         // the codes go in at checkout and the finder asks once more there,
         // and on the discount-link path a total that falls because the cart
         // emptied is not credited as a saving. Measured 100.7 kB.
-        limit: '101 KB',
+        // 2026-10-31 (T-11366), raised 101 -> 102.5 kB: a credited code is
+        // held until the store settles, and its total and named code are read
+        // again before the card, the "worked" report or the box save (the DOM
+        // loop, the late-code credit, the discount-link path and the page a
+        // submit reloads to). Measured 102.35 kB.
+        limit: '102.5 KB',
         brotli: false,
     },
     {
