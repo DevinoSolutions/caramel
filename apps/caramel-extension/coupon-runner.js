@@ -211,6 +211,8 @@ export const CARAMEL_SETTLE_FULL_MS = 8000
 export const CARAMEL_SETTLE_SHORT_MS = 1000
 export const CARAMEL_SETTLE_READ_MS = 500
 export const CARAMEL_SETTLE_LARGE_DROP = 0.5
+// How long a run that found nothing waits before its last look (T-11601).
+const CARAMEL_LAST_LOOK_MS = 1000
 
 // How long a credit from `from` down to `total` is held (see above).
 export function caramelSettleWindowMs(from, total) {
@@ -1020,6 +1022,18 @@ export async function startApplyingCoupons(rec, options) {
         )
         return moved.length ? Math.max(...moved) : largest
     }
+    // The order total as the settle check reads it, NaN when none can be read.
+    const orderTotalNow = code => {
+        const t = rec.caramelFound ? _caramelFinderTotalAfter(rec, code) : NaN
+        return Number.isFinite(t) ? t : hasPriceCfg ? movedTotalNow() : NaN
+    }
+    // Codes the order named before we typed any: never ours to credit
+    // (T-11601). And codes the store took that moved a readable total by
+    // nothing (AUTO_INSERT_ZERO_EFFECT): never the cause of a later drop.
+    const namedAtStart = new Set(
+        coupons.map(c => c.code).filter(c => caramelCodeOnOrder(rec, [c])),
+    )
+    const acceptedFlat = new Set()
 
     // A store whose submit navigates may send it late (T-9245, see
     // caramelWatchPageLeaving): once this page is leaving, the code in flight
@@ -1137,9 +1151,10 @@ export async function startApplyingCoupons(rec, options) {
          * arrived without a discount, the last failed code that can still be
          * on the order and was submitted while the total still read the
          * starting total. The total must hold for two reads; a zero total
-         * counts only when the order names the code. Nothing else credits a
-         * code: a total that dropped with no such refusal, or beside a plain
-         * "invalid code", is left as it was. */
+         * counts only when the order names the code. Nothing else in the loop
+         * credits a code: a total that dropped with no such refusal, or beside
+         * a plain "invalid code", is left as it was (the last look after the
+         * loop credits only a named code, or a drop after the last code). */
         let landed = null
         if (
             !res.success &&
@@ -1248,6 +1263,7 @@ export async function startApplyingCoupons(rec, options) {
                     total: res.newTotal,
                     reason: 'the store accepted the code but the total did not change — trying the next code',
                 })
+                acceptedFlat.add(code)
                 await removeAppliedCoupon(rec, {
                     code,
                     hadPreExisting: preExistingDiscount,
@@ -1354,6 +1370,26 @@ export async function startApplyingCoupons(rec, options) {
             break
         }
 
+        /* The order names this code as applied and no total can weigh it
+         * (T-11601). gant.co.uk (SFCC, no config, 2026-10-31): GB14 folded the
+         * box away behind "GB14 ... Remove" and a -£10 line, the attempt read
+         * nothing, and the run typed six more codes into a box that was gone.
+         * Stop here: the last look after the loop credits it once it holds. */
+        if (
+            !namedAtStart.has(code) &&
+            !(
+                Number.isFinite(original) &&
+                Number.isFinite(orderTotalNow(code))
+            ) &&
+            caramelCodeOnOrder(rec, [code])
+        ) {
+            log('AUTO_INSERT_NAMED_UNMEASURED', {
+                code,
+                reason: 'the order shows this code applied and no total can be read — stopping here',
+            })
+            break
+        }
+
         // Apply FAILED. Decide what cleanup is needed before next attempt:
         //   - If the cart visibly accepted the code (`committed`) but an error
         //     showed up → remove that pending coupon so the next try starts
@@ -1447,6 +1483,93 @@ export async function startApplyingCoupons(rec, options) {
     if (leaving.isLeaving()) await holdForNavigation({ recordHeld: false })
     leaving.stop()
     await caramelEndRun()
+
+    /* One more look at the order before the run ends with nothing (T-11601).
+     *
+     * The card said "Auto-apply didn't stick" over a code that was saving the
+     * shopper money, on two stores for two reasons (1.4.30 and 1.4.31,
+     * 2026-10-31). gant.co.uk: no total could be read, so GB14's -£10 was never
+     * seen (AUTO_INSERT_NAMED_UNMEASURED above). store.franklinplanner.com
+     * (BigCommerce): FPBDAY took $17.95 to $14.36 after its attempt was judged,
+     * and the time budget ended the run.
+     *
+     * After a short wait the order is read twice. Credited, once the store has
+     * settled (T-11366):
+     *   · a tried code the order names, when the total fell below the starting
+     *     total (and held across both reads), or when no total can weigh it —
+     *     then the card names the code and claims no amount;
+     *   · else, on a cart that arrived without a discount, the LAST code tried,
+     *     when the total fell after its own wait: it was submitted at the
+     *     starting total, the store did not answer it in words, and no code
+     *     came after it to own the drop.
+     * A total that did not move, a zero total the order does not explain, a
+     * code the order named before we started, or a code the store took for
+     * nothing (acceptedFlat) credits nothing. */
+    if (!bestCode && triedCodes.length && !globalThis._caramelCancelled) {
+        await sleep(CARAMEL_LAST_LOOK_MS)
+        const named = caramelCodeOnOrder(
+            rec,
+            triedCodes.filter(
+                c => !namedAtStart.has(c) && !acceptedFlat.has(c),
+            ),
+        )
+        const first = orderTotalNow(named)
+        await sleep(CARAMEL_SETTLE_READ_MS)
+        const now = orderTotalNow(named)
+        const weighable = Number.isFinite(original) && Number.isFinite(now)
+        const dropped =
+            weighable &&
+            Math.abs(now - first) < 0.01 &&
+            now < original - 0.01 &&
+            (now > 0 || !!named)
+        const last = failedTries.at(-1)
+        const late = named
+            ? dropped || !weighable
+                ? coupons.find(c => c.code === named)
+                : null
+            : dropped &&
+                !preExistingDiscount &&
+                last?.code === triedCodes.at(-1) &&
+                last.onOrder &&
+                !(last.totalAtSubmit < original - 0.01)
+              ? last
+              : null
+        if (late) {
+            const from = dropped ? caramelBaselineFor(now, originalPrices) : NaN
+            const checkTotal = Number.isFinite(from) && now < from - 0.01
+            log('AUTO_INSERT_LAST_LOOK_CREDIT', {
+                code: late.code,
+                total: now,
+                named: !!named,
+                reason: dropped
+                    ? 'the total fell after the code was judged'
+                    : 'the order shows the code applied and no total can be read',
+            })
+            const settled = await caramelCreditSettles({
+                code: late.code,
+                from,
+                total: now,
+                checkTotal,
+                wasNamed: !!named,
+                read: () => ({
+                    total: orderTotalNow(late.code),
+                    named: !!caramelCodeOnOrder(rec, [late.code]),
+                }),
+                windowMs: caramelSettleWindowMs(from, now),
+            })
+            if (settled.held && !globalThis._caramelCancelled) {
+                caramelLoadedFinder()?.caramelFinderConfirmed(rec)
+                const diff = checkTotal
+                    ? caramelBaselineFor(settled.total, originalPrices) -
+                      settled.total
+                    : 0
+                bestCode = late.code
+                bestId = late.id
+                bestSave = diff > 0 ? diff : 0
+                bestSaveUnmeasurable = !(diff > 0)
+            }
+        }
+    }
 
     if (globalThis._caramelCancelled) {
         log('AUTO_INSERT_STOP', { result: 'cancelled', t: performance.now() })
