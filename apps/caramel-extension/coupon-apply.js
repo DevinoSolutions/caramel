@@ -435,6 +435,132 @@ export function caramelQuoteIsAttributable(quote, priorText) {
     return !_caramelNormalizeQuote(priorText).includes(q)
 }
 
+/* What the store drew after we submitted, for a box read like a found one
+ * (_caramelReadsLikeFound): a refusal it gave an earlier code and puts up
+ * again is its answer to this one, even in the very words already on the page.
+ * fullsource.com, 1.4.30 (2026-10-31, T-11368): "This coupon code has expired
+ * or is invalid" stayed up between codes, so from the third code on the text
+ * was "already there", each refused code waited out the full 10s, and the run
+ * budget was gone before FREESHIP, the code that worked.
+ *
+ * Drawn again means: the node saying it (or one around it) was inserted, its
+ * text was set (even to the same words), or it was shown after being hidden
+ * (hidden, aria-hidden, display/visibility, a hiding class, a dialog's open).
+ * Any other attribute change (a form's "loading" class) is not an answer.
+ * Only what happens from arm() on counts: applyCoupon arms it right before its
+ * click, so a store that re-draws the box as the code is typed does not answer
+ * for it. One watch at a time: a new snapshot stops the last one.
+ *
+ * Only words the store already gave as its answer count
+ * (_caramelStoreAnswers): a store that re-draws its whole promo section brings
+ * its standing hint along ("Enter a valid promo code to get free shipping"),
+ * and that hint is furniture however often it is drawn. */
+let _caramelRedraws = null
+// Every refusal this page gave as its answer to a code, normalised.
+const _caramelStoreAnswers = new Set()
+function _caramelGaveBefore(q) {
+    for (const a of _caramelStoreAnswers)
+        if (q.includes(a) || a.includes(q)) return true
+    return false
+}
+const _CARAMEL_HIDDEN_BY = {
+    hidden: v => v !== null,
+    'aria-hidden': v => v === 'true',
+    open: v => v === null,
+    style: v => /display\s*:\s*none|visibility\s*:\s*hidden/i.test(v || ''),
+    class: v =>
+        String(v || '')
+            .split(/\s+/)
+            .some(c => /^(.*[-_])?(hidden|hide|invisible)$|^d-none$/i.test(c)),
+}
+function _caramelWatchRedraws(on) {
+    _caramelRedraws?.stop()
+    _caramelRedraws = null
+    if (
+        !on ||
+        typeof MutationObserver === 'undefined' ||
+        !document.documentElement
+    )
+        return null
+    const touched = new Set()
+    const note = node => {
+        const el = node?.nodeType === 1 ? node : node?.parentElement
+        // Our own prompt and cards are never the store's answer.
+        if (el && touched.size < 1000 && !el.closest('[id^="caramel"]'))
+            touched.add(el)
+    }
+    const take = records => {
+        for (const r of records) {
+            if (r.type === 'childList') r.addedNodes.forEach(note)
+            else if (r.type === 'characterData') note(r.target)
+            else {
+                const hiddenBy = _CARAMEL_HIDDEN_BY[r.attributeName]
+                if (
+                    hiddenBy(r.oldValue) &&
+                    !hiddenBy(r.target.getAttribute(r.attributeName))
+                )
+                    note(r.target)
+            }
+        }
+    }
+    const observer = new MutationObserver(take)
+    observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+        attributeOldValue: true,
+        attributeFilter: Object.keys(_CARAMEL_HIDDEN_BY),
+    })
+    const watch = {
+        arm() {
+            observer.takeRecords()
+            touched.clear()
+        },
+        // Does a shown element drawn since arm() say `quote`?
+        saysAgain(quote) {
+            take(observer.takeRecords())
+            const q = _caramelNormalizeQuote(quote)
+            if (!q || !_caramelGaveBefore(q)) return false
+            // The words without spaces, matched against textContent first:
+            // it needs no layout, and this runs on every poll of the wait.
+            const bare = q.replace(/\s/g, '')
+            const holds = el =>
+                (el.textContent || '')
+                    .replace(/\s/g, '')
+                    .toLowerCase()
+                    .includes(bare)
+            for (const el of touched)
+                if (
+                    el.isConnected &&
+                    holds(el) &&
+                    _isVisible(el) &&
+                    _caramelNormalizeQuote(
+                        el.innerText ?? el.textContent,
+                    ).includes(q)
+                )
+                    return true
+            return false
+        },
+        stop() {
+            observer.disconnect()
+            touched.clear()
+            if (_caramelRedraws === watch) _caramelRedraws = null
+        },
+    }
+    _caramelRedraws = watch
+    return watch
+}
+
+/* caramelQuoteIsAttributable, or the store drew the quote again after we
+ * submitted (see _caramelWatchRedraws). */
+function _caramelSaidSinceSubmit(quote, priorText) {
+    return (
+        caramelQuoteIsAttributable(quote, priorText) ||
+        !!_caramelRedraws?.saysAgain(quote)
+    )
+}
+
 const ERROR_WORDS_RE =
     /\b(invalid|expired|not valid|doesn'?t apply|cannot be applied|cannot apply|already used|no longer|reached the limit|minimum|coupon code is required|wrong code)\b/i
 
@@ -707,7 +833,7 @@ function _caramelRejectionSentences(scope) {
 function _caramelSmallestSaying(scope, priorText) {
     const texts = _caramelRejectionSentences(scope)
     const best =
-        texts.find(t => caramelQuoteIsAttributable(t, priorText)) || texts[0]
+        texts.find(t => _caramelSaidSinceSubmit(t, priorText)) || texts[0]
     return best && best.length <= 200 ? best : null
 }
 
@@ -792,7 +918,7 @@ function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
             // (measured live 2026-10-22).
             if (readsLikeFound) {
                 const said = _caramelSmallestSaying(scope, priorText)
-                if (said && caramelQuoteIsAttributable(said, priorText))
+                if (said && _caramelSaidSinceSubmit(said, priorText))
                     return said
                 standing ??= said
                 scope = scope.parentElement
@@ -868,7 +994,7 @@ function _caramelPageAlertSaying(alertsBefore) {
         if (
             said &&
             _caramelNamesCoupon(said) &&
-            caramelQuoteIsAttributable(said, before)
+            _caramelSaidSinceSubmit(said, before)
         )
             return said
     }
@@ -954,6 +1080,9 @@ export function caramelSnapshotCart(rec, code = '') {
     const alertsBefore = _caramelReadsLikeFound(rec)
         ? _caramelPageAlertsNow()
         : null
+    // Watched from here: the shopper's click (code-capture.js) is already the
+    // submit. applyCoupon re-arms it at its own click.
+    const redraws = _caramelWatchRedraws(_caramelReadsLikeFound(rec))
     return {
         hasPriceCfg,
         original,
@@ -965,6 +1094,7 @@ export function caramelSnapshotCart(rec, code = '') {
         errorBaseline,
         priorAreaText,
         alertsBefore,
+        redraws,
     }
 }
 
@@ -1120,7 +1250,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
             const said = _caramelRejectionSentences(answerEl)
             return remarked
                 ? said
-                      .filter(s => caramelQuoteIsAttributable(s, pageBefore))
+                      .filter(s => _caramelSaidSinceSubmit(s, pageBefore))
                       .join(' ¶ ')
                 : said.join(' ¶ ')
         }
@@ -1133,10 +1263,14 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                     const now = rejections()
                     // "Promo code applied. Cannot be combined with other
                     // offers." is an acceptance with a caveat: leave the
-                    // verdict to the total.
+                    // verdict to the total. The same words drawn again are
+                    // the store's answer too (_caramelWatchRedraws).
                     if (
                         now &&
-                        now !== before &&
+                        (now !== before ||
+                            _caramelRejectionSentences(answerEl).some(
+                                s => !!_caramelRedraws?.saysAgain(s),
+                            )) &&
                         !_caramelSaysAccepted(answerEl.innerText, shownBefore)
                     )
                         return 'answered'
@@ -1164,7 +1298,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                         priorAreaText,
                         null,
                     )
-                    if (said && caramelQuoteIsAttributable(said, priorAreaText))
+                    if (said && _caramelSaidSinceSubmit(said, priorAreaText))
                         return 'answered'
                 }
                 return 'answer-timeout'
@@ -1245,7 +1379,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                         priorAreaText,
                         alertsBefore,
                     )
-                    if (said && caramelQuoteIsAttributable(said, priorAreaText))
+                    if (said && _caramelSaidSinceSubmit(said, priorAreaText))
                         return via
                     if (
                         left() <= 0 ||
@@ -1339,7 +1473,14 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     const answeredByRow = !!rowAnswer
     // Quotable only if the store said it BECAUSE of us (see
     // _caramelCouponAreaText). Detection above is deliberately untouched.
-    const errorIsNew = caramelQuoteIsAttributable(errorMsg, priorAreaText)
+    // Or the store drew it again for this code (_caramelWatchRedraws): the
+    // last read of the watch, which ends here.
+    const errorIsNew = _caramelSaidSinceSubmit(errorMsg, priorAreaText)
+    if (snapshot.redraws) {
+        snapshot.redraws.stop()
+        if (errorIsNew && !answeredByRow)
+            _caramelStoreAnswers.add(_caramelNormalizeQuote(errorMsg))
+    }
     if (errorMsg && !errorIsNew) {
         // opts.redact: a SHOPPER-typed code (code-capture.js) never reaches a
         // log line, and neither does the page text, which can quote it. The
@@ -1351,7 +1492,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                 : {
                       code,
                       text: String(errorMsg).slice(0, 140),
-                      reason: 'this text was already on the page before we submitted — it is the store’s furniture, not its verdict',
+                      reason: 'this text was already on the page before we submitted and the store did not draw it again — it is the store’s furniture, not its verdict',
                   },
         )
     }
@@ -1614,6 +1755,9 @@ export async function applyCoupon(code, rec) {
                 if (applyBtn.disabled)
                     log('AUTO_INSERT_APPLY_STILL_DISABLED', { code })
             }
+            // What the store draws from the click on answers this code; what
+            // it drew as the code was typed does not.
+            snapshot.redraws?.arm()
             try {
                 const r = applyBtn.getBoundingClientRect()
                 const cx = r.x + r.width / 2
