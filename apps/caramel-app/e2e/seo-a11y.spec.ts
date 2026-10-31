@@ -33,6 +33,11 @@ test.describe('SEO & Accessibility Basics', () => {
         await expect(page).toHaveTitle(/privacy|caramel/i)
     })
 
+    test('terms page has correct title', async ({ page }) => {
+        await page.goto('/terms')
+        await expect(page).toHaveTitle(/terms of service/i)
+    })
+
     test('images have alt text', async ({ page }) => {
         await page.goto('/')
 

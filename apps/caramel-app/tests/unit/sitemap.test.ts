@@ -81,6 +81,7 @@ describe('sitemap.ts — static routes', () => {
             '/pricing',
             '/support',
             '/privacy',
+            '/terms',
         ]) {
             expect(urls, `missing ${path}`).toContain(`${ORIGIN}${path}`)
         }
@@ -231,9 +232,10 @@ describe('sitemap.ts — store entries are canonical, lowercase, deduped, policy
         expect(
             urlsOf(entries).some(u => u.startsWith(`${ORIGIN}/coupons/`)),
         ).toBe(false)
-        // 7 marketing routes + /faq + /docs + /compare/coupon-extensions +
-        // /honey-extension + /agent-setup + one page per agent guide
-        expect(entries.length).toBe(12 + AGENT_GUIDES.length)
+        // 8 marketing routes (incl. /terms) + /faq + /docs +
+        // /compare/coupon-extensions + /honey-extension + /agent-setup + one
+        // page per agent guide
+        expect(entries.length).toBe(13 + AGENT_GUIDES.length)
         expect(urlsOf(entries)).toContain(`${ORIGIN}/compare/coupon-extensions`)
         expect(urlsOf(entries)).toContain(`${ORIGIN}/honey-extension`)
     })
