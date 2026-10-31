@@ -198,7 +198,13 @@ module.exports = [
         // again before the card, the "worked" report or the box save (the DOM
         // loop, the late-code credit, the discount-link path and the page a
         // submit reloads to). Measured 102.35 kB.
-        limit: '102.5 KB',
+        // 2026-10-31 (T-11601), raised 102.5 -> 105.5 kB: a run that found
+        // nothing looks at the order once more before saying so, and credits
+        // a code that landed after it was judged; the order's applied code is
+        // read on any checkout (a row with its own remove control, or a
+        // discount row with a negative amount), not only Shopify's tags.
+        // Measured 105.22 kB.
+        limit: '105.5 KB',
         brotli: false,
     },
     {

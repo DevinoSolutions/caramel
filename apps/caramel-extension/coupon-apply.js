@@ -621,6 +621,117 @@ export function caramelRefusedForExistingDiscount(text) {
 // button's label is read too, as it names the code on its own.
 const _CARAMEL_SHOPIFY_REMOVE_CODE =
     'button[data-event-name="remove_discount_code"]'
+
+/* Any other checkout (T-11601): the code is named in a row of the order that
+ * either carries its own remove control, or speaks of a discount beside a
+ * negative amount. gant.co.uk (SFCC, 2026-10-31) showed "GB14 - As a
+ * subscriber ... Remove" with the line at -£10; store.franklinplanner.com
+ * (BigCommerce) "Coupon discount Remove -$3.59" over the code. Never a row in
+ * a cart line, a gift card, a row that refuses the code, a store notice
+ * (alert or error box), a form holding a field (our own input box), or our
+ * own UI (shadow roots are not walked; a light-DOM host is skipped). */
+const _CARAMEL_ROW_MAX_TEXT = 400
+const _CARAMEL_ROW_MAX_UP = 5
+const _CARAMEL_REMOVE_LABEL_RE = /\b(remove|delete)\b/i
+// A bare × counts only when the control's own markup says it removes (SFRA's
+// button.remove-coupon): a store's banner closes with one too.
+const _CARAMEL_REMOVE_GLYPH_RE = /^[×✕✖✗⨯x]$/i
+const _CARAMEL_CLOSE_LABEL_RE = /\b(close|dismiss|hide)\b/i
+const _CARAMEL_ORDER_DISCOUNT_RE =
+    /\b(discount|coupon|promo(tion)?|voucher|code|sav(e|ed|ing|ings)|reduction|offer|off)\b/i
+const _CARAMEL_NEGATIVE_AMOUNT_RE =
+    /(?:^|[^\p{L}\p{N}])[-−–]\s?(?:[A-Z]{0,3}\s?)?[$£€¥₹]?\s?\d/u
+const _CARAMEL_NOTICE_SEL =
+    '[role="alert"], [class*="error" i], [class*="alert" i]'
+const _CARAMEL_FORM_FIELD_SEL = 'input:not([type="hidden"]), textarea, select'
+
+function _caramelIsRemoveControl(el) {
+    if (!_isVisible(el)) return false
+    const label = (
+        el.getAttribute('aria-label') ||
+        el.getAttribute('title') ||
+        el.innerText ||
+        el.textContent ||
+        ''
+    ).trim()
+    const attrs = [...el.attributes].map(a => a.value).join(' ')
+    return (
+        (_CARAMEL_REMOVE_LABEL_RE.test(label) ||
+            (_CARAMEL_REMOVE_GLYPH_RE.test(label) &&
+                _CARAMEL_REMOVE_LABEL_RE.test(attrs))) &&
+        !_CARAMEL_CLOSE_LABEL_RE.test(label) &&
+        !/gift/i.test(attrs)
+    )
+}
+
+// Is `start` (an element whose own text holds `code`) inside a row of the
+// order that shows the code applied?
+function _caramelOrderRowShows(start, code, couponInput) {
+    if (start.closest('[id^="caramel"]')) return false
+    const notice = start.closest(_CARAMEL_NOTICE_SEL)
+    if (
+        notice &&
+        (notice.innerText ?? notice.textContent ?? '').length <=
+            _CARAMEL_ROW_MAX_TEXT
+    )
+        return false
+    let el = start
+    for (let up = 0; up < _CARAMEL_ROW_MAX_UP && el; up++) {
+        if (el === document.body) return false
+        const text = (el.innerText ?? el.textContent ?? '').trim()
+        if (text.length > _CARAMEL_ROW_MAX_TEXT) return false
+        if ([...el.querySelectorAll(_CARAMEL_FORM_FIELD_SEL)].some(_isVisible))
+            return false
+        if (
+            /gift ?card/i.test(text) ||
+            caramelRowReadsRejected(el) ||
+            _caramelRefusesTheCode(text, code)
+        )
+            return false
+        const removes = [...el.querySelectorAll(_CARAMEL_CONTROLS)].filter(
+            _caramelIsRemoveControl,
+        )
+        if (removes.some(b => !_caramelInCartLine(b, [b], couponInput)))
+            return true
+        if (
+            _CARAMEL_ORDER_DISCOUNT_RE.test(text) &&
+            _CARAMEL_NEGATIVE_AMOUNT_RE.test(text)
+        )
+            return true
+        el = el.parentElement
+    }
+    return false
+}
+
+// The codes of `codes` (upper case) that some order row shows applied.
+function _caramelCodesInOrderRows(rec, codes) {
+    const want = new Set(codes.map(c => String(c).toUpperCase()))
+    const shown = new Set()
+    if (!want.size || !document.body) return shown
+    const couponInput = pickBestMatch(rec?.couponInput)
+    const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+    )
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const parent = n.parentElement
+        if (!parent || parent.closest('script, style, noscript, template'))
+            continue
+        for (const word of n.textContent
+            .toUpperCase()
+            .split(/[^\p{L}\p{N}_-]+/u)) {
+            if (
+                want.has(word) &&
+                !shown.has(word) &&
+                _isVisible(parent) &&
+                _caramelOrderRowShows(parent, word, couponInput)
+            )
+                shown.add(word)
+        }
+    }
+    return shown
+}
+
 export function caramelCodeOnOrder(rec, codes) {
     const words = new Set(
         [
@@ -645,6 +756,9 @@ export function caramelCodeOnOrder(rec, codes) {
     )
     for (let i = codes.length - 1; i >= 0; i--)
         if (words.has(String(codes[i]).toUpperCase())) return codes[i]
+    const rows = _caramelCodesInOrderRows(rec, codes)
+    for (let i = codes.length - 1; i >= 0; i--)
+        if (rows.has(String(codes[i]).toUpperCase())) return codes[i]
     return null
 }
 
