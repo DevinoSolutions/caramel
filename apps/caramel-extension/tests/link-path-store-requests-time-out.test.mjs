@@ -250,8 +250,18 @@ describe('a store request that is never answered', () => {
         )
 
         expect(await runEnds()).toBe(true)
-        expect(stubs.wins.map(w => w.code)).toEqual(['LATE15'])
-        expect(stubs.wins[0].id).toBe('late15')
+        // The handoff is what the reloaded page records in savings history
+        // (caramelRecordSaving) and names on the card, so all four fields
+        // have to be the live code's: its name, its catalog id, and the
+        // amount read off the cart.
+        expect(stubs.wins).toEqual([
+            expect.objectContaining({
+                code: 'LATE15',
+                id: 'late15',
+                saved: 15,
+                currency: 'USD',
+            }),
+        ])
         expect(cart.read().total_discount).toBe(1500)
     }, 15000)
 
