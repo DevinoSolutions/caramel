@@ -219,7 +219,12 @@ module.exports = [
         // applied code is read on any checkout (a row with its own remove
         // control, or a discount row with a negative amount), not only
         // Shopify's tags. Measured 107.37 kB.
-        limit: '107.5 KB',
+        // 2026-11-02 (T-12408), raised 107.5 -> 107.8 kB: when the
+        // discount-link path read the cart total after every code it tried
+        // and none fell, the no-win card says so ("We tried N codes on your
+        // cart and none lowered your total") instead of blaming auto-apply.
+        // Measured 107.70 kB.
+        limit: '107.8 KB',
         brotli: false,
     },
     {
