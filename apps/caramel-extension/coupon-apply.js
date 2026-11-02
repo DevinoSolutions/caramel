@@ -70,8 +70,15 @@ const GENERIC_REMOVE_SELECTORS_SCOPED =
 // deleted cart. If a store genuinely needs a remove button we can't scope, that
 // belongs in its config's `couponRemove`, where it is a deliberate per-store
 // decision rather than a blind default for every store.
+
+// "does not apply" as well as "doesn't apply" (T-13010). BigCommerce's checkout
+// refuses a code with "Coupon does not apply" in an alert beside the box;
+// store.franklinplanner.com, measured live 2026-11-03. Read as no answer at all,
+// every refused code waited out the whole window and the run stopped after two
+// codes (EARLY_PROBE), before FPBDAY, which takes $19.50 to $15.60. The same
+// phrase is in ERROR_WORDS_RE below.
 export const GENERIC_ERROR_TEXT_RE =
-    /\b(invalid|expired|not\s+(valid|applicable|eligible)|limited\s+to|cannot\s+be\s+(applied|redeemed)|doesn'?t\s+apply|no\s+eligible|enter\s+a\s+valid|nicht|ungültig|abgelaufen|expiré|expirado|caducado)\b/i
+    /\b(invalid|expired|not\s+(valid|applicable|eligible)|limited\s+to|cannot\s+be\s+(applied|redeemed)|does(?:n['’]?t|\s+not)\s+apply|no\s+eligible|enter\s+a\s+valid|nicht|ungültig|abgelaufen|expiré|expirado|caducado)\b/i
 // `abgelaufen` / `expiré` / `expirado` / `caducado` are the same word as
 // "expired" in the four European languages our catalogue actually covers, and
 // each one is unambiguous — unlike the bare `nicht` above, they cannot appear in
@@ -628,7 +635,7 @@ function _caramelSaidSinceSubmit(quote, priorText) {
 }
 
 const ERROR_WORDS_RE =
-    /\b(invalid|expired|not valid|doesn'?t apply|cannot be applied|cannot apply|already used|no longer|reached the limit|minimum|coupon code is required|wrong code)\b/i
+    /\b(invalid|expired|not valid|does(?:n['’]?t| not) apply|cannot be applied|cannot apply|already used|no longer|reached the limit|minimum|coupon code is required|wrong code)\b/i
 
 // The text of every innermost SHOWN element under scope that carries a
 // rejection phrase: the store's sentences, without the label or button around

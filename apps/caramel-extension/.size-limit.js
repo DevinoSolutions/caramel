@@ -239,7 +239,12 @@ module.exports = [
         // hold it open, each try and the winner's re-apply have a hard cap,
         // and every /discount/ page body is stopped before the next code.
         // Measured 109.57 kB (+0.68 kB).
-        limit: '109.6 KB',
+        // 2026-11-03 (T-13010), raised 109.6 -> 109.8 kB: a code the served
+        // list holds twice is tried once, and "Coupon does not apply"
+        // (BigCommerce) reads as the store refusing the code, so the run no
+        // longer stops after two tries on store.franklinplanner.com.
+        // Measured 109.71 kB (+0.14 kB).
+        limit: '109.8 KB',
         brotli: false,
     },
     {

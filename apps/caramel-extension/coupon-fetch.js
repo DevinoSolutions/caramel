@@ -173,9 +173,16 @@ export const RESTRICTED_STATUSES = new Set(CaramelCoupons.RESTRICTED_STATUSES)
  * Normalises once, here, so every consumer (apply loop, manual list, copy
  * button) sees the same clean value. Internal spaces are LEFT ALONE — a few
  * stores really do issue codes containing them. Codes left empty are dropped;
- * an empty code can only ever waste an attempt. */
+ * an empty code can only ever waste an attempt.
+ *
+ * A code the list holds twice is kept once, at its first (best-ranked) place,
+ * matched without regard to case as stores match it (T-13010). The catalog can
+ * hold one code under two ids: store.franklinplanner.com served CHEER, TREAT,
+ * SAVE10, SHIP49 and CPT15 twice each (2026-11-02), so "coupon 2 of 8" typed
+ * CHEER again, and the copy list showed TREAT twice. */
 export function _caramelCleanCodes(list) {
     if (!Array.isArray(list)) return list
+    const seen = new Set()
     return list
         .map(c => {
             if (!c || typeof c.code !== 'string') return c
@@ -188,7 +195,14 @@ export function _caramelCleanCodes(list) {
                 .trim()
             return code === c.code ? c : { ...c, code }
         })
-        .filter(c => !c || typeof c.code !== 'string' || c.code.length > 0)
+        .filter(c => {
+            if (!c || typeof c.code !== 'string') return true
+            if (!c.code.length) return false
+            const key = c.code.toUpperCase()
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+        })
 }
 
 /* What a coupon is plausibly worth on THIS cart, in the cart's own money.
