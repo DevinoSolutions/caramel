@@ -45,11 +45,15 @@ export default function DataPrivacySection({
     // that removes it. Counted server-side with the same predicate the scrub
     // matches on, so the button and the route cannot disagree.
     const suggestionsCount = overview?.siteSuggestions.identifyingCount ?? 0
+    // Coupon boxes the extension proposed (T-12391): the delete route deletes
+    // them, so a user whose only data is a proposal must reach it too.
+    const proposalsCount = overview?.couponBoxProposals.count ?? 0
     const nothingToDelete =
         savingsCount === 0 &&
         favoritesCount === 0 &&
         reportsCount === 0 &&
-        suggestionsCount === 0
+        suggestionsCount === 0 &&
+        proposalsCount === 0
 
     async function deleteData() {
         setBusy(true)
@@ -126,6 +130,9 @@ export default function DataPrivacySection({
         reportsCount > 0
             ? `${reportsCount} coupon ${reportsCount === 1 ? 'report' : 'reports'}`
             : null,
+        proposalsCount > 0
+            ? `${proposalsCount} coupon ${proposalsCount === 1 ? 'box' : 'boxes'} your extension found`
+            : null,
     ].filter((clause): clause is string => clause !== null)
 
     return (
@@ -144,8 +151,9 @@ export default function DataPrivacySection({
                     <h3 className={subHeadingClasses}>Download your data</h3>
                     <p className={`${bodyTextClasses} mt-2`}>
                         A single JSON file with your account details, the stores
-                        you follow, your synced savings, and the codes
-                        you&apos;ve reported. Yours to keep.
+                        you follow, your synced savings, the codes you&apos;ve
+                        reported or submitted, your store requests, and the
+                        coupon boxes your extension found. Yours to keep.
                     </p>
                     {/* A plain <a download>: the server sets
                         Content-Disposition, so there is no fetch, no blob, and
@@ -169,9 +177,10 @@ export default function DataPrivacySection({
                         </p>
                         <p className={`${bodyTextClasses} mt-1`}>
                             Removes the stores you follow, your synced savings
-                            history, and your coupon reports, and takes your
-                            details off any store requests you sent. Your
-                            account and sign-in stay. This can&apos;t be undone.
+                            history, your coupon reports and the coupon boxes
+                            your extension found, and takes your details off any
+                            store requests you sent. Your account and sign-in
+                            stay. This can&apos;t be undone.
                         </p>
                         <button
                             type="button"

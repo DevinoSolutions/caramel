@@ -27,6 +27,7 @@ const { prismaMock } = vi.hoisted(() => ({
         favoriteStore: { findMany: vi.fn() },
         couponReport: { findMany: vi.fn() },
         siteSuggestion: { count: vi.fn() },
+        couponBoxProposal: { count: vi.fn() },
     },
 }))
 vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
@@ -83,6 +84,7 @@ function stubEmptyDatabase() {
     prismaMock.favoriteStore.findMany.mockResolvedValue([])
     prismaMock.couponReport.findMany.mockResolvedValue([])
     prismaMock.siteSuggestion.count.mockResolvedValue(0)
+    prismaMock.couponBoxProposal.count.mockResolvedValue(0)
     countCouponsForStoresMock.mockResolvedValue(new Map())
 }
 
@@ -114,6 +116,7 @@ describe('GET /api/account/overview — the zero-data user (the DEFAULT)', () =>
             },
             favorites: [],
             siteSuggestions: { identifyingCount: 0 },
+            couponBoxProposals: { count: 0 },
             reports: {
                 reportCount: 0,
                 // null, NOT 0 — with nothing to confirm there is no
@@ -177,6 +180,24 @@ describe('GET /api/account/overview — the zero-data user (the DEFAULT)', () =>
         expect(prismaMock.siteSuggestion.count).toHaveBeenCalledTimes(1)
         expect(
             (prismaMock.siteSuggestion as Record<string, unknown>).findMany,
+        ).toBeUndefined()
+    })
+
+    it('counts the caller’s coupon box proposals with the SAME predicate the delete route deletes with (T-12391)', async () => {
+        prismaMock.couponBoxProposal.count.mockResolvedValue(3)
+        const body = (await (
+            await GET(overviewRequest())
+        ).json()) as ProfileOverview
+
+        expect(body.couponBoxProposals).toEqual({ count: 3 })
+        // couponBoxProposalIdentityWhere: the delete route's deleteMany gets
+        // this exact where (account-data-delete.test.ts), so a user whose only
+        // data is a proposal is never told "Nothing to delete".
+        expect(prismaMock.couponBoxProposal.count).toHaveBeenCalledWith({
+            where: { userId: USER_ID },
+        })
+        expect(
+            (prismaMock.couponBoxProposal as Record<string, unknown>).findMany,
         ).toBeUndefined()
     })
 

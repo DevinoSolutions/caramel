@@ -41,6 +41,7 @@ function emptyOverview(): ProfileOverview {
         },
         favorites: [],
         siteSuggestions: { identifyingCount: 0 },
+        couponBoxProposals: { count: 0 },
         reports: {
             reportCount: 0,
             confirmedCount: null,
@@ -142,7 +143,20 @@ describe('the danger-zone gate counts store requests', () => {
         expect(deleteButton().disabled).toBe(true)
     })
 
-    it('any ONE of the four counts is enough on its own', () => {
+    it('a user whose ONLY data is a coupon box proposal can reach the route (T-12391)', () => {
+        const overview = emptyOverview()
+        overview.couponBoxProposals.count = 1
+        renderSection(overview)
+
+        const button = deleteButton()
+        expect(button.disabled).toBe(false)
+        fireEvent.click(button)
+        expect(dialogText()).toContain(
+            'This permanently removes 1 coupon box your extension found',
+        )
+    })
+
+    it('any ONE of the five counts is enough on its own', () => {
         const cases: ((o: ProfileOverview) => void)[] = [
             o => {
                 o.savings.eventCount = 1
@@ -161,6 +175,9 @@ describe('the danger-zone gate counts store requests', () => {
             },
             o => {
                 o.siteSuggestions.identifyingCount = 1
+            },
+            o => {
+                o.couponBoxProposals.count = 2
             },
         ]
         // Indexed loop, not `.entries()`: the tsconfig target predates

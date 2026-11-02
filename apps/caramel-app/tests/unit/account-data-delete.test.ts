@@ -9,10 +9,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // Three properties this file exists to keep true:
 //   1. The literal confirmation string is required SERVER-side. The typed
 //      dialog is a second lock, not the only one.
-//   2. It deletes only the caller's rows, and only the three login-features
-//      tables — never the account, never the sync preference. Site suggestions
-//      are the one exception and are SCRUBBED rather than deleted (the store
-//      request is not personal data once the requester is off it).
+//   2. It deletes only the caller's rows, and only the four tables that are
+//      theirs alone (savings, favourites, reports, coupon box proposals) —
+//      never the account, never the sync preference. Site suggestions are the
+//      one exception and are SCRUBBED rather than deleted (the store request
+//      is not personal data once the requester is off it).
 //   3. It is TRANSACTIONAL: a partial failure leaves nothing deleted, which is
 //      what makes the failure toast ("Nothing was removed") a true statement.
 //
@@ -30,6 +31,13 @@ const { prismaMock, transactionMock } = vi.hoisted(() => {
             savingsEvent: { deleteMany: vi.fn(() => ({ op: 'savings' })) },
             favoriteStore: { deleteMany: vi.fn(() => ({ op: 'favorites' })) },
             couponReport: { deleteMany: vi.fn(() => ({ op: 'reports' })) },
+            couponBoxProposal: {
+                deleteMany: vi.fn(() => ({ op: 'proposals' })),
+            },
+            // The shopper-submitted codes live in `coupons`; unlinking them is
+            // a catalog write awaiting the owner (T-12392). Mocked so the "not
+            // called" assertion below is a statement about the route.
+            coupon: { updateMany: vi.fn(), deleteMany: vi.fn() },
             siteSuggestion: {
                 // Typed args, so the `data` key assertion below reads the real
                 // call rather than an untyped `any` the compiler cannot check.
@@ -87,6 +95,7 @@ beforeEach(() => {
         { count: 14 },
         { count: 6 },
         { count: 7 },
+        { count: 2 },
         { count: 3 },
     ])
 })
@@ -97,7 +106,12 @@ describe('POST /api/account/data/delete — the confirmation gate', () => {
 
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({
-            deleted: { savingsEvents: 14, favoriteStores: 6, couponReports: 7 },
+            deleted: {
+                savingsEvents: 14,
+                favoriteStores: 6,
+                couponReports: 7,
+                couponBoxProposals: 2,
+            },
             scrubbed: { siteSuggestions: 3 },
         })
         expect(transactionMock).toHaveBeenCalledTimes(1)
@@ -142,7 +156,7 @@ describe('POST /api/account/data/delete — the confirmation gate', () => {
 })
 
 describe('POST /api/account/data/delete — scope', () => {
-    it('scopes all three deletes to the caller and to nothing else', async () => {
+    it('scopes all four deletes to the caller and to nothing else', async () => {
         await POST(deleteRequest({ confirm: 'DELETE' }))
 
         expect(prismaMock.savingsEvent.deleteMany).toHaveBeenCalledWith({
@@ -152,6 +166,11 @@ describe('POST /api/account/data/delete — scope', () => {
             where: { userId: USER_ID },
         })
         expect(prismaMock.couponReport.deleteMany).toHaveBeenCalledWith({
+            where: { userId: USER_ID },
+        })
+        // Through the shared couponBoxProposalIdentityWhere, the predicate the
+        // overview counts with, so the button and the route agree.
+        expect(prismaMock.couponBoxProposal.deleteMany).toHaveBeenCalledWith({
             where: { userId: USER_ID },
         })
         // The suggestion scrub is matched TWO ways — the second is the whole
@@ -204,6 +223,7 @@ describe('POST /api/account/data/delete — scope', () => {
         expect(prismaMock.savingsEvent.deleteMany).toHaveBeenCalledTimes(1)
         expect(prismaMock.favoriteStore.deleteMany).toHaveBeenCalledTimes(1)
         expect(prismaMock.couponReport.deleteMany).toHaveBeenCalledTimes(1)
+        expect(prismaMock.couponBoxProposal.deleteMany).toHaveBeenCalledTimes(1)
 
         // Only now is "and nothing else happened" a real statement. Toggling
         // sync off and deleting history are deliberately separate acts — a
@@ -212,24 +232,38 @@ describe('POST /api/account/data/delete — scope', () => {
         expect(prismaMock.user.update).not.toHaveBeenCalled()
         expect(prismaMock.user.delete).not.toHaveBeenCalled()
     })
+
+    it('does NOT touch the codes the caller submitted to the catalog (T-12392, owner decision pending)', async () => {
+        const res = await POST(deleteRequest({ confirm: 'DELETE' }))
+
+        // Positive half first, for the same reason as above.
+        expect(res.status).toBe(200)
+        expect(transactionMock).toHaveBeenCalledTimes(1)
+
+        expect(prismaMock.coupon.updateMany).not.toHaveBeenCalled()
+        expect(prismaMock.coupon.deleteMany).not.toHaveBeenCalled()
+    })
 })
 
 describe('POST /api/account/data/delete — transactional', () => {
-    it('runs all three deletes AND the suggestion scrub inside ONE $transaction, never as loose awaits', async () => {
+    it('runs all four deletes AND the suggestion scrub inside ONE $transaction, never as loose awaits', async () => {
         await POST(deleteRequest({ confirm: 'DELETE' }))
 
         const batch = transactionMock.mock.calls[0]![0]
         expect(Array.isArray(batch)).toBe(true)
-        expect(batch).toHaveLength(4)
+        expect(batch).toHaveLength(5)
         // The builders were invoked to BUILD the batch, and their results were
         // handed to $transaction rather than awaited separately. The scrub is
         // IN here on purpose: run as a fourth loose await after a successful
         // transaction, a failure would empty the three tables and leave the
-        // email sitting in site_suggestions.
+        // email sitting in site_suggestions. The proposals delete is in it too
+        // (T-12391): a loose await would let "Delete my data" report success
+        // with the caller's proposals still stored.
         expect(batch).toEqual([
             { op: 'savings' },
             { op: 'favorites' },
             { op: 'reports' },
+            { op: 'proposals' },
             { op: 'suggestions' },
         ])
     })
