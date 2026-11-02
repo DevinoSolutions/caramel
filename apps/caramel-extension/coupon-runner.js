@@ -445,7 +445,7 @@ export async function startApplyingCoupons(rec, options) {
                 })
                 return
             }
-            const { code, id } = linkCodes[i]
+            const { code } = linkCodes[i]
             await updateTestingModal(i + 1, linkCodes.length, code)
             _markTriedCode(code)
             const after = await applyViaDiscountLink(code)
