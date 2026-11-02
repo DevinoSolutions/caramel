@@ -413,6 +413,11 @@ export async function startApplyingCoupons(rec, options) {
         let bestCode = null
         let bestId = null
         let bestCurrency = _cart0.currency
+        // Probes whose cart total we actually read back, and whether any total
+        // fell only because the cart held nothing to discount. Together they
+        // decide whether the no-win card may say "none lowered your total".
+        let measuredProbes = 0
+        let sawHollowDrop = false
         for (let i = 0; i < linkCodes.length; i++) {
             if (globalThis._caramelCancelled) {
                 // Stopping mid-probe leaves whichever code we tried last on the
@@ -435,11 +440,13 @@ export async function startApplyingCoupons(rec, options) {
             // unreadable — we learned nothing about this code, so don't leave
             // it blacklisted for the rest of the session (see _unmarkTriedCode).
             if (!after) _unmarkTriedCode(code)
+            else measuredProbes++
             if (
                 after &&
                 after.total_price < bestTotal &&
                 !_linkCartHoldsTheSaving(after, code)
             ) {
+                sawHollowDrop = true
                 log('AUTO_INSERT_DROP_ON_EMPTY_CART', {
                     code,
                     total: after.total_price,
@@ -734,7 +741,27 @@ export async function startApplyingCoupons(rec, options) {
         }
         // Genuinely no discount on the cart — hand the codes over to copy
         // instead of also grinding the (deaf) DOM form.
-        showFinalModal(0, null, null, false, coupons)
+        //
+        // Say what we measured. The default line, "Auto-apply didn't stick",
+        // blames the tool; on the stores where this lands (2026-11-02:
+        // bostonproper, hobbytron, purpleleafshop, shefit, vincecamuto) the
+        // store's own cart marked every code we sent not applicable. Only when
+        // we read the total back after EVERY probe, and none fell for a hollow
+        // reason, may we say none lowered it; otherwise keep the default line
+        // rather than claim a total we did not see.
+        const sawEveryTotal =
+            linkCodes.length > 0 &&
+            measuredProbes === linkCodes.length &&
+            !sawHollowDrop
+        showFinalModal(
+            0,
+            null,
+            sawEveryTotal
+                ? `We tried ${linkCodes.length} code${linkCodes.length === 1 ? '' : 's'} on your cart and none lowered your total. You can still paste one by hand.`
+                : null,
+            false,
+            coupons,
+        )
         return
     }
 
