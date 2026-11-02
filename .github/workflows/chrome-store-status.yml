@@ -11,7 +11,9 @@ name: Status – Chrome Web Store
 # plus takenDown / warned. It carries no rejection reason; that text only
 # exists in the developer dashboard.
 #
-# CHROME_PUBLISHER_ID is the publisher's id from the dashboard URL
+# CHROME_PUBLISHER_ID is the id of the "Devino" publisher that owns the item
+# (the dashboard's publisher menu; the account's personal publisher
+# ebd43a72-... owns no items and answers 403), from the dashboard URL
 # (chrome.google.com/webstore/devconsole/<id>). It is an account identifier,
 # not a credential: every call still needs the OAuth secrets below.
 
@@ -26,7 +28,7 @@ permissions:
   contents: read
 
 env:
-  CHROME_PUBLISHER_ID: ebd43a72-0f18-49db-83a7-d79f2293bff7
+  CHROME_PUBLISHER_ID: 8ac57e56-97c4-4013-bab4-73283684b1f8
 
 jobs:
   status:
