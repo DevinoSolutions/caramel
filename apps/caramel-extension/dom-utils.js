@@ -437,7 +437,7 @@ export function caramelFindMoney(text) {
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
 export function getPrice(selector, { returnLargest } = {}) {
-    let el = qOne(selector)
+    let el = caramelPriceElement(selector)
     if (!el && typeof selector === 'string' && selector.includes('[id=')) {
         const id = selector.match(/\[id=['"]([^'"]+)['"]\]/)?.[1]
         if (id) el = document.getElementById(id)
@@ -1117,4 +1117,47 @@ export function qAll(sel, root) {
     } catch {
         return []
     }
+}
+
+/* The first element a config's selector LIST matches, trying each selector in
+ * the list's order (T-12490). A config lists the store's own total first and a
+ * broad fallback after it; querySelector(list) instead returns the first match
+ * in the PAGE, and BigCommerce draws the Subtotal's [data-test="cart-price-value"]
+ * above [data-test="cart-total"]: store.franklinplanner.com read $17.95 while
+ * FPBDAY took the grand total to $14.36. Splits on top-level commas only, never
+ * inside (), [] or quotes, so :is(a, b), [x="a,b"] and an XPath part stay whole. */
+// An XPath part is evaluated as XPath (qOne), so a list mixing CSS and XPath,
+// which querySelector threw on, reads its parts too. `accept` skips a match.
+export function qFirstOfList(sel, root, accept = Boolean) {
+    let depth = 0
+    let quote = ''
+    let from = 0
+    for (let i = 0; sel && i <= sel.length; i++) {
+        const ch = sel[i]
+        if (ch === '\\') i++
+        else if (quote) quote = ch === quote ? '' : quote
+        else if (ch === '"' || ch === "'") quote = ch
+        else if (ch === '(' || ch === '[') depth++
+        else if (ch === ')' || ch === ']') depth--
+        else if (!depth && (ch === ',' || i === sel.length)) {
+            const el = qOne(sel.slice(from, i).trim(), root)
+            if (accept(el)) return el
+            from = i + 1
+        }
+    }
+    return null
+}
+
+// The element a priceContainer is read from (getPrice, and the element the
+// apply wait watches): the first part in list order whose match is shown and
+// holds an amount, else one that holds an amount, else the first match. A
+// first part that matches an empty skeleton or a hidden twin must not hide a
+// later part's total (page order used to reach it).
+const _caramelHasMoney = el => !!el && caramelFindMoney(el.innerText).length > 0
+export function caramelPriceElement(sel) {
+    return (
+        qFirstOfList(sel, null, el => _caramelHasMoney(el) && _isVisible(el)) ||
+        qFirstOfList(sel, null, _caramelHasMoney) ||
+        qFirstOfList(sel)
+    )
 }
