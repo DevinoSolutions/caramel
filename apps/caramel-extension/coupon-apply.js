@@ -2064,9 +2064,37 @@ export async function applyCoupon(code, rec) {
 //   GET /discount/{code}    -> attaches the code to the session server-side
 // Any site that isn't that platform simply fails the /cart.js shape probe and
 // the normal config-selector DOM flow below runs unchanged.
+
+/* Every store request the discount-link path awaits gets a deadline (T-12600).
+ *
+ * The run awaits each request in turn, and fetch() has no deadline of its own.
+ * neweracap.com in Firefox (1.4.32, 2026-11-02): the card stopped at "Trying
+ * coupon 6 of 8" and never moved, because one /discount/ request was never
+ * answered. A store that does not answer now ends that one request; the run
+ * carries on and ends with a card that says what the cart shows.
+ *
+ * The signal also covers reading the body. The fallback's timer is never
+ * cleared, for that reason: r.json() on a body that stops arriving is the same
+ * hang as a request that never answers. Safari 15 has no AbortSignal.timeout,
+ * so it gets the AbortController form. */
+export const CARAMEL_STORE_REQUEST_MS = 10000
+export function _caramelStoreFetch(url, opts) {
+    let signal
+    if (typeof AbortSignal.timeout === 'function') {
+        signal = AbortSignal.timeout(CARAMEL_STORE_REQUEST_MS)
+    } else {
+        const c = new AbortController()
+        setTimeout(() => c.abort(), CARAMEL_STORE_REQUEST_MS)
+        signal = c.signal
+    }
+    return fetch(url, { ...opts, signal })
+}
+
 export async function probeCartJson() {
     try {
-        const r = await fetch('/cart.js', { credentials: 'same-origin' })
+        const r = await _caramelStoreFetch('/cart.js', {
+            credentials: 'same-origin',
+        })
         if (!r.ok) return null
         const j = await r.json()
         if (
@@ -2184,7 +2212,7 @@ export function _unmarkTriedCode(code) {
 // Cross-file content-script call — per-file analysis can't see it.
 export async function _caramelClearCartDiscounts() {
     try {
-        const r = await fetch('/cart/update.js', {
+        const r = await _caramelStoreFetch('/cart/update.js', {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
@@ -2207,12 +2235,25 @@ export async function applyViaDiscountLink(code) {
     // A later code simply replaces the session's discount, so probing several
     // codes leaves at most one (possibly ineffective) code attached — inert.
     try {
-        await fetch('/discount/' + encodeURIComponent(code), {
+        await _caramelStoreFetch('/discount/' + encodeURIComponent(code), {
             credentials: 'same-origin',
             redirect: 'follow',
         })
-        return await probeCartJson()
     } catch {
-        return null
+        // No answer is not "didn't apply": the store may have taken the code
+        // before the request ran out of time. The cart decides. It counts as a
+        // measurement only if the cart names the code, because a cart that
+        // does not name it may still be about to.
+        const cart = await probeCartJson()
+        return _caramelCartNamesCode(cart, code) ? cart : null
     }
+    return await probeCartJson()
+}
+
+// Does the cart list `code` among its discount codes, live or not?
+function _caramelCartNamesCode(cart, code) {
+    const want = String(code).toUpperCase()
+    return (
+        Array.isArray(cart?.discount_codes) ? cart.discount_codes : []
+    ).some(e => String(e?.code ?? '').toUpperCase() === want)
 }

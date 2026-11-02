@@ -179,6 +179,19 @@ function _linkCartHoldsTheSaving(cart, code) {
     return cart.total_price > 0 || _linkCartNamesCode(cart, code)
 }
 
+// Which of our probed codes a total drop belongs to: the probed code, unless
+// the cart names ANOTHER code we probed as live and not this one. A cart that
+// names no code of ours keeps the credit here: a store can rewrite our code
+// into a generated one (100percentpure: LAYAN came back as ATsxsb7x), and ours
+// is still the one the shopper can type.
+function _linkDropOwner(cart, mine, probed) {
+    const live = (Array.isArray(cart.discount_codes) ? cart.discount_codes : [])
+        .filter(e => e && e.applicable !== false)
+        .map(e => String(e.code ?? '').toUpperCase())
+    if (live.includes(String(mine.code).toUpperCase())) return mine
+    return probed.find(c => live.includes(String(c.code).toUpperCase())) || mine
+}
+
 // Does the cart list `code` among its applied discount codes?
 function _linkCartNamesCode(cart, code) {
     const want = String(code).toUpperCase()
@@ -456,9 +469,20 @@ export async function startApplyingCoupons(rec, options) {
                 continue
             }
             if (after && after.total_price < bestTotal) {
+                // A code whose request ran out of time can still land on the
+                // store after we moved on (T-12600). When the cart names that
+                // code as the live one and not this one, the drop is its.
+                const owner = _linkDropOwner(after, linkCodes[i], linkCodes)
+                if (owner !== linkCodes[i]) {
+                    log('AUTO_INSERT_DROP_BELONGS_TO_ANOTHER_CODE', {
+                        code,
+                        owner: owner.code,
+                        total: after.total_price,
+                    })
+                }
                 bestTotal = after.total_price
-                bestCode = code
-                bestId = id
+                bestCode = owner.code
+                bestId = owner.id
                 bestCurrency = after.currency || bestCurrency
             }
         }
