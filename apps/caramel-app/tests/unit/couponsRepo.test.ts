@@ -6,6 +6,7 @@ import {
     expireCoupons,
     getCouponStats,
     isKnownStore,
+    listCodesSubmittedByUser,
     listCoupons,
     listNeighbourStoreRows,
     listRecentlyWorkedCoupons,
@@ -766,6 +767,87 @@ describe('listRecentlyWorkedCoupons (landing "Codes that just worked" read)', ()
         )
         await expect(listRecentlyWorkedCoupons(8)).rejects.toThrow(
             /coupons-db schema drift \[coupons\.recently-worked\]/,
+        )
+    })
+})
+
+describe('listCodesSubmittedByUser ("Download your data" submitted codes, T-12391)', () => {
+    it('reads only the caller’s own rows, EVERY status, newest first, and never selects the id', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons'),
+            [
+                {
+                    site: 'peepers.com',
+                    code: 'MINE15',
+                    status: 'pending',
+                    expired: false,
+                    submissionSource: 'manual',
+                    submittedAt: new Date('2026-07-01T09:00:00.000Z'),
+                },
+                {
+                    site: 'gap.com',
+                    code: 'OLD10',
+                    status: 'invalid',
+                    expired: true,
+                    submissionSource: 'checkout',
+                    // Driver tolerance: an ISO string normalizes to a Date.
+                    submittedAt: '2026-06-01T09:00:00.000Z',
+                },
+            ],
+        )
+
+        const rows = await listCodesSubmittedByUser('user-under-test')
+
+        expect(rows).toEqual([
+            {
+                site: 'peepers.com',
+                code: 'MINE15',
+                status: 'pending',
+                expired: false,
+                submissionSource: 'manual',
+                submittedAt: new Date('2026-07-01T09:00:00.000Z'),
+            },
+            {
+                site: 'gap.com',
+                code: 'OLD10',
+                status: 'invalid',
+                expired: true,
+                submissionSource: 'checkout',
+                submittedAt: new Date('2026-06-01T09:00:00.000Z'),
+            },
+        ])
+
+        expect(capturedQueries).toHaveLength(1)
+        const q = capturedQueries[0]!
+        expect(q.trim().startsWith('SELECT')).toBe(true)
+        expect(q).not.toMatch(/\b(UPDATE|INSERT|DELETE)\b/)
+        // Scoped to the caller alone, the user id BOUND, never inlined.
+        expect(q).toContain('WHERE submitted_by_user_id = ?')
+        expect(capturedValues[0]).toEqual(['user-under-test'])
+        // No visibility predicate: an export lists a code the catalog has
+        // since marked invalid or expired too, with its current status.
+        expect(q).not.toMatch(/status IN \(/)
+        expect(q).not.toMatch(/expired = FALSE/)
+        // The export never hands out catalog keys.
+        expect(q).not.toMatch(/SELECT\s+id\b|,\s*id\s*,/)
+        expect(q).toContain('ORDER BY created_at DESC, id DESC')
+    })
+
+    it('a row missing submittedAt fails the zod boundary loudly', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons'),
+            [
+                {
+                    site: 'peepers.com',
+                    code: 'MINE15',
+                    status: 'pending',
+                    expired: false,
+                    submissionSource: 'manual',
+                },
+            ],
+        )
+        await expect(listCodesSubmittedByUser('u')).rejects.toThrow(
+            /coupons-db schema drift \[account\.submitted-codes\]/,
         )
     })
 })

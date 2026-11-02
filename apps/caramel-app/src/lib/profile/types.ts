@@ -74,6 +74,15 @@ export interface ProfileOverview {
     siteSuggestions: {
         identifyingCount: number
     }
+    /** Coupon boxes this account's extension proposed for stores with no
+     * config (coupon_box_proposals, T-12391). A COUNT: the danger zone needs it
+     * because "Delete my data" deletes these rows, so a user whose only data is
+     * a proposal must not be told "Nothing to delete". Counted with the same
+     * predicate the delete route deletes with
+     * (src/lib/couponBoxProposalIdentity.ts). */
+    couponBoxProposals: {
+        count: number
+    }
     reports: {
         reportCount: number
         /** null when not derivable from real records — the UI then falls to a

@@ -79,6 +79,8 @@ import {
     StoreConfigRowSchema,
     StoreCouponAggregateRowSchema,
     StoreListRowSchema,
+    type SubmittedCodeRow,
+    SubmittedCodeRowSchema,
     TotalCountRowSchema,
     WorkedCountRowSchema,
     parseCouponRows,
@@ -1394,6 +1396,36 @@ export async function findCatalogStoreNames(
         'coupon-box-save.catalog-store-names',
     )
     return Array.from(new Set(rows.map(row => row.name)))
+}
+
+/**
+ * api/account/export GET — the codes this shopper submitted
+ * (submitShopperCoupon), newest first, for "Download your data" (T-12391).
+ * Read-only.
+ *
+ * EVERY status, deliberately without visibleCouponsWhere(): the export answers
+ * "what did I give you", so a code since marked invalid or expired is still the
+ * shopper's and is still listed, with its current status. Scoped by
+ * `submitted_by_user_id = userId` alone, which the (submitted_by_user_id,
+ * created_at) index answers; supplier rows carry NULL there and never match.
+ * No `id` is selected: the export never hands out catalog keys.
+ */
+export async function listCodesSubmittedByUser(
+    userId: string,
+): Promise<SubmittedCodeRow[]> {
+    const rawRows = await prisma.$queryRaw(Prisma.sql`
+        SELECT site, code, status, expired,
+               submission_source AS "submissionSource",
+               created_at AS "submittedAt"
+        FROM coupons
+        WHERE submitted_by_user_id = ${userId}
+        ORDER BY created_at DESC, id DESC
+    `)
+    return parseCouponRows(
+        SubmittedCodeRowSchema,
+        rawRows,
+        'account.submitted-codes',
+    )
 }
 
 export type SubmitShopperCouponArgs = {

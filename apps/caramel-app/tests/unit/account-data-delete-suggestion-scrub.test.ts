@@ -39,6 +39,7 @@ const { prismaMock } = vi.hoisted(() => ({
         savingsEvent: { deleteMany: vi.fn(async () => ({ count: 0 })) },
         favoriteStore: { deleteMany: vi.fn(async () => ({ count: 0 })) },
         couponReport: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+        couponBoxProposal: { deleteMany: vi.fn(async () => ({ count: 0 })) },
         user: { update: vi.fn(), delete: vi.fn() },
         siteSuggestion: {} as Record<string, unknown>,
     },
@@ -197,6 +198,7 @@ describe('delete-my-data scrubs the requester identity — THE PAIR', () => {
                 savingsEvents: 0,
                 favoriteStores: 0,
                 couponReports: 0,
+                couponBoxProposals: 0,
             },
             // Its own key: these rows still exist. Calling it a deletion would
             // be a lie the next reader of this response would believe.
@@ -280,14 +282,14 @@ describe('delete-my-data scrubs the requester identity — scope', () => {
 })
 
 describe('delete-my-data scrubs the requester identity — transactional', () => {
-    it('the scrub is the FOURTH member of the SAME batch, never a loose await after it', async () => {
+    it('the scrub is the LAST member of the SAME batch, never a loose await after it', async () => {
         seedTheThreeRows()
         await deletePOST(deleteRequest())
 
         expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
         const batch = prismaMock.$transaction.mock.calls[0]![0]
         expect(Array.isArray(batch)).toBe(true)
-        expect(batch).toHaveLength(4)
+        expect(batch).toHaveLength(5)
         expect(siteSuggestionFake.updateMany).toHaveBeenCalledTimes(1)
     })
 
