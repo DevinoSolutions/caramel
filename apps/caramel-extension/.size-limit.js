@@ -213,7 +213,13 @@ module.exports = [
         // on the nodes saying an earlier refusal (a successful kipling-usa.com
         // code was 1-3.5 s slower with them watched page-wide). Measured
         // 104.49 kB.
-        limit: '104.5 KB',
+        // 2026-11-02 (T-11601), raised 104.5 -> 107.5 kB: a run that
+        // found nothing looks at the order once more before saying so, and
+        // credits a code that landed after it was judged; the order's
+        // applied code is read on any checkout (a row with its own remove
+        // control, or a discount row with a negative amount), not only
+        // Shopify's tags. Measured 107.37 kB.
+        limit: '107.5 KB',
         brotli: false,
     },
     {
