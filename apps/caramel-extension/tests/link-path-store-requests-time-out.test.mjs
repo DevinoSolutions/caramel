@@ -265,6 +265,42 @@ describe('a store request that is never answered', () => {
         expect(cart.read().total_discount).toBe(1500)
     }, 15000)
 
+    it('keeps a code the store applied on its own, when it is later in our list', async () => {
+        // The store applies LATER20 by itself the moment MINE is sent, so
+        // MINE's cart read shows the drop with LATER20 as the live code. On
+        // this cart (harney's, measured) re-sending an attached code kills
+        // it, so LATER20's own probe cannot show its saving: the drop has to
+        // be credited to the code the cart names, and the put-back is what
+        // confirms it. Crediting MINE loses the saving at the put-back, and
+        // crediting no one ends with the store's code knocked off the cart.
+        useStore(
+            makeCart({ subtotal: 11100, worth: { LATER20: 1500 } }),
+            codes('MINE', 'LATER20'),
+        )
+        const storeFetch = globalThis.fetch
+        let autoApplied = false
+        globalThis.fetch = async (url, opts) => {
+            const r = await storeFetch(url, opts)
+            if (String(url) === '/discount/MINE' && !autoApplied) {
+                autoApplied = true
+                cart.apply('LATER20')
+            }
+            return r
+        }
+
+        expect(await runEnds()).toBe(true)
+        expect(sent.slice(0, 2)).toEqual(['MINE', 'LATER20'])
+        expect(stubs.wins).toEqual([
+            expect.objectContaining({
+                code: 'LATER20',
+                id: 'later20',
+                saved: 15,
+            }),
+        ])
+        // The store's code is live on the cart when the run ends.
+        expect(cart.read().total_discount).toBe(1500)
+    }, 15000)
+
     it('ends the run when the cart itself stops answering', async () => {
         // Every read after the first: the run still ends, and with no card
         // that claims a saving.
