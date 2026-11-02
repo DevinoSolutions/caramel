@@ -224,7 +224,11 @@ module.exports = [
         // and none fell, the no-win card says so ("We tried N codes on your
         // cart and none lowered your total") instead of blaming auto-apply.
         // Measured 107.70 kB.
-        limit: '107.8 KB',
+        // 2026-11-02 (T-12600), raised 107.8 -> 108.5 kB: every store request
+        // on the discount-link path now has a deadline, so a store that never
+        // answers ends that request instead of the whole run, and a drop is
+        // credited to the code the cart shows as live. Measured 108.47 kB.
+        limit: '108.5 KB',
         brotli: false,
     },
     {
