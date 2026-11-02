@@ -222,13 +222,43 @@ export function caramelEstimatedValue(coupon, totalMinor) {
     return total ? Math.min(cash, total) : amount
 }
 
-/* Best-first ordering. Stable, so codes we can't value keep their original
- * order — an unvalued coupon is unknown, not worthless, and sinking it below a
- * known-tiny one would be its own way of losing money. */
+/* The status tier the app ranks a store's list by (couponsRepo.ts
+ * proofTierSql): proven (green) first, then restricted (amber), then the rest.
+ * Read from the shared STATUS_META, so "proven" has one definition. */
+const _TIER_RANK = { green: 0, amber: 1 }
+function _caramelProofTier(coupon) {
+    const tier = CaramelCoupons.STATUS_META?.[coupon?.status]?.tier
+    return tier in _TIER_RANK ? _TIER_RANK[tier] : 2
+}
+
+/* Best-first ordering, inside the order the app already chose.
+ *
+ * The app ranks a store's codes by proof: recently-failing codes sink, and
+ * inside each of those groups proven codes lead, freshest proof first. The
+ * apply loop tries only the first 8, so sorting the whole list by advertised
+ * value undid that: on 18 of 50 stores sampled 2026-11-02 a proven code fell
+ * out of the 8 behind higher-advertised unverified ones, and on 4 of them
+ * (hobbytron, vincecamuto, lillianvernon, katespade) none of the 8 tried was
+ * proven.
+ *
+ * So a code never crosses a tier boundary of the list as served: each run of
+ * same-tier codes is sorted by value, and the runs keep their order. A tier
+ * that drops back (a proven code after an unverified one) is where the app
+ * started a sunk group, and that boundary is kept too. Stable inside a run, so
+ * codes we can't value keep their original order: an unvalued coupon is
+ * unknown, not worthless, and sinking it below a known-tiny one would be its
+ * own way of losing money. */
 export function caramelRankByValue(list, totalMinor) {
+    let run = 0
+    let prevTier = null
     return (Array.isArray(list) ? list : [])
-        .map((c, i) => ({ c, i, v: caramelEstimatedValue(c, totalMinor) }))
-        .sort((a, b) => b.v - a.v || a.i - b.i)
+        .map((c, i) => {
+            const tier = _caramelProofTier(c)
+            if (prevTier !== null && tier !== prevTier) run++
+            prevTier = tier
+            return { c, i, run, v: caramelEstimatedValue(c, totalMinor) }
+        })
+        .sort((a, b) => a.run - b.run || b.v - a.v || a.i - b.i)
         .map(x => x.c)
 }
 
