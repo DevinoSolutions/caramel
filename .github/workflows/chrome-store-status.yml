@@ -1,0 +1,87 @@
+name: Status – Chrome Web Store
+
+# Read-only: asks the Chrome Web Store API v2 what Google's review is doing
+# with the extension (T-12799). The v1.1 API our release and submit workflows
+# use cannot read review state at all, and the dashboard needs an interactive
+# Google sign-in, so "is 1.4.x in review, rejected or live?" had no answer
+# outside a browser. This changes nothing in the store.
+#
+# fetchStatus returns, per revision, the state (PENDING_REVIEW, STAGED,
+# PUBLISHED, PUBLISHED_TO_TESTERS, REJECTED, CANCELLED) and the crxVersion,
+# plus takenDown / warned. It carries no rejection reason; that text only
+# exists in the developer dashboard.
+#
+# CHROME_PUBLISHER_ID is the publisher's id from the dashboard URL
+# (chrome.google.com/webstore/devconsole/<id>). It is an account identifier,
+# not a credential: every call still needs the OAuth secrets below.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: chrome-store-status
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CHROME_PUBLISHER_ID: ebd43a72-0f18-49db-83a7-d79f2293bff7
+
+jobs:
+  status:
+    name: '🔎 Read the Chrome Web Store review status'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch the item status (API v2)
+        env:
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+          for name in CHROME_CLIENT_ID CHROME_CLIENT_SECRET CHROME_REFRESH_TOKEN CHROME_EXTENSION_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository secret $name is not set."
+              exit 1
+            fi
+          done
+
+          http=$(curl -sS -o /tmp/cws-token.json -w '%{http_code}' \
+            -X POST https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=${CHROME_CLIENT_ID}" \
+            --data-urlencode "client_secret=${CHROME_CLIENT_SECRET}" \
+            --data-urlencode "refresh_token=${CHROME_REFRESH_TOKEN}" \
+            --data-urlencode "grant_type=refresh_token")
+          if [ "$http" != "200" ]; then
+            reason=$(jq -r '"\(.error // "unknown"): \(.error_description // "no description")"' /tmp/cws-token.json 2>/dev/null || echo "unparseable response")
+            echo "::error::Google OAuth token exchange returned HTTP $http ($reason)."
+            exit 1
+          fi
+          token=$(jq -er '.access_token' /tmp/cws-token.json)
+          echo "::add-mask::$token"
+
+          http=$(curl -sS -o /tmp/cws-status.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "https://chromewebstore.googleapis.com/v2/publishers/${CHROME_PUBLISHER_ID}/items/${CHROME_EXTENSION_ID}:fetchStatus")
+          echo "fetchStatus HTTP $http"
+          # The response holds states, versions and the item's public key;
+          # no secret, so it is printed whole.
+          jq . /tmp/cws-status.json || cat /tmp/cws-status.json
+          if [ "$http" != "200" ]; then
+            echo "::error::fetchStatus returned HTTP $http (see the body above)."
+            exit 1
+          fi
+
+          {
+            echo "### Chrome Web Store status"
+            echo ""
+            jq -r '
+              "- Published: \(.publishedItemRevisionStatus.state // "none") \([.publishedItemRevisionStatus.distributionChannels[]?.crxVersion] | join(", "))",
+              "- Submitted: \(.submittedItemRevisionStatus.state // "none") \([.submittedItemRevisionStatus.distributionChannels[]?.crxVersion] | join(", "))",
+              "- Last async upload: \(.lastAsyncUploadState // "none")",
+              "- Taken down: \(.takenDown // false) · Warned: \(.warned // false)"
+            ' /tmp/cws-status.json
+          } >> "$GITHUB_STEP_SUMMARY"
