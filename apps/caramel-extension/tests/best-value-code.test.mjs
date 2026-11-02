@@ -279,16 +279,6 @@ describe('best-first ordering', () => {
         expect(ranked.slice(3, 5)).toEqual(['UNVERIFIED7', 'UNVERIFIED6'])
     })
 
-    it('ranks the whole list by value alone without the tier (the old order)', () => {
-        // The pre-change ranking, kept to show what the tier stops.
-        const byValueOnly = [...served].sort(
-            (a, b) =>
-                caramelEstimatedValue(b, 10000) - caramelEstimatedValue(a, 10000),
-        )
-
-        expect(byValueOnly.slice(0, 8).map(c => c.code)).not.toContain('PROVEN15')
-    })
-
     it('never lifts a code across a group the app sank', () => {
         // A proven code AFTER unverified ones is one the app sank for recent
         // shopper failures; it stays below them.

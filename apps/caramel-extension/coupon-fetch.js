@@ -225,12 +225,6 @@ export function caramelEstimatedValue(coupon, totalMinor) {
 /* The status tier the app ranks a store's list by (couponsRepo.ts
  * proofTierSql): proven (green) first, then restricted (amber), then the rest.
  * Read from the shared STATUS_META, so "proven" has one definition. */
-const _TIER_RANK = { green: 0, amber: 1 }
-function _caramelProofTier(coupon) {
-    const tier = CaramelCoupons.STATUS_META?.[coupon?.status]?.tier
-    return tier in _TIER_RANK ? _TIER_RANK[tier] : 2
-}
-
 /* Best-first ordering, inside the order the app already chose.
  *
  * The app ranks a store's codes by proof: recently-failing codes sink, and
@@ -250,11 +244,14 @@ function _caramelProofTier(coupon) {
  * own way of losing money. */
 export function caramelRankByValue(list, totalMinor) {
     let run = 0
-    let prevTier = null
+    let prevTier
     return (Array.isArray(list) ? list : [])
         .map((c, i) => {
-            const tier = _caramelProofTier(c)
-            if (prevTier !== null && tier !== prevTier) run++
+            // The app's three proof tiers: proven (green), restricted
+            // (amber), and every other status as one.
+            const t = CaramelCoupons.STATUS_META?.[c?.status]?.tier
+            const tier = t === 'green' || t === 'amber' ? t : ''
+            if (i && tier !== prevTier) run++
             prevTier = tier
             return { c, i, run, v: caramelEstimatedValue(c, totalMinor) }
         })
