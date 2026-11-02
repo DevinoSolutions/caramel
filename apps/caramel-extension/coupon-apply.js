@@ -15,6 +15,7 @@ import {
     caramelDisclosureFor,
     caramelFormSubmitIsUnsafe,
     caramelIsForbiddenControl,
+    caramelPriceElement,
     caramelSubmitBesideInput,
     getPrice,
     pickBestMatch,
@@ -962,7 +963,7 @@ export function caramelCodeOnOrder(rec, codes) {
 export function _caramelFinderTotalAfter(rec, code) {
     const now = caramelFinderTotalNow(rec)
     if (!Number.isNaN(now) || !code) return now
-    const el = qOne(rec.priceContainer)
+    const el = caramelPriceElement(rec.priceContainer)
     return el &&
         _isVisible(el) &&
         getPrice(rec.priceContainer, { returnLargest: true }) === 0 &&
@@ -1390,7 +1391,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // Looked up again on every read (waitForTotalChange): a store may answer
     // by drawing a new total element.
     const findPriceEl = () =>
-        qOne(rec.priceContainer) ||
+        caramelPriceElement(rec.priceContainer) ||
         document.getElementById(
             rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] || '',
         )

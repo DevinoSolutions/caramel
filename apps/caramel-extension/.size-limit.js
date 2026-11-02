@@ -228,7 +228,12 @@ module.exports = [
         // on the discount-link path now has a deadline, so a store that never
         // answers ends that request instead of the whole run, and a drop is
         // credited to the code the cart shows as live. Measured 108.47 kB.
-        limit: '108.5 KB',
+        // 2026-11-02 (T-12490), raised 108.5 -> 108.9 kB: a config's
+        // priceContainer list is read in list order (the store's own total
+        // first), not page order, which read store.franklinplanner.com's
+        // Subtotal above its grand total; a part whose match shows no amount
+        // gives way to the next. Measured 108.89 kB (+0.43 kB).
+        limit: '108.9 KB',
         brotli: false,
     },
     {
