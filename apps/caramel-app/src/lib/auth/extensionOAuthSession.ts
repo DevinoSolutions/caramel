@@ -129,12 +129,19 @@ export async function mintExtensionSession({
     // verified below, would hand that stranger a working password into the
     // owner's account. So when a provider sign-in claims an UNVERIFIED account
     // by email, whatever was set up before the email was proven goes first:
-    // its password login and its sessions. The provider has just proven the
-    // email, so the person signing in now is the owner; they can set a
-    // password again through the reset flow.
+    // its password and its sessions. The password login row is KEPT with the
+    // password cleared (orchestrator decision 2026-10-27, the same take-back
+    // as the web sign-in's in accountLinking.ts), so no data is deleted and
+    // the reset flow fills the row again. The provider has just proven the
+    // email, so the person signing in now is the owner.
     if (user && !linkedUser && !user.emailVerified) {
-        await prisma.account.deleteMany({
-            where: { userId: user.id, providerId: 'credential' },
+        await prisma.account.updateMany({
+            where: {
+                userId: user.id,
+                providerId: 'credential',
+                password: { not: null },
+            },
+            data: { password: null },
         })
         await prisma.session.deleteMany({ where: { userId: user.id } })
     }
