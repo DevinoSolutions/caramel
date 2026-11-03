@@ -28,6 +28,7 @@ const { prismaMock } = vi.hoisted(() => ({
             { count: 0 },
             { count: 0 },
             { count: 0 },
+            0,
         ]),
         user: {
             findUnique: vi.fn(async () => ({ savingsSyncEnabled: true })),
@@ -40,6 +41,8 @@ const { prismaMock } = vi.hoisted(() => ({
         couponReport: { deleteMany: vi.fn() },
         couponBoxProposal: { deleteMany: vi.fn() },
         siteSuggestion: { updateMany: vi.fn() },
+        // couponsRepo.unlinkCodesSubmittedByUser (T-12392).
+        $executeRaw: vi.fn(),
         session: { deleteMany: vi.fn(async () => ({ count: 1 })) },
     },
 }))

@@ -32,11 +32,15 @@ const { prismaMock } = vi.hoisted(() => ({
 }))
 vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
 
-const { countCouponsForStoresMock } = vi.hoisted(() => ({
-    countCouponsForStoresMock: vi.fn(async () => new Map<string, number>()),
-}))
+const { countCouponsForStoresMock, countCodesSubmittedByUserMock } = vi.hoisted(
+    () => ({
+        countCouponsForStoresMock: vi.fn(async () => new Map<string, number>()),
+        countCodesSubmittedByUserMock: vi.fn(async (_userId: string) => 0),
+    }),
+)
 vi.mock('@/lib/couponsRepo', () => ({
     countCouponsForStores: countCouponsForStoresMock,
+    countCodesSubmittedByUser: countCodesSubmittedByUserMock,
 }))
 
 const { getSessionMock } = vi.hoisted(() => ({
@@ -86,6 +90,7 @@ function stubEmptyDatabase() {
     prismaMock.siteSuggestion.count.mockResolvedValue(0)
     prismaMock.couponBoxProposal.count.mockResolvedValue(0)
     countCouponsForStoresMock.mockResolvedValue(new Map())
+    countCodesSubmittedByUserMock.mockResolvedValue(0)
 }
 
 beforeEach(() => {
@@ -117,6 +122,7 @@ describe('GET /api/account/overview — the zero-data user (the DEFAULT)', () =>
             favorites: [],
             siteSuggestions: { identifyingCount: 0 },
             couponBoxProposals: { count: 0 },
+            submittedCodes: { linkedCount: 0 },
             reports: {
                 reportCount: 0,
                 // null, NOT 0 — with nothing to confirm there is no
@@ -181,6 +187,20 @@ describe('GET /api/account/overview — the zero-data user (the DEFAULT)', () =>
         expect(
             (prismaMock.siteSuggestion as Record<string, unknown>).findMany,
         ).toBeUndefined()
+    })
+
+    it('counts the codes the caller submitted with the SAME predicate the delete route unlinks with (T-12392)', async () => {
+        countCodesSubmittedByUserMock.mockResolvedValue(4)
+        const body = (await (
+            await GET(overviewRequest())
+        ).json()) as ProfileOverview
+
+        // couponsRepo's countCodesSubmittedByUser and unlinkCodesSubmittedByUser
+        // share `submitted_by_user_id = <caller>` (couponsRepo.test.ts pins the
+        // SQL), so a user whose only data is a shared code can reach the route.
+        expect(body.submittedCodes).toEqual({ linkedCount: 4 })
+        expect(countCodesSubmittedByUserMock).toHaveBeenCalledTimes(1)
+        expect(countCodesSubmittedByUserMock).toHaveBeenCalledWith(USER_ID)
     })
 
     it('counts the caller’s coupon box proposals with the SAME predicate the delete route deletes with (T-12391)', async () => {

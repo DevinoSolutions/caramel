@@ -1,5 +1,6 @@
 import { withRoute } from '@/lib/api/withRoute'
 import { couponBoxProposalIdentityWhere } from '@/lib/couponBoxProposalIdentity'
+import { unlinkCodesSubmittedByUser } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import {
     SITE_SUGGESTION_SCRUB_DATA,
@@ -27,11 +28,12 @@ import { z } from 'zod'
 //    input: deleting the row would silently retract a store request that other
 //    people may also have made, and would corrupt a queue this user does not
 //    own. Nothing new is stamped — a scrub is not an ANSWER to the request.
-//  - It does NOT touch the codes the caller submitted to the catalog
-//    (`coupons.submitted_by_user_id`). TODO(T-12392): those codes keep their
-//    link to the account until the owner decides; unlinking them is a write
-//    to the catalog, which only the sanctioned writers in couponsRepo.ts may
-//    make. Deleting the ACCOUNT already unlinks them (the FK is SET NULL).
+//  - It does NOT delete the codes the caller submitted to the catalog, it
+//    UNLINKS them (owner-directed 2026-11-03, T-12392): one sanctioned
+//    catalog write, couponsRepo.ts unlinkCodesSubmittedByUser, nulls
+//    `coupons.submitted_by_user_id` on the caller's own rows. The codes stay
+//    in the catalog for every other shopper; only the link to this person
+//    goes. Deleting the ACCOUNT leaves them the same way (the FK is SET NULL).
 //  - It does NOT flip the savings-sync preference. Turning sync OFF and
 //    DELETING history are two deliberately separate acts: a delete that also
 //    changed a setting the user never touched would make the danger zone do
@@ -94,6 +96,7 @@ export const POST = withRoute(
             couponReports,
             couponBoxProposals,
             siteSuggestions,
+            submittedCodes,
         ] = await prisma.$transaction([
             prisma.savingsEvent.deleteMany({ where: { userId } }),
             prisma.favoriteStore.deleteMany({ where: { userId } }),
@@ -105,6 +108,8 @@ export const POST = withRoute(
                 where: siteSuggestionIdentityWhere({ userId, email }),
                 data: SITE_SUGGESTION_SCRUB_DATA,
             }),
+            // In the same batch as the rest, for the same reason as the scrub.
+            unlinkCodesSubmittedByUser(userId),
         ])
 
         return NextResponse.json({
@@ -118,6 +123,8 @@ export const POST = withRoute(
             // rows still exist, and calling that a deletion would be a lie the
             // next reader of this response would believe.
             scrubbed: { siteSuggestions: siteSuggestions.count },
+            // Same for the codes: they are still in the catalog, without you.
+            unlinked: { submittedCodes },
         })
     },
 )

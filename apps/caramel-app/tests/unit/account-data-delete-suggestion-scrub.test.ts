@@ -40,6 +40,9 @@ const { prismaMock } = vi.hoisted(() => ({
         favoriteStore: { deleteMany: vi.fn(async () => ({ count: 0 })) },
         couponReport: { deleteMany: vi.fn(async () => ({ count: 0 })) },
         couponBoxProposal: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+        // couponsRepo.unlinkCodesSubmittedByUser (T-12392): no submitted codes
+        // in this suite, so the unlink touches 0 rows.
+        $executeRaw: vi.fn(async () => 0),
         user: { update: vi.fn(), delete: vi.fn() },
         siteSuggestion: {} as Record<string, unknown>,
     },
@@ -203,6 +206,7 @@ describe('delete-my-data scrubs the requester identity — THE PAIR', () => {
             // Its own key: these rows still exist. Calling it a deletion would
             // be a lie the next reader of this response would believe.
             scrubbed: { siteSuggestions: 2 },
+            unlinked: { submittedCodes: 0 },
         })
         for (const id of ['signed-in', 'signed-out']) {
             expect(row(id).userId).toBeNull()
@@ -282,14 +286,15 @@ describe('delete-my-data scrubs the requester identity — scope', () => {
 })
 
 describe('delete-my-data scrubs the requester identity — transactional', () => {
-    it('the scrub is the LAST member of the SAME batch, never a loose await after it', async () => {
+    it('the scrub is a member of the SAME batch, never a loose await after it', async () => {
         seedTheThreeRows()
         await deletePOST(deleteRequest())
 
         expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
         const batch = prismaMock.$transaction.mock.calls[0]![0]
         expect(Array.isArray(batch)).toBe(true)
-        expect(batch).toHaveLength(5)
+        // Five deletes/scrubs plus the submitted-code unlink (T-12392).
+        expect(batch).toHaveLength(6)
         expect(siteSuggestionFake.updateMany).toHaveBeenCalledTimes(1)
     })
 

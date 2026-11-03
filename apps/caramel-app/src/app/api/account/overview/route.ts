@@ -1,6 +1,9 @@
 import { withRoute } from '@/lib/api/withRoute'
 import { couponBoxProposalIdentityWhere } from '@/lib/couponBoxProposalIdentity'
-import { countCouponsForStores } from '@/lib/couponsRepo'
+import {
+    countCodesSubmittedByUser,
+    countCouponsForStores,
+} from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import { summarizeReports } from '@/lib/profile/reportImpact'
 import { readSavingsSyncEnabled } from '@/lib/profile/savingsSyncPreference'
@@ -58,6 +61,7 @@ export const GET = withRoute(
             syncEnabled,
             identifyingSuggestionCount,
             couponBoxProposalCount,
+            submittedCodeCount,
         ] = await Promise.all([
             prisma.user.findUnique({
                 where: { id: userId },
@@ -127,6 +131,9 @@ export const GET = withRoute(
             prisma.couponBoxProposal.count({
                 where: couponBoxProposalIdentityWhere(userId),
             }),
+            // A COUNT as well: the codes this account submitted that "Delete my
+            // data" would take it off (T-12392).
+            countCodesSubmittedByUser(userId),
         ])
 
         // Per-currency totals. Deliberately NOT summed into one number: a
@@ -195,6 +202,7 @@ export const GET = withRoute(
             })),
             siteSuggestions: { identifyingCount: identifyingSuggestionCount },
             couponBoxProposals: { count: couponBoxProposalCount },
+            submittedCodes: { linkedCount: submittedCodeCount },
             reports,
         }
 

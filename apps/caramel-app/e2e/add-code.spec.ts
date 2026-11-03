@@ -166,3 +166,107 @@ test.describe('Add a code — signed in (real session, local DB)', () => {
         expect(posted).toBe(false)
     })
 })
+
+// "Delete my data" takes the shopper off the codes they shared, and the code
+// stays in the catalog (owner decision 2026-11-03, T-12392). The whole chain,
+// real session and real Postgres: the form writes the row, the danger zone
+// finds it (overview count), the route unlinks it in its transaction. Its own
+// user, because the delete wipes that user's data.
+const DELETE_DATA_EMAIL = 'e2e-delete-data-codes@caramel.dev'
+
+test.describe('Delete my data keeps a shared code, without the shopper (real session, local DB)', () => {
+    test.skip(!SEEDABLE, 'needs a seedable local/CI Postgres (DATABASE_URL)')
+
+    test.beforeAll(async () => {
+        await seedVerifiedUser({
+            baseURL: seedBaseURL,
+            email: DELETE_DATA_EMAIL,
+            password: ADD_CODE_PASSWORD,
+            name: 'E2E Delete Data User',
+        })
+    })
+
+    test('the code stays in the catalog and no longer carries the account', async ({
+        page,
+    }) => {
+        const code = `E2D${Date.now().toString(36).toUpperCase()}`
+        expect(normalizeShopperCode(code)).toBe(code)
+        let couponId: string | null = null
+        try {
+            await page.goto('/login')
+            await page
+                .getByPlaceholder('you@example.com')
+                .fill(DELETE_DATA_EMAIL)
+            await page
+                .getByPlaceholder('Enter your password')
+                .fill(ADD_CODE_PASSWORD)
+            await page
+                .getByRole('button', { name: 'Sign in', exact: true })
+                .click()
+            await expect(page).toHaveURL(/\/$/, { timeout: 15000 })
+
+            await page.goto(`/coupons/${STORE}`)
+            await page.getByRole('textbox', { name: 'Coupon code' }).fill(code)
+            const submitResponse = page.waitForResponse(
+                res =>
+                    res.url().endsWith('/api/coupons/submit') &&
+                    res.request().method() === 'POST',
+            )
+            await page.getByRole('button', { name: 'Add code' }).click()
+            const submitted = await submitResponse
+            expect(submitted.status()).toBe(200)
+            couponId = ((await submitted.json()) as { couponId: string })
+                .couponId
+
+            await page.goto('/profile#data')
+            // Enabled only once the overview has counted the shared code: a
+            // shopper whose only data is that code is not told "Nothing to
+            // delete".
+            const deleteButton = page
+                .getByRole('button', { name: 'Delete my data' })
+                .first()
+            await expect(deleteButton).toBeEnabled({ timeout: 15000 })
+            await deleteButton.click()
+
+            const dialog = page.getByRole('dialog')
+            await expect(dialog).toContainText(
+                'This takes your account off the code you shared',
+            )
+            await expect(dialog).not.toContainText('permanently removes')
+            await dialog.getByLabel('Type DELETE to confirm.').fill('DELETE')
+            const deleteResponse = page.waitForResponse(
+                res =>
+                    res.url().endsWith('/api/account/data/delete') &&
+                    res.request().method() === 'POST',
+            )
+            await dialog.getByRole('button', { name: 'Delete my data' }).click()
+            const deleted = await deleteResponse
+            expect(deleted.status()).toBe(200)
+            expect(
+                ((await deleted.json()) as { unlinked: unknown }).unlinked,
+            ).toEqual({ submittedCodes: 1 })
+
+            const prisma = await openTestPrisma()
+            try {
+                const row = await prisma.coupon.findUnique({
+                    where: { id: couponId },
+                    select: {
+                        code: true,
+                        submittedByUserId: true,
+                        submissionSource: true,
+                    },
+                })
+                // Still in the catalog, still marked a shopper row, no owner.
+                expect(row).toEqual({
+                    code,
+                    submittedByUserId: null,
+                    submissionSource: 'manual',
+                })
+            } finally {
+                await prisma.$disconnect()
+            }
+        } finally {
+            if (couponId !== null) await deleteCouponById(couponId)
+        }
+    })
+})

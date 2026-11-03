@@ -48,12 +48,17 @@ export default function DataPrivacySection({
     // Coupon boxes the extension proposed (T-12391): the delete route deletes
     // them, so a user whose only data is a proposal must reach it too.
     const proposalsCount = overview?.couponBoxProposals.count ?? 0
+    // Codes this account submitted to the catalog (T-12392): the delete route
+    // takes the account off them, so a user whose only data is a submitted
+    // code must reach it too.
+    const submittedCount = overview?.submittedCodes.linkedCount ?? 0
     const nothingToDelete =
         savingsCount === 0 &&
         favoritesCount === 0 &&
         reportsCount === 0 &&
         suggestionsCount === 0 &&
-        proposalsCount === 0
+        proposalsCount === 0 &&
+        submittedCount === 0
 
     async function deleteData() {
         setBusy(true)
@@ -179,8 +184,9 @@ export default function DataPrivacySection({
                             Removes the stores you follow, your synced savings
                             history, your coupon reports and the coupon boxes
                             your extension found, and takes your details off any
-                            store requests you sent. Your account and sign-in
-                            stay. This can&apos;t be undone.
+                            store requests you sent and any codes you shared.
+                            Your account and sign-in stay. This can&apos;t be
+                            undone.
                         </p>
                         <button
                             type="button"
@@ -253,6 +259,26 @@ export default function DataPrivacySection({
                                         ? 'the request itself stays'
                                         : 'the requests themselves stay'}
                                     , just without you attached.{' '}
+                                </>
+                            )}
+                            {/* Its own sentence too, for the same reason: the
+                                codes stay in the catalog for other shoppers,
+                                so "removes 3 codes" would be false. */}
+                            {submittedCount > 0 && (
+                                <>
+                                    {clauses.length > 0 || suggestionsCount > 0
+                                        ? 'It also takes'
+                                        : 'This takes'}{' '}
+                                    your account off{' '}
+                                    {submittedCount === 1
+                                        ? 'the code you shared'
+                                        : `the ${submittedCount} codes you shared`}{' '}
+                                    &mdash;{' '}
+                                    {submittedCount === 1
+                                        ? 'it stays'
+                                        : 'they stay'}{' '}
+                                    for other shoppers, just no longer linked to
+                                    you.{' '}
                                 </>
                             )}
                             Your account stays, and Caramel keeps working.

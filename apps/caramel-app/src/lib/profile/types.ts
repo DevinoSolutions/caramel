@@ -83,6 +83,14 @@ export interface ProfileOverview {
     couponBoxProposals: {
         count: number
     }
+    /** Catalog codes this account submitted that still carry its id (T-12392).
+     * A COUNT: "Delete my data" takes the account off them (the codes stay in
+     * the catalog), so a user whose only data is a submitted code must not be
+     * told "Nothing to delete". The same predicate the delete route unlinks
+     * with (couponsRepo countCodesSubmittedByUser / unlinkCodesSubmittedByUser). */
+    submittedCodes: {
+        linkedCount: number
+    }
     reports: {
         reportCount: number
         /** null when not derivable from real records — the UI then falls to a

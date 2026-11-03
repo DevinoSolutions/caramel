@@ -1428,6 +1428,52 @@ export async function listCodesSubmittedByUser(
     )
 }
 
+/**
+ * api/account/overview GET — how many catalog codes still carry this shopper's
+ * account (submitShopperCoupon), so the danger zone knows "Delete my data" has
+ * something to do and can say what (T-12392). Read-only, and the SAME predicate
+ * unlinkCodesSubmittedByUser writes with, so the button and the route cannot
+ * disagree. Every status: an expired code still names the shopper.
+ */
+export async function countCodesSubmittedByUser(
+    userId: string,
+): Promise<number> {
+    const [row] = parseCouponRows(
+        TotalCountRowSchema,
+        await prisma.$queryRaw(Prisma.sql`
+            SELECT COUNT(*)::int AS total
+            FROM coupons
+            WHERE submitted_by_user_id = ${userId}
+        `),
+        'account.submitted-codes-count',
+    )
+    return row?.total ?? 0
+}
+
+/**
+ * api/account/data/delete POST — "Delete my data" takes the shopper off the
+ * codes they submitted (submitShopperCoupon). Owner-directed 2026-11-03
+ * (T-12392): the codes stay in the catalog for everyone, only the link to the
+ * person goes. It is the same state deleting the ACCOUNT already leaves them in
+ * (the foreign key is ON DELETE SET NULL): `submission_source` stays set, so
+ * the row still reads as shopper-submitted, never as a supplier row.
+ *
+ * A sanctioned catalog write (CLAUDE.md, Hard boundaries), and the narrowest
+ * one: one column, only on the caller's own rows, only ever to NULL. Returned
+ * UNAWAITED so the route runs it inside its one transaction with the other
+ * deletes; awaited on its own, a failure after them would tell the shopper
+ * nothing was removed while their savings were already gone.
+ */
+export function unlinkCodesSubmittedByUser(
+    userId: string,
+): Prisma.PrismaPromise<number> {
+    return prisma.$executeRaw(Prisma.sql`
+        UPDATE coupons
+        SET submitted_by_user_id = NULL
+        WHERE submitted_by_user_id = ${userId}
+    `)
+}
+
 export type SubmitShopperCouponArgs = {
     /** Already-resolved store domain (resolveStoreDomain); lowercased here. */
     base: string
