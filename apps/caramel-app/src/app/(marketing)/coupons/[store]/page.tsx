@@ -339,7 +339,7 @@ export default async function StoreCouponsPage({
     }
 
     return (
-        <main className="relative min-h-screen px-6 pt-32 dark:bg-darkBg lg:px-8 sm:pt-8">
+        <main className="dark:bg-darkBg relative min-h-screen px-6 pt-32 sm:pt-8 lg:px-8">
             <CouponsSection
                 defaultFilters={{ site: base }}
                 initialCoupons={coupons}
@@ -391,7 +391,7 @@ export default async function StoreCouponsPage({
                 timestamp exists in the row data. */}
             <section
                 aria-labelledby="how-caramel-works-heading"
-                className="mx-auto max-w-4xl pt-16 pb-24"
+                className="mx-auto max-w-4xl pb-24 pt-16"
             >
                 <h2
                     id="how-caramel-works-heading"
