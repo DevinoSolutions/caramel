@@ -2236,10 +2236,16 @@ export async function applyViaDiscountLink(code) {
     // A later code simply replaces the session's discount, so probing several
     // codes leaves at most one (possibly ineffective) code attached — inert.
     try {
-        await _caramelStoreFetch('/discount/' + encodeURIComponent(code), {
-            credentials: 'same-origin',
-            redirect: 'follow',
-        })
+        const r = await _caramelStoreFetch(
+            '/discount/' + encodeURIComponent(code),
+            { credentials: 'same-origin', redirect: 'follow' },
+        )
+        // The storefront page the redirect lands on is never read, and fetch()
+        // resolves on its headers: left alone, its body went on loading under
+        // the next codes' requests until the deadline cut it (neweracap.com,
+        // 1.4.33: two /discount/ requests open at once, ended together at
+        // 11-14 s). The code has landed by now, so stop it here.
+        await _caramelDropBody(r)
     } catch {
         // No answer is not "didn't apply": the store may have taken the code
         // before the request ran out of time. The cart decides. It counts as a
@@ -2249,6 +2255,17 @@ export async function applyViaDiscountLink(code) {
         return _caramelCartNamesCode(cart, code) ? cart : null
     }
     return await probeCartJson()
+}
+
+// Stop loading a response body nobody will read. A body that is already
+// closed or errored has nothing left to stop, so cancel's rejection then says
+// nothing about the request; it is the only error this lets go.
+async function _caramelDropBody(r) {
+    try {
+        await r?.body?.cancel()
+    } catch {
+        // already closed or errored: nothing left to stop
+    }
 }
 
 // Does the cart list `code` among its discount codes, live or not?

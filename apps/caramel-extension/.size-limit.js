@@ -233,7 +233,13 @@ module.exports = [
         // first), not page order, which read store.franklinplanner.com's
         // Subtotal above its grand total; a part whose match shows no amount
         // gives way to the next. Measured 108.89 kB (+0.43 kB).
-        limit: '108.9 KB',
+        // 2026-11-03 (1.4.33 neweracap hang), raised 108.9 -> 109.6 kB: the
+        // discount-link run always ends with a card. The settle window ends
+        // by the clock as well as by turns, a strike it cannot confirm cannot
+        // hold it open, each try and the winner's re-apply have a hard cap,
+        // and every /discount/ page body is stopped before the next code.
+        // Measured 109.57 kB (+0.68 kB).
+        limit: '109.6 KB',
         brotli: false,
     },
     {

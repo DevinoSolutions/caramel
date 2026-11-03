@@ -24,6 +24,7 @@ import {
     _unmarkTriedCode,
     applyCoupon,
     applyViaDiscountLink,
+    CARAMEL_STORE_REQUEST_MS,
     caramelCodeOnOrder,
     caramelRefusedForExistingDiscount,
     caramelRowReadsRejected,
@@ -247,6 +248,42 @@ export function caramelSettleWindowMs(from, total) {
  * is gone when the order named it at the credit (`wasNamed`) and no longer
  * does. Resolves { held, total }: with `checkTotal`, `total` is the last total
  * read while the credit stood, which is what the saving is measured from. */
+/* The most one discount-link try may take, whatever its requests do: the
+ * /discount/ request and the cart read each have CARAMEL_STORE_REQUEST_MS, and
+ * a request that runs out of time reads the cart once more. A try still
+ * running after that is given up on and reads as "learned nothing", so the
+ * card can never sit on "Trying coupon x of y" (1.4.33, neweracap.com). */
+export const CARAMEL_LINK_TRY_MS = 3 * CARAMEL_STORE_REQUEST_MS + 2000
+// `work` with a deadline: its value, or `onLate` once `ms` have passed.
+async function _caramelWithin(ms, work, onLate) {
+    let timer
+    try {
+        return await Promise.race([
+            work,
+            new Promise(resolve => {
+                timer = setTimeout(() => resolve(onLate()), ms)
+            }),
+        ])
+    } finally {
+        clearTimeout(timer)
+    }
+}
+
+/* The window is measured on the clock, and the run gets out of it whatever the
+ * reads say (1.4.33, neweracap.com, 2026-11-03).
+ *
+ * It used to be counted in loop turns, each a 500ms sleep plus a cart read, and
+ * one read saying the drop was gone kept the loop going until a second one
+ * agreed. In Chrome and Firefox the card then sat on "Trying coupon 8 of 8" for
+ * three minutes and more over a $0 order (FREE), the one case that takes the
+ * full window, while the cart was read at ever wider gaps: a page whose timers
+ * the browser holds back stretches every turn, and an unreadable read left a
+ * pending strike waiting for ever. So: the window ends at the first of the
+ * clock and the turns it used to count (on a page that is not held back the
+ * two agree), a strike still pending then gets at most
+ * CARAMEL_SETTLE_EXTRA_READS more reads, and a credit the last reads could
+ * not confirm is not claimed. */
+const CARAMEL_SETTLE_EXTRA_READS = 2
 export async function caramelCreditSettles({
     code,
     from,
@@ -258,12 +295,29 @@ export async function caramelCreditSettles({
 }) {
     let last = total
     let strikes = 0
-    let waited = 0
-    while (waited < windowMs || strikes > 0) {
+    let extraReads = 0
+    let turns = 0
+    const started = performance.now()
+    const waited = () => Math.round(performance.now() - started)
+    for (; ; turns++) {
         // A cancelled run reports nothing and leaves the code where it is.
         if (globalThis._caramelCancelled) break
+        if (
+            waited() >= windowMs ||
+            turns * CARAMEL_SETTLE_READ_MS >= windowMs
+        ) {
+            if (!strikes) break
+            if (extraReads++ >= CARAMEL_SETTLE_EXTRA_READS) {
+                log('AUTO_INSERT_CREDIT_UNCONFIRMED', {
+                    code,
+                    credited: total,
+                    waited: waited(),
+                    reason: 'last read showed the saving gone',
+                })
+                return { held: false, total: from }
+            }
+        }
         await sleep(CARAMEL_SETTLE_READ_MS)
-        waited += CARAMEL_SETTLE_READ_MS
         const now = await read()
         if (!now) continue
         const dropGone =
@@ -276,7 +330,7 @@ export async function caramelCreditSettles({
                     code,
                     credited: total,
                     total: now.total,
-                    waited,
+                    waited: waited(),
                     reason: dropGone ? 'total back up' : 'code gone',
                 })
                 return { held: false, total: now.total }
@@ -448,7 +502,18 @@ export async function startApplyingCoupons(rec, options) {
             const { code } = linkCodes[i]
             await updateTestingModal(i + 1, linkCodes.length, code)
             _markTriedCode(code)
-            const after = await applyViaDiscountLink(code)
+            const after = await _caramelWithin(
+                CARAMEL_LINK_TRY_MS,
+                applyViaDiscountLink(code),
+                () => {
+                    log('AUTO_INSERT_TRY_CAPPED', {
+                        code,
+                        ms: CARAMEL_LINK_TRY_MS,
+                        reason: 'try outlived its request deadlines',
+                    })
+                    return null
+                },
+            )
             // A null result means the request failed or the cart became
             // unreadable — we learned nothing about this code, so don't leave
             // it blacklisted for the rest of the session (see _unmarkTriedCode).
@@ -511,7 +576,19 @@ export async function startApplyingCoupons(rec, options) {
             // at all. The confirmation underneath is unchanged and still
             // decides the verdict, so this can only turn a lost win into a
             // measured one.
-            confirmed = await _caramelPutCodeOnCart(bestCode)
+            // Up to two tries' worth: a read, a re-send, a clear and a re-send.
+            confirmed = await _caramelWithin(
+                2 * CARAMEL_LINK_TRY_MS,
+                _caramelPutCodeOnCart(bestCode),
+                () => {
+                    log('AUTO_INSERT_TRY_CAPPED', {
+                        code: bestCode,
+                        ms: 2 * CARAMEL_LINK_TRY_MS,
+                        reason: 're-apply outlived its request deadlines',
+                    })
+                    return null
+                },
+            )
             if (
                 !confirmed ||
                 confirmed.total_price >= _cart0.total_price ||
