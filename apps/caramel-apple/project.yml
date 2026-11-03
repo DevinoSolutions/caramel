@@ -70,6 +70,9 @@ targets:
     entitlements:
       path: App/Caramel.entitlements
       properties:
+        # Native Sign in with Apple (NativeAppleSignIn in App/Core/SessionStore.swift).
+        com.apple.developer.applesignin:
+          - Default
         com.apple.security.application-groups:
           - group.com.devino.Caramel
         # One shared keychain group so the app and the extension address the same session item

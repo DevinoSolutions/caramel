@@ -6,10 +6,15 @@
 // sign-in failed on prod + dev. The app now signs its own secret at runtime
 // from APPLE_TEAM_ID / APPLE_KEY_ID / APPLE_PRIVATE_KEY (see src/lib/env.ts).
 //
-// Two consumers share this ONE helper so they can never disagree:
+// Every consumer shares this ONE helper so they can never disagree:
 //   - src/lib/auth/auth.ts (better-auth's `socialProviders.apple`, through
 //     `createAppleSocialProviderConfig`)
 //   - src/app/api/extension/oauth/route.ts (the extension's token exchange)
+//   - src/lib/auth/appleNativeSignIn.ts (the iOS app's native sheet: its
+//     codes and tokens belong to the app's bundle id, so the secret is signed
+//     with that bundle id as `sub` instead of the Services ID)
+//   - src/lib/auth/appleTokenRevocation.ts (with the client the token was
+//     issued to)
 //
 // SYNCHRONOUS ON PURPOSE (node:crypto, not an async JOSE library). better-auth
 // 1.6.23 resolves the `socialProviders.apple` config ONCE (create-context.mjs)
@@ -35,7 +40,8 @@ interface CachedSecret {
     expiresAtSeconds: number
 }
 
-let cached: CachedSecret | undefined
+// One secret per client id (`sub`): the Services ID and the iOS bundle id.
+const cached = new Map<string, CachedSecret>()
 
 function nowSeconds(): number {
     return Math.floor(Date.now() / 1000)
@@ -48,8 +54,10 @@ interface AppleSigningConfig {
     privateKeyPem: string
 }
 
-function readAppleSigningConfig(): AppleSigningConfig {
-    const clientId = env.APPLE_CLIENT_ID
+function readAppleSigningConfig(
+    clientIdOverride: string | undefined,
+): AppleSigningConfig {
+    const clientId = clientIdOverride ?? env.APPLE_CLIENT_ID
     const teamId = env.APPLE_TEAM_ID
     const keyId = env.APPLE_KEY_ID
     const privateKey = env.APPLE_PRIVATE_KEY
@@ -100,8 +108,11 @@ function parseApplePrivateKey(privateKeyPem: string): KeyObject {
     return privateKey
 }
 
-function signAppleClientSecret(): CachedSecret {
-    const { clientId, teamId, keyId, privateKeyPem } = readAppleSigningConfig()
+function signAppleClientSecret(
+    clientIdOverride: string | undefined,
+): CachedSecret {
+    const { clientId, teamId, keyId, privateKeyPem } =
+        readAppleSigningConfig(clientIdOverride)
     const privateKey = parseApplePrivateKey(privateKeyPem)
 
     const issuedAtSeconds = nowSeconds()
@@ -132,16 +143,23 @@ function signAppleClientSecret(): CachedSecret {
  * fewer than 30 days of validity remain. Throws (never returns a stale or
  * empty secret) when Apple's signing config is missing or the key is invalid;
  * a failed sign leaves the cache untouched, so the next call retries.
+ *
+ * `clientId` is the JWT's `sub`: env.APPLE_CLIENT_ID (the Services ID of the
+ * web flows) unless the caller names another client of the same team, such
+ * as the iOS app's bundle id for a code the native sheet issued.
  */
-export function getAppleClientSecret(): string {
+export function getAppleClientSecret(clientId?: string): string {
+    const key = clientId ?? env.APPLE_CLIENT_ID ?? ''
+    const current = cached.get(key)
     if (
-        cached &&
-        cached.expiresAtSeconds - nowSeconds() > RESIGN_WHEN_REMAINING_SECONDS
+        current &&
+        current.expiresAtSeconds - nowSeconds() > RESIGN_WHEN_REMAINING_SECONDS
     ) {
-        return cached.token
+        return current.token
     }
-    cached = signAppleClientSecret()
-    return cached.token
+    const signed = signAppleClientSecret(clientId)
+    cached.set(key, signed)
+    return signed.token
 }
 
 export interface AppleSocialProviderConfig {
