@@ -16,9 +16,13 @@ import { toast } from 'sonner'
 interface CouponCardProps {
     coupon: Coupon
     index: number
+    /** The page clock (CouponsSection `now`, anchored to the server's render
+     *  time). Never Date.now(): the browser's clock can be hours off, and the
+     *  "Xh ago" text would then differ from the server HTML (CARAMEL-18). */
+    now: number
 }
 
-export default function CouponCard({ coupon, index }: CouponCardProps) {
+export default function CouponCard({ coupon, index, now }: CouponCardProps) {
     const [showCode, setShowCode] = useState(false)
     // Unlike showCode (a 3-second overlay), this stays true once the shopper
     // has copied the code, so the "Did it work?" question outlives the overlay.
@@ -63,14 +67,14 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
     // "Worked Xh ago" line nor the proven-by-use Verified upgrade (both read
     // lastWorkedAt) may sit beside a "Reported not working" hint. These are
     // shopper/extension reports, so the hint says "Reported", never "Broken".
-    const failing = isRecentlyFailing(coupon)
-    const failedAgo = failing ? formatFailedAgo(coupon.lastFailedAt) : null
+    const failing = isRecentlyFailing(coupon, now)
+    const failedAgo = failing ? formatFailedAgo(coupon.lastFailedAt, now) : null
     const lastWorkedAt = failing ? null : coupon.lastWorkedAt
-    const workedAgo = formatWorkedAgo(lastWorkedAt)
+    const workedAgo = formatWorkedAgo(lastWorkedAt, now)
     // Catalog status badge, upgraded to Verified when a shopper's apply in
     // the last 24h proved an unverified code (coupons.ts couponBadge) — so a
     // green "Just worked" line never sits next to an "Unverified" badge.
-    const catalogBadge = couponBadge(coupon.status, lastWorkedAt)
+    const catalogBadge = couponBadge(coupon.status, lastWorkedAt, now)
     // A code shoppers keep reporting as not working must not carry the green
     // Verified badge beside that hint: the catalog's check is older than the
     // reports. Other tiers (unverified, restricted, ...) are unaffected.
@@ -89,11 +93,11 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
             // the whole list, and a 20-card page would otherwise hold the
             // next page's cards back 1-2s.
             transition={{ duration: 0.3, delay: (index % 10) * 0.05 }}
-            className="dark:from-darkSurface dark:via-darkSurface dark:to-darkSurface group relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-lg dark:border-orange-900/50 dark:hover:border-orange-800/70"
+            className="group relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50/50 via-white to-orange-50/40 p-5 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-lg dark:border-orange-900/50 dark:from-darkSurface dark:via-darkSurface dark:to-darkSurface dark:hover:border-orange-800/70"
         >
             <div className="flex items-center gap-5 md:flex-col md:items-start">
                 {/* Left: Discount Badge */}
-                <div className="from-caramel flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br to-orange-600 text-white shadow-md ring-1 ring-orange-200 dark:ring-orange-900/50">
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-caramel to-orange-600 text-white shadow-md ring-1 ring-orange-200 dark:ring-orange-900/50">
                     <div className="text-center leading-tight">
                         {discount ? (
                             <>
@@ -149,7 +153,7 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                     {coupon.newCustomersOnly && (
                         <span
                             data-testid="coupon-new-customers-only"
-                            className="mr-2 mt-2 inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-semibold text-orange-700 ring-1 ring-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:ring-orange-900/50"
+                            className="mt-2 mr-2 inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-semibold text-orange-700 ring-1 ring-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:ring-orange-900/50"
                             title="This code works only for a new account at this store."
                         >
                             New customers only
@@ -169,7 +173,7 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                     <button
                         type="button"
                         onClick={handleCopyCode}
-                        className="from-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkSurface whitespace-nowrap rounded-2xl bg-gradient-to-r to-orange-600 px-6 py-3 font-semibold text-white shadow-md transition-all hover:scale-105 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 md:w-full"
+                        className="rounded-2xl bg-gradient-to-r from-caramel to-orange-600 px-6 py-3 font-semibold whitespace-nowrap text-white shadow-md transition-all hover:scale-105 hover:shadow-lg focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:focus-visible:ring-offset-darkSurface md:w-full"
                     >
                         Get Coupon Code
                     </button>
@@ -190,7 +194,7 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
                 >
                     <div className="text-center">
                         <p className="mb-2 text-sm text-gray-300">Your Code:</p>
-                        <p className="from-caramel mb-3 bg-gradient-to-r to-orange-600 bg-clip-text text-3xl font-black text-transparent">
+                        <p className="mb-3 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-3xl font-black text-transparent">
                             {coupon.code}
                         </p>
                         <p className="text-xs text-gray-400">

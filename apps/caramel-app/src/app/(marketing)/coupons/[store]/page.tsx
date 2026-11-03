@@ -339,13 +339,15 @@ export default async function StoreCouponsPage({
     }
 
     return (
-        <main className="dark:bg-darkBg relative min-h-screen px-6 pt-32 sm:pt-8 lg:px-8">
+        <main className="relative min-h-screen px-6 pt-32 dark:bg-darkBg lg:px-8 sm:pt-8">
             <CouponsSection
                 defaultFilters={{ site: base }}
                 initialCoupons={coupons}
                 initialTotal={total}
                 disableInitialFetch
                 pageSize={STORE_PAGE_SIZE}
+                // The cards' "Xh ago" lines run on the server's clock (CARAMEL-18).
+                renderedAt={new Date().getTime()}
                 // `base` — not the raw slug — because that is the normalized
                 // store key favorites are filed under (the same value the
                 // canonical URL uses), so /coupons/www.nike.com and
@@ -389,7 +391,7 @@ export default async function StoreCouponsPage({
                 timestamp exists in the row data. */}
             <section
                 aria-labelledby="how-caramel-works-heading"
-                className="mx-auto max-w-4xl pb-24 pt-16"
+                className="mx-auto max-w-4xl pt-16 pb-24"
             >
                 <h2
                     id="how-caramel-works-heading"

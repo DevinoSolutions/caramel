@@ -79,13 +79,15 @@ export default async function CouponsPage() {
     }
 
     return (
-        <main className="dark:bg-darkBg relative min-h-screen px-6 pt-32 lg:px-8">
+        <main className="relative min-h-screen px-6 pt-32 dark:bg-darkBg lg:px-8">
             <CouponsSection
                 initialCoupons={couponsWithSignals}
                 initialTotal={total}
                 disableInitialFetch
                 heroTitle={COUPONS_BODY.heading}
                 heroSubtitle={COUPONS_BODY.summary}
+                // The cards' "Xh ago" lines run on the server's clock (CARAMEL-18).
+                renderedAt={new Date().getTime()}
             />
             <PopularStores />
             {/* Server-rendered letter strip into the A–Z directory — the hub's

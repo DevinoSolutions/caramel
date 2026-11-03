@@ -45,7 +45,16 @@ interface CouponsSectionProps {
      *  (a visual-regression baseline); the store page renders more (see
      *  STORE_PAGE_SIZE there). */
     pageSize?: number
+    /** The server's clock (ms) when it rendered this page. Every card's
+     *  "Worked 3h ago" / "Reported not working 11h ago" line is computed from
+     *  it, never from the browser's own clock: a visitor whose clock is off by
+     *  an hour got different text than the server HTML and a React hydration
+     *  error (CARAMEL-18). */
+    renderedAt: number
 }
+
+// How often the relative-time lines move on while the page stays open.
+const CLOCK_TICK_MS = 60 * 1000
 
 const DEFAULT_PAGE_SIZE = COUPONS_BODY.pageSize
 
@@ -59,7 +68,20 @@ export default function CouponsSection({
     heroAction,
     heroNote,
     pageSize = DEFAULT_PAGE_SIZE,
+    renderedAt,
 }: CouponsSectionProps) {
+    // The server's render time until the page has hydrated, so the first
+    // client render matches the server HTML exactly. After that it keeps
+    // ticking on the server's clock: the browser's clock is read only for the
+    // time elapsed since mount, so a wrong clock cannot shift the labels.
+    const [now, setNow] = useState(renderedAt)
+    useEffect(() => {
+        const mountedAt = Date.now()
+        const id = setInterval(() => {
+            setNow(renderedAt + (Date.now() - mountedAt))
+        }, CLOCK_TICK_MS)
+        return () => clearInterval(id)
+    }, [renderedAt])
     const ITEMS_PER_PAGE = pageSize
     const MIN_LOADING_DELAY_MS = 350
 
@@ -325,7 +347,7 @@ export default function CouponsSection({
                 the LCP) until hydration — mobile LCP 4.7-8.6 s. CSS,
                 transform only, paints on the first frame. */}
             <div className="hero-enter mb-8 text-center">
-                <h1 className="from-caramel dark:to-caramel mb-4 bg-gradient-to-r to-orange-600 bg-clip-text text-5xl font-extrabold text-transparent sm:text-3xl md:text-4xl dark:from-orange-400">
+                <h1 className="mb-4 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-5xl font-extrabold text-transparent dark:from-orange-400 dark:to-caramel md:text-4xl sm:text-3xl">
                     {heroTitle}
                 </h1>
                 {heroSubtitle ? (
@@ -365,12 +387,12 @@ export default function CouponsSection({
                             // never opacity 0 in the HTML (see the header note).
                             initial={false}
                             animate={{ opacity: 1 }}
-                            className="border-caramel/25 dark:border-caramel/30 dark:bg-darkSurface flex min-h-[400px] flex-col items-center justify-center rounded-3xl border-2 border-dashed bg-white p-12 text-center shadow-sm"
+                            className="flex min-h-[400px] flex-col items-center justify-center rounded-3xl border-2 border-dashed border-caramel/25 bg-white p-12 text-center shadow-sm dark:border-caramel/30 dark:bg-darkSurface"
                         >
-                            <div className="bg-caramel/10 dark:bg-caramel/20 mb-6 flex h-16 w-16 items-center justify-center rounded-2xl text-3xl">
-                                <MagnifyingGlassIcon className="text-caramel h-8 w-8" />
+                            <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-caramel/10 text-3xl dark:bg-caramel/20">
+                                <MagnifyingGlassIcon className="h-8 w-8 text-caramel" />
                             </div>
-                            <p className="from-caramel mb-2 bg-gradient-to-r to-orange-600 bg-clip-text text-3xl font-bold text-transparent sm:text-2xl">
+                            <p className="mb-2 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text text-3xl font-bold text-transparent sm:text-2xl">
                                 {COUPONS_BODY.emptyHeading}
                             </p>
                             <p className="text-gray-600 dark:text-gray-400">
@@ -396,7 +418,7 @@ export default function CouponsSection({
                                     // the first page: start at rest.
                                     initial={false}
                                     animate={{ opacity: 1 }}
-                                    className="from-caramel mt-8 rounded-3xl bg-gradient-to-r to-orange-600 p-8 text-center text-white shadow-xl"
+                                    className="mt-8 rounded-3xl bg-gradient-to-r from-caramel to-orange-600 p-8 text-center text-white shadow-xl"
                                 >
                                     <p className="text-lg font-semibold">
                                         {COUPONS_BODY.endHeading}
@@ -421,6 +443,7 @@ export default function CouponsSection({
                                             key={`${coupon.id}-${index}`}
                                             coupon={coupon}
                                             index={index}
+                                            now={now}
                                         />
                                     ))}
                                 </AnimatePresence>
@@ -428,6 +451,7 @@ export default function CouponsSection({
                             <FailingCodesDisclosure
                                 coupons={failingCoupons}
                                 startIndex={mainCoupons.length}
+                                now={now}
                                 moreToLoad={hasMore}
                                 allFlagged={
                                     !hasMore && mainCoupons.length === 0
@@ -445,7 +469,7 @@ export default function CouponsSection({
 
                 {/* Sidebar */}
                 <aside className="w-80 space-y-4 md:w-full">
-                    <div className="dark:bg-darkSurface rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10">
+                    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
                         <div className="mb-4 flex items-center justify-center">
                             <Image
                                 src={storeLogo}
@@ -471,7 +495,7 @@ export default function CouponsSection({
                     </div>
 
                     <InstallSurfaceGate>
-                        <div className="dark:bg-darkSurface rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10">
+                        <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
                             <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
                                 {COUPONS_BODY.browserHeading}
                             </p>
@@ -516,7 +540,7 @@ export default function CouponsSection({
                                                 },
                                             )
                                         }
-                                        className="focus-visible:ring-caramel dark:focus-visible:ring-offset-darkSurface inline-flex items-center gap-2 rounded-full bg-gray-50 px-6 py-3 text-center shadow-sm transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:bg-white/5 dark:hover:bg-white/10"
+                                        className="inline-flex items-center gap-2 rounded-full bg-gray-50 px-6 py-3 text-center shadow-sm transition hover:bg-gray-100 focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:bg-white/5 dark:hover:bg-white/10 dark:focus-visible:ring-offset-darkSurface"
                                     >
                                         {browser.icon}
                                         {browser.name}
@@ -526,7 +550,7 @@ export default function CouponsSection({
                         </div>
                     </InstallSurfaceGate>
 
-                    <div className="dark:bg-darkSurface rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10">
+                    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg dark:border-white/10 dark:bg-darkSurface">
                         <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
                             {COUPONS_BODY.supportedHeading}
                         </p>
@@ -535,7 +559,7 @@ export default function CouponsSection({
                         </p>
                         <Link
                             href="/supported-stores"
-                            className="from-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkSurface mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r to-orange-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                            className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-caramel to-orange-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:focus-visible:ring-offset-darkSurface"
                         >
                             {COUPONS_BODY.supportedLink}
                         </Link>

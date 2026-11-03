@@ -80,7 +80,7 @@ afterEach(() => {
 
 describe('CouponsSection filter metadata (NF-06)', () => {
     it('populates store AND discount options from the /api/coupons/filters response', async () => {
-        render(<CouponsSection />)
+        render(<CouponsSection renderedAt={Date.now()} />)
         await waitFor(() =>
             expect(screen.getByTestId('store-options').textContent).toBe(
                 'a.com,b.com',
@@ -92,7 +92,7 @@ describe('CouponsSection filter metadata (NF-06)', () => {
     })
 
     it('requests the filters endpoint with sites included (includeSites=true)', async () => {
-        render(<CouponsSection />)
+        render(<CouponsSection renderedAt={Date.now()} />)
         await waitFor(() => {
             const requestedSites = (
                 fetch as ReturnType<typeof vi.fn>
@@ -125,6 +125,7 @@ describe('CouponsSection SSR hydration (server-rendered coupon pages)', () => {
     it('keeps server-provided coupons on mount and never refetches /api/coupons (the old filter effect wiped SSR content with a duplicate fetch)', async () => {
         render(
             <CouponsSection
+                renderedAt={Date.now()}
                 initialCoupons={[ssrCoupon]}
                 initialTotal={1}
                 disableInitialFetch
@@ -153,5 +154,51 @@ describe('CouponsSection SSR hydration (server-rendered coupon pages)', () => {
             )
         expect(listingCalls).toEqual([])
         expect(screen.getByText('SSR-rendered coupon')).toBeTruthy()
+    })
+})
+
+// CARAMEL-18: the server-rendered cards must say what the server HTML said,
+// whatever the visitor's clock reads, so the section hands its cards the
+// server's render time (`renderedAt`), not the browser's Date.now().
+describe('CouponsSection — cards run on the server render clock (CARAMEL-18)', () => {
+    it('labels a server-rendered card from renderedAt even when the browser clock is 3 h ahead', () => {
+        const HOUR = 60 * 60 * 1000
+        const renderedAt = Date.parse('2026-11-03T16:00:00Z')
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(renderedAt + 3 * HOUR)
+        try {
+            render(
+                <CouponsSection
+                    renderedAt={renderedAt}
+                    initialCoupons={[
+                        {
+                            id: 'c1',
+                            code: 'SAVE10',
+                            site: 'example.com',
+                            title: 'Save 10%',
+                            description: '10% off',
+                            rating: 4,
+                            discount_type: 'PERCENTAGE',
+                            discount_amount: 10,
+                            expiry: null,
+                            expired: false,
+                            timesUsed: 0,
+                            failWeight: 5,
+                            lastFailedAt: new Date(
+                                renderedAt - 11 * HOUR,
+                            ).toISOString(),
+                        },
+                    ]}
+                    initialTotal={1}
+                    disableInitialFetch
+                />,
+            )
+
+            expect(
+                screen.getByText('Reported not working 11h ago'),
+            ).toBeTruthy()
+        } finally {
+            vi.useRealTimers()
+        }
     })
 })

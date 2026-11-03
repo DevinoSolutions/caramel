@@ -11,6 +11,9 @@ interface FailingCodesDisclosureProps {
     coupons: Coupon[]
     /** Where the first collapsed code sits in the full list (stagger index only). */
     startIndex: number
+    /** The page clock the cards' relative-time lines are computed from
+     *  (CouponsSection `now`). */
+    now: number
     /** More pages remain, so more flagged codes may still arrive: the count reads "N+". */
     moreToLoad?: boolean
     /** Every code in the list is flagged (and none are left to load): say so above the disclosure. */
@@ -27,6 +30,7 @@ interface FailingCodesDisclosureProps {
 export default function FailingCodesDisclosure({
     coupons,
     startIndex,
+    now,
     moreToLoad = false,
     allFlagged = false,
 }: FailingCodesDisclosureProps) {
@@ -55,7 +59,7 @@ export default function FailingCodesDisclosure({
                 aria-expanded={open}
                 aria-controls={regionId}
                 onClick={() => setOpen(value => !value)}
-                className="focus-visible:ring-caramel dark:focus-visible:ring-offset-darkSurface flex w-full items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 px-5 py-3 text-left text-sm font-semibold text-amber-800 transition hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 px-5 py-3 text-left text-sm font-semibold text-amber-800 transition hover:bg-amber-50 focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300 dark:hover:bg-amber-950/30 dark:focus-visible:ring-offset-darkSurface"
             >
                 <span>{label}</span>
                 <ChevronDownIcon
@@ -76,6 +80,7 @@ export default function FailingCodesDisclosure({
                             key={coupon.id}
                             coupon={coupon}
                             index={startIndex + offset}
+                            now={now}
                         />
                     ))}
                 </AnimatePresence>
