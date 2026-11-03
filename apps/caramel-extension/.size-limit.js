@@ -256,7 +256,12 @@ module.exports = [
         // resumes once). neweracap.com's Revy Bundles app reloads the cart
         // page on any /cart/ change and cost the shopper the card in 1 of 3
         // Firefox runs. Measured 112.08 kB (+2.08 kB).
-        limit: '112.1 KB',
+        // 2026-11-03 (T-13791), raised 112.1 -> 112.2 kB: a run with no win
+        // reports every code the store refused in its own words, each with
+        // its own reason, not only the last one (funko.com: 8 refused, 1
+        // reported, so the other 7 kept leading the list). Measured 112.12 kB
+        // (+0.02 kB).
+        limit: '112.2 KB',
         brotli: false,
     },
     {
