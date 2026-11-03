@@ -244,7 +244,12 @@ module.exports = [
         // (BigCommerce) reads as the store refusing the code, so the run no
         // longer stops after two tries on store.franklinplanner.com.
         // Measured 109.71 kB (+0.14 kB).
-        limit: '109.8 KB',
+        // 2026-11-03 (T-11238), raised 109.8 -> 110.0 kB: the codes of one
+        // store are fetched once at a time, shared by the prompt check and the
+        // run, and a failed fetch is never cached, so a slow failure can no
+        // longer leave a store with codes showing "No codes for this store".
+        // Measured 109.96 kB (+0.25 kB).
+        limit: '110.0 KB',
         brotli: false,
     },
     {
