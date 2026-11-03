@@ -1125,7 +1125,11 @@ export async function startApplyingCoupons(rec, options) {
     let bestCode = null
     let bestId = null // coupon id paired with bestCode, for the trust-loop report
     let lastStoreReason = null // last real error text the store showed us
-    let lastFailId = null // coupon id paired with lastStoreReason
+    // Every coupon the store refused in its own words → that refusal, in the
+    // order tried. A run that ends with no win reports each of them to the trust
+    // loop; reporting only the last one left the other refused codes ranked
+    // first for the next shopper (funko.com, 2026-11-03: 8 refused, 1 reported).
+    const storeRejections = new Map()
     const triedCodes = []
     // Each failed code, whether it can still be on the order (not taken off,
     // not refused in the store's words), and whether the total had already
@@ -1612,7 +1616,12 @@ export async function startApplyingCoupons(rec, options) {
             !/timeout/i.test(res.errorMsg)
         ) {
             lastStoreReason = caramelStoreWords(res.errorMsg)
-            lastFailId = coupons[i].id // pair the reason with its coupon
+            // Pair the reason with its coupon.
+            if (coupons[i].id)
+                storeRejections.set(coupons[i].id, {
+                    code,
+                    reason: lastStoreReason,
+                })
             rejectedCodes.add(code)
         }
         // A code the store refused by listing it "NOT APPLIED" stays on the
@@ -1855,12 +1864,14 @@ export async function startApplyingCoupons(rec, options) {
             tried: triedCodes,
             t: performance.now(),
         })
-        // Report 'failed' ONLY when a coupon produced the store's real
-        // rejection reason (lastFailId set → lastStoreReason is that text).
+        // Report 'failed' ONLY for a coupon that produced the store's real
+        // rejection reason (storeRejections holds each one with that text), and
+        // report EACH such coupon, each judged on its own reason.
         // When the checkout gave no real signal — no-signal early-exit, time
-        // budget, or an untrusted synthetic click — lastFailId stays null and
-        // we fire NOTHING: a valid code the store rejected only because our
-        // click isn't trusted must never be recorded as a coupon failure.
+        // budget, or an untrusted synthetic click — the code never enters
+        // storeRejections and we fire NOTHING for it: a valid code the store
+        // rejected only because our click isn't trusted must never be recorded
+        // as a coupon failure.
         // A cart that already carried a discount makes the evidence just as
         // unattributable. "Cannot be combined with the discount already
         // applied" reaches lastStoreReason via coupon-apply.js's
@@ -1869,32 +1880,29 @@ export async function startApplyingCoupons(rec, options) {
         // Withheld rather than softened: the endpoint takes {worked, failed}
         // and nothing else, so there is no neutral verdict to send, and a false
         // 'failed' down-ranks a working code for every future shopper.
-        if (lastFailId) {
+        for (const [failId, { code: failCode, reason }] of storeRejections) {
             if (preExistingDiscount) {
                 log('AUTO_INSERT_VERDICT_WITHHELD', {
-                    id: lastFailId,
-                    storeReason: lastStoreReason,
+                    id: failId,
+                    storeReason: reason,
                     reason: 'the cart arrived with a discount, so this rejection is not evidence about the code',
                 })
             } else if (
                 rec.caramelFound === true &&
-                !GENERIC_ERROR_TEXT_RE.test(String(lastStoreReason)) &&
-                !_reasonNamesCode(
-                    lastStoreReason,
-                    coupons.find(c => c.id === lastFailId)?.code,
-                )
+                !GENERIC_ERROR_TEXT_RE.test(String(reason)) &&
+                !_reasonNamesCode(reason, failCode)
             ) {
                 // A box the finder picked is a guess at the store's markup, so
                 // a reason that is neither a generic rejection nor about our
                 // code ("Minimum spend $50") may describe the cart or another
                 // box. Only those two kinds of reason are evidence against it.
                 log('AUTO_INSERT_VERDICT_WITHHELD', {
-                    id: lastFailId,
-                    storeReason: lastStoreReason,
+                    id: failId,
+                    storeReason: reason,
                     reason: 'the box was found by the finder and the store reason names neither the code nor a generic rejection',
                 })
             } else {
-                reportOutcome(lastFailId, 'failed', lastStoreReason)
+                reportOutcome(failId, 'failed', reason)
             }
         }
         // Nothing auto-applied. Hand the tried codes to the modal so the user

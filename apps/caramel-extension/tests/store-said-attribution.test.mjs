@@ -292,6 +292,73 @@ describe('a real rejection is still repeated, word for word', () => {
     })
 })
 
+// funko.com, real-user pass 2026-11-03 on 1.4.35: eight codes tried, the store
+// refused every one in its own words ("Coupon already redeemed", "Please enter
+// a valid Promo Code"), and the trust loop heard about ONE of them, the last.
+// The other seven kept their rating and still led the list for the next
+// shopper. Every refusal we can attribute is evidence about its own code.
+describe('every code the store refused in its own words is reported, not only the last', () => {
+    const REASONS = {
+        TMT1: 'Coupon already redeemed',
+        BADCODE: 'Please enter a valid Promo Code',
+        OLD20: 'OLD20 has expired',
+    }
+
+    beforeEach(() => {
+        stubs.getCoupons = async () => [
+            { code: 'TMT1', id: 'c1' },
+            { code: 'BADCODE', id: 'c2' },
+            { code: 'OLD20', id: 'c3' },
+        ]
+        stubs.applyCoupon = async code => ({
+            success: false,
+            newTotal: NaN,
+            committed: false,
+            errorMsg: REASONS[code],
+            errorIsNew: true,
+        })
+    })
+
+    it('sends one failed report per refused code, each with its own reason', async () => {
+        await startApplyingCoupons(REC)
+
+        expect(outcomeCalls).toEqual([
+            ['c1', 'failed', 'Coupon already redeemed'],
+            ['c2', 'failed', 'Please enter a valid Promo Code'],
+            ['c3', 'failed', 'OLD20 has expired'],
+        ])
+    })
+
+    it('leaves out a code whose answer we cannot attribute', async () => {
+        stubs.applyCoupon = async code => ({
+            success: false,
+            newTotal: NaN,
+            committed: false,
+            errorMsg: REASONS[code],
+            // BADCODE's text was on the page before we submitted it.
+            errorIsNew: code !== 'BADCODE',
+        })
+
+        await startApplyingCoupons(REC)
+
+        expect(outcomeCalls).toEqual([
+            ['c1', 'failed', 'Coupon already redeemed'],
+            ['c3', 'failed', 'OLD20 has expired'],
+        ])
+    })
+
+    it('reports a code once when the list carries it twice', async () => {
+        stubs.getCoupons = async () => [
+            { code: 'TMT1', id: 'c1' },
+            { code: 'TMT1', id: 'c1' },
+        ]
+
+        await startApplyingCoupons(REC)
+
+        expect(outcomeCalls.filter(c => c[0] === 'c1')).toHaveLength(1)
+    })
+})
+
 describe('our own exception text is never a store quote', () => {
     it('stays silent when the attempt threw', async () => {
         // applyCoupon's catch returns String(err) as errorMsg. Showing a
