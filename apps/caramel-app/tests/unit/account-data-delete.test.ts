@@ -34,9 +34,14 @@ const { prismaMock, transactionMock } = vi.hoisted(() => {
             couponBoxProposal: {
                 deleteMany: vi.fn(() => ({ op: 'proposals' })),
             },
-            // The shopper-submitted codes live in `coupons`; unlinking them is
-            // a catalog write awaiting the owner (T-12392). Mocked so the "not
-            // called" assertion below is a statement about the route.
+            // The shopper-submitted codes live in `coupons`, which the app
+            // reads and writes only through couponsRepo's raw SQL. The unlink
+            // (T-12392) is couponsRepo.unlinkCodesSubmittedByUser, a
+            // $executeRaw; the model methods are mocked so the "not called"
+            // assertions below are statements about the route.
+            $executeRaw: vi.fn((_sql: { sql: string; values: unknown[] }) => ({
+                op: 'unlink',
+            })),
             coupon: { updateMany: vi.fn(), deleteMany: vi.fn() },
             siteSuggestion: {
                 // Typed args, so the `data` key assertion below reads the real
@@ -97,6 +102,7 @@ beforeEach(() => {
         { count: 7 },
         { count: 2 },
         { count: 3 },
+        4,
     ])
 })
 
@@ -113,6 +119,8 @@ describe('POST /api/account/data/delete — the confirmation gate', () => {
                 couponBoxProposals: 2,
             },
             scrubbed: { siteSuggestions: 3 },
+            // Its own key: the codes still exist, only the link to you is gone.
+            unlinked: { submittedCodes: 4 },
         })
         expect(transactionMock).toHaveBeenCalledTimes(1)
     })
@@ -233,13 +241,21 @@ describe('POST /api/account/data/delete — scope', () => {
         expect(prismaMock.user.delete).not.toHaveBeenCalled()
     })
 
-    it('does NOT touch the codes the caller submitted to the catalog (T-12392, owner decision pending)', async () => {
+    it('UNLINKS the codes the caller submitted, never deletes them (T-12392, owner-directed 2026-11-03)', async () => {
         const res = await POST(deleteRequest({ confirm: 'DELETE' }))
 
         // Positive half first, for the same reason as above.
         expect(res.status).toBe(200)
-        expect(transactionMock).toHaveBeenCalledTimes(1)
-
+        expect(prismaMock.$executeRaw).toHaveBeenCalledTimes(1)
+        const sql = prismaMock.$executeRaw.mock.calls[0]![0]
+        const text = sql.sql.replace(/\s+/g, ' ').trim()
+        // One column, to NULL, on the caller's own rows and nothing else: the
+        // codes stay in the catalog for every other shopper.
+        expect(text).toBe(
+            'UPDATE coupons SET submitted_by_user_id = NULL WHERE submitted_by_user_id = ?',
+        )
+        expect(sql.values).toEqual([USER_ID])
+        expect(text).not.toMatch(/DELETE/i)
         expect(prismaMock.coupon.updateMany).not.toHaveBeenCalled()
         expect(prismaMock.coupon.deleteMany).not.toHaveBeenCalled()
     })
@@ -251,7 +267,7 @@ describe('POST /api/account/data/delete — transactional', () => {
 
         const batch = transactionMock.mock.calls[0]![0]
         expect(Array.isArray(batch)).toBe(true)
-        expect(batch).toHaveLength(5)
+        expect(batch).toHaveLength(6)
         // The builders were invoked to BUILD the batch, and their results were
         // handed to $transaction rather than awaited separately. The scrub is
         // IN here on purpose: run as a fourth loose await after a successful
@@ -265,6 +281,9 @@ describe('POST /api/account/data/delete — transactional', () => {
             { op: 'reports' },
             { op: 'proposals' },
             { op: 'suggestions' },
+            // The unlink too: a loose await after the batch could fail with
+            // the rest already gone and the codes still carrying the account.
+            { op: 'unlink' },
         ])
     })
 

@@ -3,6 +3,7 @@ import {
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
 import {
+    countCodesSubmittedByUser,
     expireCoupons,
     getCouponStats,
     isKnownStore,
@@ -15,6 +16,7 @@ import {
     MAX_REQUESTED_SOURCES,
     requestSource,
     submitShopperCoupon,
+    unlinkCodesSubmittedByUser,
     writeFailedSignal,
     writeUsageSignal,
     writeWorkedSignal,
@@ -849,6 +851,39 @@ describe('listCodesSubmittedByUser ("Download your data" submitted codes, T-1239
         await expect(listCodesSubmittedByUser('u')).rejects.toThrow(
             /coupons-db schema drift \[account\.submitted-codes\]/,
         )
+    })
+})
+
+describe('countCodesSubmittedByUser + unlinkCodesSubmittedByUser ("Delete my data", T-12392)', () => {
+    it('counts only the caller’s own rows, every status, with the user id bound', async () => {
+        mockRows(sql => sql.includes('FROM coupons'), [{ total: 3 }])
+
+        await expect(
+            countCodesSubmittedByUser('user-under-test'),
+        ).resolves.toBe(3)
+        expect(capturedQueries).toHaveLength(1)
+        const q = capturedQueries[0]!
+        expect(q.trim().startsWith('SELECT')).toBe(true)
+        expect(q).toContain('WHERE submitted_by_user_id = ?')
+        expect(capturedValues[0]).toEqual(['user-under-test'])
+        // Every status: the unlink below has no visibility predicate either,
+        // so the count the button reads is exactly what the delete touches.
+        expect(q).not.toMatch(/status IN \(/)
+        expect(q).not.toMatch(/expired = FALSE/)
+    })
+
+    it('the unlink nulls ONE column on the caller’s rows and never deletes a code', async () => {
+        executeRawResult = 3
+
+        await expect(
+            unlinkCodesSubmittedByUser('user-under-test'),
+        ).resolves.toBe(3)
+        expect(capturedQueries).toHaveLength(1)
+        const q = capturedQueries[0]!.replace(/\s+/g, ' ').trim()
+        expect(q).toBe(
+            'UPDATE coupons SET submitted_by_user_id = NULL WHERE submitted_by_user_id = ?',
+        )
+        expect(capturedValues[0]).toEqual(['user-under-test'])
     })
 })
 

@@ -42,6 +42,7 @@ function emptyOverview(): ProfileOverview {
         favorites: [],
         siteSuggestions: { identifyingCount: 0 },
         couponBoxProposals: { count: 0 },
+        submittedCodes: { linkedCount: 0 },
         reports: {
             reportCount: 0,
             confirmedCount: null,
@@ -156,7 +157,39 @@ describe('the danger-zone gate counts store requests', () => {
         )
     })
 
-    it('any ONE of the five counts is enough on its own', () => {
+    it('a user whose ONLY data is a code they shared can reach the route, and the dialog says the code stays (T-12392)', () => {
+        const overview = emptyOverview()
+        overview.submittedCodes.linkedCount = 1
+        renderSection(overview)
+
+        const button = deleteButton()
+        expect(button.disabled).toBe(false)
+        fireEvent.click(button)
+        const body = dialogText()
+        // The code is not removed, so nothing reads as "permanently removes".
+        expect(body).not.toContain('permanently removes')
+        expect(body).toContain(
+            'This takes your account off the code you shared',
+        )
+        expect(body).toContain('it stays for other shoppers')
+    })
+
+    it('several shared codes alongside other data read as a second, plural sentence', () => {
+        const overview = emptyOverview()
+        overview.reports.reportCount = 1
+        overview.submittedCodes.linkedCount = 3
+        renderSection(overview)
+        fireEvent.click(deleteButton())
+
+        const body = dialogText()
+        expect(body).toContain('This permanently removes 1 coupon report')
+        expect(body).toContain(
+            'It also takes your account off the 3 codes you shared',
+        )
+        expect(body).toContain('they stay for other shoppers')
+    })
+
+    it('any ONE of the six counts is enough on its own', () => {
         const cases: ((o: ProfileOverview) => void)[] = [
             o => {
                 o.savings.eventCount = 1
@@ -178,6 +211,9 @@ describe('the danger-zone gate counts store requests', () => {
             },
             o => {
                 o.couponBoxProposals.count = 2
+            },
+            o => {
+                o.submittedCodes.linkedCount = 1
             },
         ]
         // Indexed loop, not `.entries()`: the tsconfig target predates
