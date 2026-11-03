@@ -847,27 +847,52 @@ async function _finderMayOffer(domain) {
 if (typeof _caramelCodes === 'undefined') {
     var _caramelCodes = null // { domain, list }
 }
+/* The fetch in flight, shared by everyone who asks for the same store's codes
+   before it answers (T-11238, 2026-11-03). The prompt check and the run each
+   used to send their own; the last to answer was cached, and a fetch that
+   failed or timed out was cached as an empty list. A slow failure landing
+   after a good list wiped it: "No codes for this store" on a store with
+   codes, for every later ask on the page. A failure is never cached now, so
+   the next ask tries again. */
+if (typeof _caramelCodesInFlight === 'undefined') {
+    var _caramelCodesInFlight = null // { domain, promise }
+}
 /* Test seam (WXT P1, 2026-08-12): the cache used to be a script global the
    suites reset with `globalThis._caramelCodes = null`; module scope made it
    unreachable, and an import binding cannot be assigned from outside. Only
-   tests/store-detect.test.mjs + tests/configless-store.test.mjs call this. */
+   the suites call this. */
 export function _caramelResetCachedCodes() {
     _caramelCodes = null
+    _caramelCodesInFlight = null
+}
+async function _caramelFetchCodes(domain) {
+    try {
+        const list = await fetchCoupons(domain, '', '')
+        const codes = Array.isArray(list) ? list : []
+        _caramelCodes = { domain, list: codes }
+        return codes
+    } catch (e) {
+        // This ask gets no codes; the cache stays empty so the next one
+        // fetches again instead of reading this failure for the whole page.
+        log('CODES_FETCH_FAILED', { domain, error: String(e?.message || e) })
+        return []
+    }
 }
 export async function getCachedCodes(rec) {
     if (_caramelCodes && _caramelCodes.domain === rec.domain)
         return _caramelCodes.list
-    let list = []
-    try {
-        list = await fetchCoupons(rec.domain, '', '')
-    } catch {
-        list = []
-    }
-    _caramelCodes = {
+    if (_caramelCodesInFlight?.domain === rec.domain)
+        return _caramelCodesInFlight.promise
+    const flight = {
         domain: rec.domain,
-        list: Array.isArray(list) ? list : [],
+        promise: _caramelFetchCodes(rec.domain),
     }
-    return _caramelCodes.list
+    _caramelCodesInFlight = flight
+    try {
+        return await flight.promise
+    } finally {
+        if (_caramelCodesInFlight === flight) _caramelCodesInFlight = null
+    }
 }
 
 /* --------------------------------------------------  init hook */
