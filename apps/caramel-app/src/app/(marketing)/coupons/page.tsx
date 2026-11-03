@@ -86,6 +86,8 @@ export default async function CouponsPage() {
                 disableInitialFetch
                 heroTitle={COUPONS_BODY.heading}
                 heroSubtitle={COUPONS_BODY.summary}
+                // The cards' "Xh ago" lines run on the server's clock (CARAMEL-18).
+                renderedAt={new Date().getTime()}
             />
             <PopularStores />
             {/* Server-rendered letter strip into the A–Z directory — the hub's
