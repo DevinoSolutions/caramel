@@ -60,6 +60,7 @@ import {
     caramelEndRun,
     caramelSetCurrencySymbol,
     caramelTakeAppliedWin,
+    caramelTakeLinkRun,
     caramelTakePendingSubmit,
     getPrice,
     pickBestMatch,
@@ -1238,6 +1239,48 @@ async function _caramelSecondLook() {
     window.__caramel_second_look = stop
 }
 
+/* Carry on a discount-link run the store's own page reloaded under (T-13322,
+ * dom-utils.js caramelHoldLinkRun). It is the same click, not a new run: the
+ * record exists only because the shopper pressed the pill on the page before
+ * this one, × ends it, and it is resumed at most once. Returns true when the
+ * run took the page. */
+async function _caramelResumeLinkRun() {
+    const carry = await caramelTakeLinkRun()
+    if (!carry) return false
+    if (carry.resumed) {
+        log('AUTO_INSERT_LINK_RUN_NOT_RESUMED', {
+            reason: 'already resumed once for this click',
+        })
+        return false
+    }
+    const cart = await probeCartJson()
+    if (!cart || cart.item_count !== carry.items) {
+        log('AUTO_INSERT_LINK_RUN_NOT_RESUMED', {
+            reason: 'the cart is not the one the run was on',
+            items: cart ? cart.item_count : null,
+        })
+        return false
+    }
+    const rec =
+        (await getDomainRecord(location.hostname)) ??
+        caramelConfiglessRecord(location.hostname)
+    log('AUTO_INSERT_LINK_RUN_RESUMES', {
+        next: carry.next,
+        of: carry.planned.length,
+        best: carry.bestCode,
+    })
+    try {
+        await startApplyingCoupons(rec, { resumed: true, linkCarry: carry })
+    } catch (e) {
+        // As for a form-path hop: never leave the shopper behind an
+        // "Applying…" overlay with nothing coming.
+        log('AUTO_INSERT_RESUME_FAILED', { error: String(e) })
+        hideTestingModal()
+        return false
+    }
+    return true
+}
+
 export async function startCheckoutDetection() {
     // Our own apply loop is running on this document (its overlay is up): a
     // re-detection now (the address bar moved, coupon-runner.js) must not take
@@ -1301,6 +1344,9 @@ export async function startCheckoutDetection() {
                 error: String(err?.message || err),
             })
         }
+    // A discount-link run the store's own page reloaded under carries on here
+    // (T-13322), before tryInitialize puts the pill back up over its work.
+    if (!applying && (await _caramelResumeLinkRun())) return
     // An attempt the store's own form POST cut short finishes here, on the page
     // that replaced it — before tryInitialize can re-prompt as if nothing had
     // happened, which is precisely what the user saw before.

@@ -249,7 +249,14 @@ module.exports = [
         // run, and a failed fetch is never cached, so a slow failure can no
         // longer leave a store with codes showing "No codes for this store".
         // Measured 109.96 kB (+0.25 kB).
-        limit: '110.0 KB',
+        // 2026-11-03 (T-13322), raised 110.0 -> 112.1 kB: a discount-link
+        // run the store's own page reloads under carries on, on the next page,
+        // from the code it was on (the run keeps its state with the
+        // background before each try; the next page takes it, checks it and
+        // resumes once). neweracap.com's Revy Bundles app reloads the cart
+        // page on any /cart/ change and cost the shopper the card in 1 of 3
+        // Firefox runs. Measured 112.08 kB (+2.08 kB).
+        limit: '112.1 KB',
         brotli: false,
     },
     {

@@ -889,6 +889,72 @@ export async function caramelTakeAppliedWin(maxAgeMs = 120000) {
     }
 }
 
+/* A discount-link run the store's own page reloads under (T-13322).
+ *
+ * The link path measures every code on one page and reloads only once, on
+ * purpose, after its win. A store theme can reload the cart page by itself
+ * when the cart changes under it: neweracap.com, Firefox, 1.4.34 gate
+ * (2026-11-03), reloaded at try 5 of 8 with FREE (-$55.99) already on the
+ * cart. The run died with the document, and the shopper got the best code
+ * with no card and the "Try Caramel" pill back, as if nothing had run.
+ *
+ * So the run keeps what it knows here while it probes, and the page the reload
+ * puts up picks it up (store-detect.js _caramelResumeLinkRun). Nothing in it is
+ * reported as a saving: the next page reads its own cart, as the run does.
+ * Cleared on every way the run ends on its own page, so our own reload after a
+ * win (which hands over through 'applied' instead) never resumes it. A record
+ * that was already resumed once is not resumed again: a theme that reloads on
+ * every cart change cannot keep a run going. */
+// Consumed by coupon-runner.js (cross-file content-script call).
+export async function caramelHoldLinkRun(state) {
+    _caramelHint('link_run', true)
+    await caramelTabHandoff('set', 'link_run', { ...state, t: Date.now() })
+}
+// Consumed by coupon-runner.js (cross-file content-script call).
+export async function caramelClearLinkRun() {
+    if (!caramelHandoffMayExist('link_run')) return
+    await caramelTabHandoff('clear', 'link_run')
+    _caramelHint('link_run', false)
+}
+const _caramelIsCode = v => typeof v === 'string' && v.length > 0
+const _caramelIsMinor = v => Number.isInteger(v) && v >= 0
+// Consumed by store-detect.js (cross-file content-script call).
+export async function caramelTakeLinkRun(maxAgeMs = 120000) {
+    const st = await _caramelTakeHandoff('link_run')
+    if (!st || typeof st !== 'object') return null
+    if (!(Date.now() - (st.t || 0) < maxAgeMs)) return null
+    // The shopper pressed × before the reload: the run is over.
+    if (_caramelRunStopped()) return null
+    // The run's own list, in its own order: { code, id } for each code.
+    const planned = Array.isArray(st.planned)
+        ? st.planned
+              .filter(c => c && _caramelIsCode(c.code))
+              .map(c => ({ code: c.code, id: c.id ?? null }))
+        : []
+    if (!planned.length || !_caramelIsMinor(st.base)) return null
+    if (!_caramelIsMinor(st.items) || st.items < 1) return null
+    if (!_caramelIsMinor(st.next) || st.next > planned.length) return null
+    const best = _caramelIsCode(st.bestCode) && _caramelIsMinor(st.bestTotal)
+    const arrived =
+        st.arrivedWith && _caramelIsCode(st.arrivedWith.code)
+            ? st.arrivedWith
+            : null
+    return {
+        base: st.base,
+        items: st.items,
+        planned,
+        next: st.next,
+        bestCode: best ? st.bestCode : null,
+        bestId: best ? (st.bestId ?? null) : null,
+        bestTotal: best ? st.bestTotal : st.base,
+        currency: typeof st.currency === 'string' ? st.currency : null,
+        arrivedWith: arrived,
+        measured: _caramelIsMinor(st.measured) ? st.measured : 0,
+        sawHollowDrop: st.sawHollowDrop === true,
+        resumed: st.resumed === true,
+    }
+}
+
 /* --------------------------------------------------  run continuity
  *
  * One click should test more than one code.
