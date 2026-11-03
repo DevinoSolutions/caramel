@@ -1081,14 +1081,6 @@ export async function startApplyingCoupons(rec, options) {
     // "here are codes you can paste yourself".
     const MAX_ATTEMPTS = 8
     const allCoupons = coupons
-    if (coupons.length > MAX_ATTEMPTS) coupons = coupons.slice(0, MAX_ATTEMPTS)
-
-    // From here on a submit may navigate, which ends this document mid-loop.
-    // Opening the run record now is what lets the next page pick the loop back
-    // up instead of leaving the shopper to click the pill again per code (see
-    // caramelBeginRun). Deliberately NOT opened on the discount-link path
-    // above: that one measures every code on this page and never hands off.
-    await caramelBeginRun()
 
     const hasPriceCfg = !!rec.priceContainer
     const original = hasPriceCfg
@@ -1097,6 +1089,25 @@ export async function startApplyingCoupons(rec, options) {
     // Snapshot EVERY price the container held, not just the largest — the
     // saving is measured against the tightest of these (caramelBaselineFor).
     const originalPrices = hasPriceCfg ? _caramelLastPrices.slice() : []
+
+    // Best plausible saving first, inside each proof tier the app served
+    // (caramelRankByValue, the order the discount-link path already uses), and
+    // only then the 8 we try. This loop ends at its first win and each try
+    // costs 8-10 s, so the order decides the saving: franklinplanner kept
+    // SAVE10 (-$1.95) and never tried FPBDAY (-$3.90) served after it
+    // (T-13318). The figure the shopper sees is still measured off their cart.
+    coupons = caramelRankByValue(
+        coupons,
+        Number.isFinite(original) ? Math.round(original * 100) : NaN,
+    )
+    if (coupons.length > MAX_ATTEMPTS) coupons = coupons.slice(0, MAX_ATTEMPTS)
+
+    // From here on a submit may navigate, which ends this document mid-loop.
+    // Opening the run record now is what lets the next page pick the loop back
+    // up instead of leaving the shopper to click the pill again per code (see
+    // caramelBeginRun). Deliberately NOT opened on the discount-link path
+    // above: that one measures every code on this page and never hands off.
+    await caramelBeginRun()
 
     /* Was a discount already on this cart before we touched it?
      *
