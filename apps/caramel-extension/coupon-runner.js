@@ -58,11 +58,13 @@ import {
     _isVisible,
     caramelBaselineFor,
     caramelBeginRun,
+    caramelClearLinkRun,
     caramelClearPendingSubmit,
     caramelCurrencyCode,
     caramelDisclosureFor,
     caramelEndRun,
     caramelHoldAppliedWin,
+    caramelHoldLinkRun,
     caramelIsForbiddenControl,
     caramelMarkPendingSubmit,
     caramelWatchPageLeaving,
@@ -424,7 +426,9 @@ export async function startApplyingCoupons(rec, options) {
             skipped: coupons.length - _untried.length,
         })
     }
-    if (!_untried.length) {
+    // A link run the store reloaded under may have tried every code already:
+    // what is left is putting its best back on and the card (T-13322).
+    if (!_untried.length && !options?.linkCarry) {
         log('AUTO_INSERT_STOP', { result: 'all-tried', t: performance.now() })
         showFinalModal(
             0,
@@ -446,424 +450,478 @@ export async function startApplyingCoupons(rec, options) {
     // synthetic events, while the link path is fast (~0.5s/code, no page
     // freeze), measurable (live totals), and works even when the coupon UI
     // lives behind an untrusted-click gate.
-    const _cart0 = await probeCartJson()
+    const _cartNow = await probeCartJson()
+    /* A link run the store's own reload cut short carries on here from what it
+     * knew (T-13322, dom-utils.js caramelHoldLinkRun): the total it started
+     * from, its best code so far, the shopper's own code, and where it was in
+     * its list. The cart on this page already carries a code we probed, so
+     * reading the start or the shopper's code off it would call our own code
+     * theirs. A cart whose items changed since is a different cart: no carry. */
+    const carry =
+        options?.linkCarry && _cartNow?.item_count === options.linkCarry.items
+            ? options.linkCarry
+            : null
+    const _cart0 = carry ? { ..._cartNow, total_price: carry.base } : _cartNow
     if (_cart0 && _cart0.item_count > 0) {
-        log('AUTO_INSERT_STRATEGY', {
-            via: 'discount-link',
-            total: _cart0.total_price,
-        })
-        /* Try them best-first, and keep the BEST result rather than the first
-         * one that moves anything.
-         *
-         * The loop used to stop at the first code that beat the baseline by any
-         * amount. On personalabs.com (2026-08-06) that took $1.35 on a $135
-         * cart and declared "Savings Found", while flash35 — in the same list —
-         * gave $47.25 by hand seconds later on the identical cart. The pill
-         * promises "the best code"; this is what makes that sentence true.
-         *
-         * Affordable only here: each probe is a ~0.5s network call whose result
-         * is the cart's real total, so the comparison is measured rather than
-         * guessed. The DOM path still stops at its first win, because there each
-         * attempt costs ~10s and removing a working code to shop around risks
-         * ending with nothing.
-         *
-         * The winner may be the discount the shopper ARRIVED with: probing
-         * replaces whatever is on the cart, so a code of theirs that beats
-         * everything we hold has to be put back at the end, by name.
-         */
-        const linkCodes = caramelRankByValue(coupons, _cart0.total_price).slice(
-            0,
-            8,
-        )
-        const arrivedWith = _existingCartDiscount(_cart0)
-        let bestTotal = _cart0.total_price
-        let bestCode = null
-        let bestId = null
-        let bestCurrency = _cart0.currency
-        // Probes whose cart total we actually read back, and whether any total
-        // fell only because the cart held nothing to discount. Together they
-        // decide whether the no-win card may say "none lowered your total".
-        let measuredProbes = 0
-        let sawHollowDrop = false
-        for (let i = 0; i < linkCodes.length; i++) {
-            if (globalThis._caramelCancelled) {
-                // Stopping mid-probe leaves whichever code we tried last on the
-                // cart. If the shopper had their own, hand it back before we
-                // go — via the cart-aware put, because if their code is still
-                // live here then a bare re-send is what would remove it.
-                if (arrivedWith) await _caramelPutCodeOnCart(arrivedWith.code)
-                log('AUTO_INSERT_STOP', {
-                    result: 'cancelled',
-                    restored: arrivedWith ? arrivedWith.code : null,
-                    t: performance.now(),
+        try {
+            log('AUTO_INSERT_STRATEGY', {
+                via: 'discount-link',
+                total: _cart0.total_price,
+                carried: carry ? carry.next : null,
+            })
+            /* Try them best-first, and keep the BEST result rather than the first
+             * one that moves anything.
+             *
+             * The loop used to stop at the first code that beat the baseline by any
+             * amount. On personalabs.com (2026-08-06) that took $1.35 on a $135
+             * cart and declared "Savings Found", while flash35 — in the same list —
+             * gave $47.25 by hand seconds later on the identical cart. The pill
+             * promises "the best code"; this is what makes that sentence true.
+             *
+             * Affordable only here: each probe is a ~0.5s network call whose result
+             * is the cart's real total, so the comparison is measured rather than
+             * guessed. The DOM path still stops at its first win, because there each
+             * attempt costs ~10s and removing a working code to shop around risks
+             * ending with nothing.
+             *
+             * The winner may be the discount the shopper ARRIVED with: probing
+             * replaces whatever is on the cart, so a code of theirs that beats
+             * everything we hold has to be put back at the end, by name.
+             */
+            const linkCodes = carry
+                ? carry.planned
+                : caramelRankByValue(coupons, _cart0.total_price).slice(0, 8)
+            const arrivedWith = carry
+                ? carry.arrivedWith
+                : _existingCartDiscount(_cart0)
+            let bestTotal = carry ? carry.bestTotal : _cart0.total_price
+            let bestCode = carry ? carry.bestCode : null
+            let bestId = carry ? carry.bestId : null
+            let bestCurrency = carry?.currency || _cart0.currency
+            // Probes whose cart total we actually read back, and whether any total
+            // fell only because the cart held nothing to discount. Together they
+            // decide whether the no-win card may say "none lowered your total".
+            let measuredProbes = carry ? carry.measured : 0
+            let sawHollowDrop = carry ? carry.sawHollowDrop : false
+            // What the page the store's own reload puts up needs to carry on from
+            // `next` (T-13322). Rewritten before each try, so a reload in the
+            // middle of one tries that code again rather than skipping it.
+            const holdRun = next =>
+                caramelHoldLinkRun({
+                    base: _cart0.total_price,
+                    items: _cart0.item_count,
+                    planned: linkCodes.map(c => ({
+                        code: c.code,
+                        id: c.id ?? null,
+                    })),
+                    next,
+                    bestCode,
+                    bestId,
+                    bestTotal,
+                    currency: bestCurrency,
+                    arrivedWith,
+                    measured: measuredProbes,
+                    sawHollowDrop,
+                    resumed: !!carry,
                 })
-                return
-            }
-            const { code } = linkCodes[i]
-            await updateTestingModal(i + 1, linkCodes.length, code)
-            _markTriedCode(code)
-            const after = await _caramelWithin(
-                CARAMEL_LINK_TRY_MS,
-                applyViaDiscountLink(code),
-                () => {
-                    log('AUTO_INSERT_TRY_CAPPED', {
-                        code,
-                        ms: CARAMEL_LINK_TRY_MS,
-                        reason: 'try outlived its request deadlines',
+            for (let i = carry ? carry.next : 0; i < linkCodes.length; i++) {
+                await holdRun(i)
+                if (globalThis._caramelCancelled) {
+                    // Stopping mid-probe leaves whichever code we tried last on the
+                    // cart. If the shopper had their own, hand it back before we
+                    // go — via the cart-aware put, because if their code is still
+                    // live here then a bare re-send is what would remove it.
+                    if (arrivedWith)
+                        await _caramelPutCodeOnCart(arrivedWith.code)
+                    log('AUTO_INSERT_STOP', {
+                        result: 'cancelled',
+                        restored: arrivedWith ? arrivedWith.code : null,
+                        t: performance.now(),
                     })
-                    return null
-                },
-            )
-            // A null result means the request failed or the cart became
-            // unreadable — we learned nothing about this code, so don't leave
-            // it blacklisted for the rest of the session (see _unmarkTriedCode).
-            if (!after) _unmarkTriedCode(code)
-            else measuredProbes++
-            if (
-                after &&
-                after.total_price < bestTotal &&
-                !_linkCartHoldsTheSaving(after, code)
-            ) {
-                sawHollowDrop = true
-                log('AUTO_INSERT_DROP_ON_EMPTY_CART', {
-                    code,
-                    total: after.total_price,
-                    items: after.item_count,
-                    reason: 'the total fell because the cart holds nothing the code could discount — not a saving',
-                })
-                continue
-            }
-            if (after && after.total_price < bestTotal) {
-                // A code whose request ran out of time can still land on the
-                // store after we moved on (T-12600). When the cart names that
-                // code as the live one and not this one, the drop is its.
-                const owner = _linkDropOwner(after, linkCodes[i], linkCodes)
-                if (owner !== linkCodes[i]) {
-                    log('AUTO_INSERT_DROP_BELONGS_TO_ANOTHER_CODE', {
-                        code,
-                        owner: owner.code,
-                        total: after.total_price,
-                    })
+                    return
                 }
-                bestTotal = after.total_price
-                bestCode = owner.code
-                bestId = owner.id
-                bestCurrency = after.currency || bestCurrency
-            }
-        }
-        /* The cart currently carries whichever code we probed LAST, so the
-         * winner has to go back on before anyone is told about it — and what we
-         * then report is what the cart says AFTER that, not what we hoped for.
-         *
-         * Shopping around introduced this risk and has to carry it: the re-apply
-         * is one more request, and it can fail (rate limit, a code the store
-         * accepts once, an expiry that lands mid-run). Reporting `bestTotal`
-         * regardless would announce a saving that is no longer on the cart —
-         * exactly the class of false claim the measured-total rule exists to
-         * prevent, reintroduced by the fix for a different problem.
-         */
-        let confirmed = null
-        // Kept when the re-apply loses it: this is the one code we WATCHED work,
-        // and it must not disappear into the bottom of the copy list (every
-        // probed code is marked tried, and the sink puts tried codes last — so
-        // without this the single proven code would be the hardest one to find).
-        let lostWinner = null
-        let lostWinnerSave = ''
-        if (bestCode) {
-            // Cart-aware put, not a bare re-send: the winner was probed, so it
-            // is already in the discount list, and re-sending an attached code
-            // demotes it — the likeliest reading of REAPPLY_LOST below firing
-            // at all. The confirmation underneath is unchanged and still
-            // decides the verdict, so this can only turn a lost win into a
-            // measured one.
-            // Up to two tries' worth: a read, a re-send, a clear and a re-send.
-            confirmed = await _caramelWithin(
-                2 * CARAMEL_LINK_TRY_MS,
-                _caramelPutCodeOnCart(bestCode),
-                () => {
-                    log('AUTO_INSERT_TRY_CAPPED', {
-                        code: bestCode,
-                        ms: 2 * CARAMEL_LINK_TRY_MS,
-                        reason: 're-apply outlived its request deadlines',
-                    })
-                    return null
-                },
-            )
-            if (
-                !confirmed ||
-                confirmed.total_price >= _cart0.total_price ||
-                !_linkCartHoldsTheSaving(confirmed, bestCode)
-            ) {
-                // Nothing is riding on the cart now. Say so rather than claim a
-                // win, and let the no-win branch below hand over the codes.
-                log('AUTO_INSERT_REAPPLY_LOST', {
-                    code: bestCode,
-                    expected: bestTotal,
-                    got: confirmed ? confirmed.total_price : null,
-                    reason: 'the winning code did not go back on the cart — reporting no win rather than a saving we cannot see',
-                })
-                lostWinner = bestCode
-                lostWinnerSave = _caramelCartMoney(
-                    _cart0,
-                    _cart0.total_price - bestTotal,
+                const { code } = linkCodes[i]
+                await updateTestingModal(i + 1, linkCodes.length, code)
+                _markTriedCode(code)
+                const after = await _caramelWithin(
+                    CARAMEL_LINK_TRY_MS,
+                    applyViaDiscountLink(code),
+                    () => {
+                        log('AUTO_INSERT_TRY_CAPPED', {
+                            code,
+                            ms: CARAMEL_LINK_TRY_MS,
+                            reason: 'try outlived its request deadlines',
+                        })
+                        return null
+                    },
                 )
-                bestCode = null
-                confirmed = null
-            } else {
-                /* The drop is real — but is it OUR code producing it?
-                 *
-                 * The confirmation checks the total, not the identity, and QA
-                 * caught the gap on 2 of 3 live wins (2026-08-06): the card
-                 * said "Code LAYAN" while 100percentpure's cart carried
-                 * `ATsxsb7x` with `LAYAN:false`, and said "26-10OFFTTWMH0"
-                 * while goodr's carried `26-10OFFLNREWZ`.
-                 *
-                 * Those two look identical and are not, and the money says to
-                 * treat them differently:
-                 *
-                 *   · A store that rewrites our code into a generated
-                 *     single-use one (LAYAN → ATsxsb7x) is still our win, and
-                 *     OUR code is the one the shopper can type again. Naming
-                 *     the generated string would be accurate and useless.
-                 *   · A cart honouring a DIFFERENT code WE PROBED means the
-                 *     re-apply never took and that other code is doing the
-                 *     work. Naming ours credits the wrong code and tells the
-                 *     shopper to expect one that is not applied.
-                 *
-                 * Telling them apart is possible only because we know exactly
-                 * what we sent. Nothing here touches the AMOUNT: that is still
-                 * read off the cart, so this can correct a name, never inflate
-                 * a saving. */
-                const honoured = _existingCartDiscount(confirmed)
-                const ours =
-                    honoured && honoured.code !== bestCode.toUpperCase()
-                        ? linkCodes.find(
-                              c =>
-                                  String(c.code).toUpperCase() ===
-                                  honoured.code,
-                          )
-                        : null
-                if (ours) {
-                    log('AUTO_INSERT_REAPPLY_OTHER_CODE', {
-                        named: bestCode,
-                        honoured: honoured.code,
-                        reason: 'the cart is honouring a different code we probed — crediting that one instead',
+                // A null result means the request failed or the cart became
+                // unreadable — we learned nothing about this code, so don't leave
+                // it blacklisted for the rest of the session (see _unmarkTriedCode).
+                if (!after) _unmarkTriedCode(code)
+                else measuredProbes++
+                if (
+                    after &&
+                    after.total_price < bestTotal &&
+                    !_linkCartHoldsTheSaving(after, code)
+                ) {
+                    sawHollowDrop = true
+                    log('AUTO_INSERT_DROP_ON_EMPTY_CART', {
+                        code,
+                        total: after.total_price,
+                        items: after.item_count,
+                        reason: 'the total fell because the cart holds nothing the code could discount — not a saving',
                     })
-                    bestCode = ours.code
-                    bestId = ours.id
+                    continue
                 }
-                if (confirmed.total_price > bestTotal) {
-                    // It landed, but for less than it did on the probe. The
-                    // cart is the authority; report what is actually on it.
-                    log('AUTO_INSERT_REAPPLY_SMALLER', {
+                if (after && after.total_price < bestTotal) {
+                    // A code whose request ran out of time can still land on the
+                    // store after we moved on (T-12600). When the cart names that
+                    // code as the live one and not this one, the drop is its.
+                    const owner = _linkDropOwner(after, linkCodes[i], linkCodes)
+                    if (owner !== linkCodes[i]) {
+                        log('AUTO_INSERT_DROP_BELONGS_TO_ANOTHER_CODE', {
+                            code,
+                            owner: owner.code,
+                            total: after.total_price,
+                        })
+                    }
+                    bestTotal = after.total_price
+                    bestCode = owner.code
+                    bestId = owner.id
+                    bestCurrency = after.currency || bestCurrency
+                }
+            }
+            // Every code is tried: a reload from here on goes straight to putting
+            // the best back on and the card.
+            await holdRun(linkCodes.length)
+            /* The cart currently carries whichever code we probed LAST, so the
+             * winner has to go back on before anyone is told about it — and what we
+             * then report is what the cart says AFTER that, not what we hoped for.
+             *
+             * Shopping around introduced this risk and has to carry it: the re-apply
+             * is one more request, and it can fail (rate limit, a code the store
+             * accepts once, an expiry that lands mid-run). Reporting `bestTotal`
+             * regardless would announce a saving that is no longer on the cart —
+             * exactly the class of false claim the measured-total rule exists to
+             * prevent, reintroduced by the fix for a different problem.
+             */
+            let confirmed = null
+            // Kept when the re-apply loses it: this is the one code we WATCHED work,
+            // and it must not disappear into the bottom of the copy list (every
+            // probed code is marked tried, and the sink puts tried codes last — so
+            // without this the single proven code would be the hardest one to find).
+            let lostWinner = null
+            let lostWinnerSave = ''
+            if (bestCode) {
+                // Cart-aware put, not a bare re-send: the winner was probed, so it
+                // is already in the discount list, and re-sending an attached code
+                // demotes it — the likeliest reading of REAPPLY_LOST below firing
+                // at all. The confirmation underneath is unchanged and still
+                // decides the verdict, so this can only turn a lost win into a
+                // measured one.
+                // Up to two tries' worth: a read, a re-send, a clear and a re-send.
+                confirmed = await _caramelWithin(
+                    2 * CARAMEL_LINK_TRY_MS,
+                    _caramelPutCodeOnCart(bestCode),
+                    () => {
+                        log('AUTO_INSERT_TRY_CAPPED', {
+                            code: bestCode,
+                            ms: 2 * CARAMEL_LINK_TRY_MS,
+                            reason: 're-apply outlived its request deadlines',
+                        })
+                        return null
+                    },
+                )
+                if (
+                    !confirmed ||
+                    confirmed.total_price >= _cart0.total_price ||
+                    !_linkCartHoldsTheSaving(confirmed, bestCode)
+                ) {
+                    // Nothing is riding on the cart now. Say so rather than claim a
+                    // win, and let the no-win branch below hand over the codes.
+                    log('AUTO_INSERT_REAPPLY_LOST', {
                         code: bestCode,
                         expected: bestTotal,
-                        got: confirmed.total_price,
+                        got: confirmed ? confirmed.total_price : null,
+                        reason: 'the winning code did not go back on the cart — reporting no win rather than a saving we cannot see',
                     })
+                    lostWinner = bestCode
+                    lostWinnerSave = _caramelCartMoney(
+                        _cart0,
+                        _cart0.total_price - bestTotal,
+                    )
+                    bestCode = null
+                    confirmed = null
+                } else {
+                    /* The drop is real — but is it OUR code producing it?
+                     *
+                     * The confirmation checks the total, not the identity, and QA
+                     * caught the gap on 2 of 3 live wins (2026-08-06): the card
+                     * said "Code LAYAN" while 100percentpure's cart carried
+                     * `ATsxsb7x` with `LAYAN:false`, and said "26-10OFFTTWMH0"
+                     * while goodr's carried `26-10OFFLNREWZ`.
+                     *
+                     * Those two look identical and are not, and the money says to
+                     * treat them differently:
+                     *
+                     *   · A store that rewrites our code into a generated
+                     *     single-use one (LAYAN → ATsxsb7x) is still our win, and
+                     *     OUR code is the one the shopper can type again. Naming
+                     *     the generated string would be accurate and useless.
+                     *   · A cart honouring a DIFFERENT code WE PROBED means the
+                     *     re-apply never took and that other code is doing the
+                     *     work. Naming ours credits the wrong code and tells the
+                     *     shopper to expect one that is not applied.
+                     *
+                     * Telling them apart is possible only because we know exactly
+                     * what we sent. Nothing here touches the AMOUNT: that is still
+                     * read off the cart, so this can correct a name, never inflate
+                     * a saving. */
+                    const honoured = _existingCartDiscount(confirmed)
+                    const ours =
+                        honoured && honoured.code !== bestCode.toUpperCase()
+                            ? linkCodes.find(
+                                  c =>
+                                      String(c.code).toUpperCase() ===
+                                      honoured.code,
+                              )
+                            : null
+                    if (ours) {
+                        log('AUTO_INSERT_REAPPLY_OTHER_CODE', {
+                            named: bestCode,
+                            honoured: honoured.code,
+                            reason: 'the cart is honouring a different code we probed — crediting that one instead',
+                        })
+                        bestCode = ours.code
+                        bestId = ours.id
+                    }
+                    if (confirmed.total_price > bestTotal) {
+                        // It landed, but for less than it did on the probe. The
+                        // cart is the authority; report what is actually on it.
+                        log('AUTO_INSERT_REAPPLY_SMALLER', {
+                            code: bestCode,
+                            expected: bestTotal,
+                            got: confirmed.total_price,
+                        })
+                    }
                 }
             }
-        }
-        /* The credit must still stand once the store settles (T-11366, see
-         * caramelCreditSettles). Here the confirmation above is already a
-         * second read of the cart, which is all the short window would add,
-         * so only a $0 order or a large drop is held for the full window. */
-        if (
-            bestCode &&
-            caramelSettleWindowMs(_cart0.total_price, confirmed.total_price) ===
-                CARAMEL_SETTLE_FULL_MS
-        ) {
-            const winner = bestCode
-            const settled = await caramelCreditSettles({
-                code: winner,
-                from: _cart0.total_price,
-                total: confirmed.total_price,
-                checkTotal: true,
-                wasNamed: _linkCartNamesCode(confirmed, winner),
-                read: async () => {
-                    const cart = await probeCartJson()
-                    if (!cart) return null
-                    return {
-                        total: _linkCartHoldsTheSaving(cart, winner)
-                            ? cart.total_price
-                            : _cart0.total_price,
-                        named: _linkCartNamesCode(cart, winner),
-                    }
-                },
-                windowMs: CARAMEL_SETTLE_FULL_MS,
-            })
-            if (settled.held) {
-                confirmed = { ...confirmed, total_price: settled.total }
-            } else {
-                // The same card as a winner that would not go back on: we
-                // watched it work, and the store did not keep it.
-                lostWinner = winner
-                lostWinnerSave = _caramelCartMoney(
-                    _cart0,
-                    _cart0.total_price - bestTotal,
-                )
-                bestCode = null
-                confirmed = null
+            /* The credit must still stand once the store settles (T-11366, see
+             * caramelCreditSettles). Here the confirmation above is already a
+             * second read of the cart, which is all the short window would add,
+             * so only a $0 order or a large drop is held for the full window. */
+            if (
+                bestCode &&
+                caramelSettleWindowMs(
+                    _cart0.total_price,
+                    confirmed.total_price,
+                ) === CARAMEL_SETTLE_FULL_MS
+            ) {
+                const winner = bestCode
+                const settled = await caramelCreditSettles({
+                    code: winner,
+                    from: _cart0.total_price,
+                    total: confirmed.total_price,
+                    checkTotal: true,
+                    wasNamed: _linkCartNamesCode(confirmed, winner),
+                    read: async () => {
+                        const cart = await probeCartJson()
+                        if (!cart) return null
+                        return {
+                            total: _linkCartHoldsTheSaving(cart, winner)
+                                ? cart.total_price
+                                : _cart0.total_price,
+                            named: _linkCartNamesCode(cart, winner),
+                        }
+                    },
+                    windowMs: CARAMEL_SETTLE_FULL_MS,
+                })
+                if (settled.held) {
+                    confirmed = { ...confirmed, total_price: settled.total }
+                } else {
+                    // The same card as a winner that would not go back on: we
+                    // watched it work, and the store did not keep it.
+                    lostWinner = winner
+                    lostWinnerSave = _caramelCartMoney(
+                        _cart0,
+                        _cart0.total_price - bestTotal,
+                    )
+                    bestCode = null
+                    confirmed = null
+                }
             }
-        }
-        if (bestCode) {
-            const saved = (_cart0.total_price - confirmed.total_price) / 100
+            if (bestCode) {
+                const saved = (_cart0.total_price - confirmed.total_price) / 100
+                log('AUTO_INSERT_STOP', {
+                    result: 'applied',
+                    via: 'discount-link',
+                    bestCode,
+                    bestSave: saved,
+                    considered: linkCodes.length,
+                    t: performance.now(),
+                })
+                // Dispatch the "worked" trust-loop report BEFORE the reload below
+                // unloads the page (the POST is already in flight by then).
+                reportOutcome(bestId, 'worked')
+                // Reload so the page's own UI shows the applied discount (tag + new
+                // total), then re-show our result on the fresh document. The
+                // background holds the handoff for this tab and origin
+                // (caramelHoldAppliedWin), so it can't leak across sites and the
+                // page cannot write it. Awaited: the reload ends this document.
+                await caramelHoldAppliedWin({
+                    code: bestCode,
+                    // Carried across the reload so the fresh document can record
+                    // the saving against its catalog coupon — the handoff is the
+                    // only place that id still exists there.
+                    id: bestId,
+                    saved,
+                    currency: confirmed.currency || bestCurrency,
+                })
+                // This reload is ours and hands over through 'applied' above:
+                // it must not read as the store reloading under the run.
+                await caramelClearLinkRun()
+                location.reload()
+                return
+            }
+            // Nothing we hold beat what the shopper already had. Probing MAY have
+            // taken their code off — and may equally have left it untouched, which
+            // is the case that used to be destroyed here. Leaving them worse off
+            // than before we ran is the one outcome this flow must never produce,
+            // and asserting we didn't is not the same as checking.
+            const keptExisting = arrivedWith
+                ? await _caramelRestoreArrivedDiscount(arrivedWith)
+                : null
+            // Their discount is gone and would not go back on. Everything below
+            // has to read differently when this is set — most of all the sentence
+            // that would otherwise tell them a dead code is saving them money.
+            const lostTheirs =
+                arrivedWith && !keptExisting ? arrivedWith.code : null
             log('AUTO_INSERT_STOP', {
-                result: 'applied',
+                result: 'none',
                 via: 'discount-link',
-                bestCode,
-                bestSave: saved,
-                considered: linkCodes.length,
+                tried: linkCodes.map(c => c.code),
+                kept: keptExisting ? keptExisting.code : null,
+                lostTheirs,
                 t: performance.now(),
             })
-            // Dispatch the "worked" trust-loop report BEFORE the reload below
-            // unloads the page (the POST is already in flight by then).
-            reportOutcome(bestId, 'worked')
-            // Reload so the page's own UI shows the applied discount (tag + new
-            // total), then re-show our result on the fresh document. The
-            // background holds the handoff for this tab and origin
-            // (caramelHoldAppliedWin), so it can't leak across sites and the
-            // page cannot write it. Awaited: the reload ends this document.
-            await caramelHoldAppliedWin({
-                code: bestCode,
-                // Carried across the reload so the fresh document can record
-                // the saving against its catalog coupon — the handoff is the
-                // only place that id still exists there.
-                id: bestId,
-                saved,
-                currency: confirmed.currency || bestCurrency,
-            })
-            location.reload()
-            return
-        }
-        // Nothing we hold beat what the shopper already had. Probing MAY have
-        // taken their code off — and may equally have left it untouched, which
-        // is the case that used to be destroyed here. Leaving them worse off
-        // than before we ran is the one outcome this flow must never produce,
-        // and asserting we didn't is not the same as checking.
-        const keptExisting = arrivedWith
-            ? await _caramelRestoreArrivedDiscount(arrivedWith)
-            : null
-        // Their discount is gone and would not go back on. Everything below
-        // has to read differently when this is set — most of all the sentence
-        // that would otherwise tell them a dead code is saving them money.
-        const lostTheirs =
-            arrivedWith && !keptExisting ? arrivedWith.code : null
-        log('AUTO_INSERT_STOP', {
-            result: 'none',
-            via: 'discount-link',
-            tried: linkCodes.map(c => c.code),
-            kept: keptExisting ? keptExisting.code : null,
-            lostTheirs,
-            t: performance.now(),
-        })
-        // None of the codes BEAT the baseline. That is not the same as "nothing
-        // worked", and saying so when the cart already carries a discount is
-        // the most dangerous thing this flow can tell a user.
-        //
-        // Seen twice on real stores (2026-08-05), both with the discount
-        // printed on screen behind our own modal: goodr.com holding
-        // BOLDERBOULDER15 at -$8.00, and 1thrive.com holding JESS20 at -$20.00
-        // that WE had just won. In both cases the modal read "Auto-apply didn't
-        // stick this time. Copy a code and paste it in the store's promo box"
-        // and offered the already-applied code as the first thing to copy.
-        // Following that advice is what actually costs the money: pasting
-        // another code into a Shopify promo box REPLACES the live one. The tool
-        // never dropped the discount itself — it just told the user to.
-        /* A code we watched work, that then wouldn't stay on. Lead with it.
-         *
-         * It is the single most useful thing on this card — we measured it — and
-         * the default ordering would bury it: every probed code is marked tried,
-         * and the sink deliberately puts tried codes last. So it goes first, by
-         * name, with the amount it produced, and the shopper is told plainly
-         * what happened rather than being handed a silent list. */
-        if (lostWinner) {
-            const first = coupons.filter(
-                c => String(c.code).toUpperCase() === lostWinner.toUpperCase(),
-            )
-            const rest = coupons.filter(
-                c => String(c.code).toUpperCase() !== lostWinner.toUpperCase(),
-            )
-            const theirs = keptExisting
-                ? keptExisting.restored
-                    ? ` We've put your ${keptExisting.code} back on the cart.`
-                    : ` Your ${keptExisting.code} is still on the cart.`
-                : lostTheirs
-                  ? ` Your own ${lostTheirs} came off while we were testing and the store wouldn't take it back — it's in the list too.`
-                  : ''
+            // None of the codes BEAT the baseline. That is not the same as "nothing
+            // worked", and saying so when the cart already carries a discount is
+            // the most dangerous thing this flow can tell a user.
+            //
+            // Seen twice on real stores (2026-08-05), both with the discount
+            // printed on screen behind our own modal: goodr.com holding
+            // BOLDERBOULDER15 at -$8.00, and 1thrive.com holding JESS20 at -$20.00
+            // that WE had just won. In both cases the modal read "Auto-apply didn't
+            // stick this time. Copy a code and paste it in the store's promo box"
+            // and offered the already-applied code as the first thing to copy.
+            // Following that advice is what actually costs the money: pasting
+            // another code into a Shopify promo box REPLACES the live one. The tool
+            // never dropped the discount itself — it just told the user to.
+            /* A code we watched work, that then wouldn't stay on. Lead with it.
+             *
+             * It is the single most useful thing on this card — we measured it — and
+             * the default ordering would bury it: every probed code is marked tried,
+             * and the sink deliberately puts tried codes last. So it goes first, by
+             * name, with the amount it produced, and the shopper is told plainly
+             * what happened rather than being handed a silent list. */
+            if (lostWinner) {
+                const first = coupons.filter(
+                    c =>
+                        String(c.code).toUpperCase() ===
+                        lostWinner.toUpperCase(),
+                )
+                const rest = coupons.filter(
+                    c =>
+                        String(c.code).toUpperCase() !==
+                        lostWinner.toUpperCase(),
+                )
+                const theirs = keptExisting
+                    ? keptExisting.restored
+                        ? ` We've put your ${keptExisting.code} back on the cart.`
+                        : ` Your ${keptExisting.code} is still on the cart.`
+                    : lostTheirs
+                      ? ` Your own ${lostTheirs} came off while we were testing and the store wouldn't take it back — it's in the list too.`
+                      : ''
+                showFinalModal(
+                    0,
+                    null,
+                    `${lostWinner} took ${lostWinnerSave} off when we tested it, but the store wouldn't keep it on your cart.${theirs} It's first in the list below — worth pasting in by hand.`,
+                    false,
+                    [
+                        ...first,
+                        ...(lostTheirs ? [_caramelOwnCodeRow(lostTheirs)] : []),
+                        ...caramelSinkTriedCodes(rest),
+                    ],
+                )
+                return
+            }
+            if (keptExisting) {
+                // Drop the live code from the copy list: re-sending a code the cart
+                // already holds is measurably how you delete it, so offering it
+                // would cost them the exact amount this sentence congratulates
+                // them on.
+                const others = coupons.filter(
+                    c => String(c.code).toUpperCase() !== keptExisting.code,
+                )
+                showFinalModal(
+                    0,
+                    null,
+                    `${keptExisting.code} is already applied and saving you ${keptExisting.amountText} — we checked ${linkCodes.length} other code${linkCodes.length === 1 ? '' : 's'} and none beat it.`,
+                    false,
+                    others,
+                )
+                return
+            }
+            if (lostTheirs) {
+                /* We took their discount off and could not put it back. No version
+                 * of this is good news, and the old code reached for the good-news
+                 * sentence anyway. Say what happened and lead with the one code we
+                 * know worked on this cart. */
+                const rest = coupons.filter(
+                    c => String(c.code).toUpperCase() !== lostTheirs,
+                )
+                showFinalModal(
+                    0,
+                    null,
+                    `We couldn't put your ${lostTheirs} back on the cart — paste it in at checkout to get that discount again. None of the ${linkCodes.length} code${linkCodes.length === 1 ? '' : 's'} we checked beat it.`,
+                    false,
+                    [
+                        _caramelOwnCodeRow(lostTheirs),
+                        ...caramelSinkTriedCodes(rest),
+                    ],
+                )
+                return
+            }
+            // Genuinely no discount on the cart — hand the codes over to copy
+            // instead of also grinding the (deaf) DOM form.
+            //
+            // Say what we measured. The default line, "Auto-apply didn't stick",
+            // blames the tool; on the stores where this lands (2026-11-02:
+            // bostonproper, hobbytron, purpleleafshop, shefit, vincecamuto) the
+            // store's own cart marked every code we sent not applicable. Only when
+            // we read the total back after EVERY probe, and none fell for a hollow
+            // reason, may we say none lowered it; otherwise keep the default line
+            // rather than claim a total we did not see.
+            const sawEveryTotal =
+                linkCodes.length > 0 &&
+                measuredProbes === linkCodes.length &&
+                !sawHollowDrop
             showFinalModal(
                 0,
                 null,
-                `${lostWinner} took ${lostWinnerSave} off when we tested it, but the store wouldn't keep it on your cart.${theirs} It's first in the list below — worth pasting in by hand.`,
+                sawEveryTotal
+                    ? `We tried ${linkCodes.length} code${linkCodes.length === 1 ? '' : 's'} on your cart and none lowered your total. You can still paste one by hand.`
+                    : null,
                 false,
-                [
-                    ...first,
-                    ...(lostTheirs ? [_caramelOwnCodeRow(lostTheirs)] : []),
-                    ...caramelSinkTriedCodes(rest),
-                ],
+                coupons,
             )
             return
+        } finally {
+            // However the run ended on this page (a card, cancelled, a throw),
+            // there is nothing left for a later page to carry on.
+            await caramelClearLinkRun()
         }
-        if (keptExisting) {
-            // Drop the live code from the copy list: re-sending a code the cart
-            // already holds is measurably how you delete it, so offering it
-            // would cost them the exact amount this sentence congratulates
-            // them on.
-            const others = coupons.filter(
-                c => String(c.code).toUpperCase() !== keptExisting.code,
-            )
-            showFinalModal(
-                0,
-                null,
-                `${keptExisting.code} is already applied and saving you ${keptExisting.amountText} — we checked ${linkCodes.length} other code${linkCodes.length === 1 ? '' : 's'} and none beat it.`,
-                false,
-                others,
-            )
-            return
-        }
-        if (lostTheirs) {
-            /* We took their discount off and could not put it back. No version
-             * of this is good news, and the old code reached for the good-news
-             * sentence anyway. Say what happened and lead with the one code we
-             * know worked on this cart. */
-            const rest = coupons.filter(
-                c => String(c.code).toUpperCase() !== lostTheirs,
-            )
-            showFinalModal(
-                0,
-                null,
-                `We couldn't put your ${lostTheirs} back on the cart — paste it in at checkout to get that discount again. None of the ${linkCodes.length} code${linkCodes.length === 1 ? '' : 's'} we checked beat it.`,
-                false,
-                [
-                    _caramelOwnCodeRow(lostTheirs),
-                    ...caramelSinkTriedCodes(rest),
-                ],
-            )
-            return
-        }
-        // Genuinely no discount on the cart — hand the codes over to copy
-        // instead of also grinding the (deaf) DOM form.
-        //
-        // Say what we measured. The default line, "Auto-apply didn't stick",
-        // blames the tool; on the stores where this lands (2026-11-02:
-        // bostonproper, hobbytron, purpleleafshop, shefit, vincecamuto) the
-        // store's own cart marked every code we sent not applicable. Only when
-        // we read the total back after EVERY probe, and none fell for a hollow
-        // reason, may we say none lowered it; otherwise keep the default line
-        // rather than claim a total we did not see.
-        const sawEveryTotal =
-            linkCodes.length > 0 &&
-            measuredProbes === linkCodes.length &&
-            !sawHollowDrop
-        showFinalModal(
-            0,
-            null,
-            sawEveryTotal
-                ? `We tried ${linkCodes.length} code${linkCodes.length === 1 ? '' : 's'} on your cart and none lowered your total. You can still paste one by hand.`
-                : null,
-            false,
-            coupons,
-        )
-        return
     }
 
     // Nothing to discount? Say so, and don't spend the user's time or the
