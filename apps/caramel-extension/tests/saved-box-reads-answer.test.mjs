@@ -96,18 +96,44 @@ describe('a saved box: the store refusing a code', () => {
     )
 
     it(
-        'the same page read as a plain config still waits the whole window (the measured defect)',
+        'the same page read as a plain config ends the wait too, quoting the plain way',
         async () => {
             storeSaysBesideTheBox(REFUSAL)
 
             const { res, ms } = await timed('BAD15', config())
 
             expect(res.success).toBe(false)
-            expect(ms).toBeGreaterThan(9000)
-            // The plain reader quotes a window around the words: the field's
-            // label and the Apply button come with it.
+            // It used to wait the whole 10 s window (T-13100,
+            // store.franklinplanner.com): a refusal read beside a configured
+            // box now ends the wait the way a saved box's does.
+            expect(ms).toBeLessThan(6000)
+            // The plain reader still quotes a window around the words: the
+            // field's label and the Apply button come with it.
             expect(res.errorMsg).not.toBe(REFUSAL)
             expect(res.errorMsg).toContain('Apply')
+        },
+        SLOW,
+    )
+
+    it(
+        'a plain config whose store prints a refusal-shaped caveat before lowering the total still wins',
+        async () => {
+            document.getElementById('ap').addEventListener('click', () => {
+                setTimeout(() => {
+                    const p = document.createElement('p')
+                    p.textContent =
+                        'This code cannot be combined with other offers.'
+                    document.querySelector('.promo').appendChild(p)
+                }, 100)
+                setTimeout(() => {
+                    document.getElementById('tot').textContent = '$85.00'
+                }, 700)
+            })
+
+            const { res } = await timed('TEXT15', config())
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(85)
         },
         SLOW,
     )
@@ -268,8 +294,9 @@ describe('which configs read like a found box', () => {
                 config({ savedBox: true, errorIndicator: '#nowhere' }),
             )
 
-            // Read the plain way: no early answer, and the window quote.
-            expect(ms).toBeGreaterThan(9000)
+            // Read the plain way: the window quote, not a found box's sentence.
+            // The refusal the plain reader sees still ends the wait (T-13100).
+            expect(ms).toBeLessThan(6000)
             expect(res.errorMsg).not.toBe(REFUSAL)
         },
         SLOW,

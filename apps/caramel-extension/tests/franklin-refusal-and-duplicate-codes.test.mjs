@@ -149,12 +149,6 @@ describe('franklinplanner: "Coupon does not apply" is the store answering', () =
             expect(GENERIC_ERROR_TEXT_RE.test(t), t).toBe(false)
     })
 
-    // TODO(T-13100): a configured box whose refusal is read here, beside the
-    // box rather than by its errorIndicator, still waits the whole ~10s window
-    // per code, and the same sentence redrawn for the next code is not
-    // attributed to it (the early waiter and the redraw watch serve finder and
-    // saved boxes only). Neither ends the run any more: the first refusal is
-    // attributed (below), and the runner's signal is sticky.
     it('a refused code is the store answering this code, in its own words', async () => {
         storeRefusesEveryCode()
 
@@ -177,4 +171,79 @@ describe('franklinplanner: "Coupon does not apply" is the store answering', () =
         expect(second.success).toBe(false)
         expect(second.errorMsg).toBe(REFUSAL)
     }, 30000)
+})
+
+// T-13100: the config's errorIndicator misses BigCommerce's alert, so the
+// refusal is read beside the box by the generic reader. That reading used to
+// end the wait only for finder-picked and saved boxes, so on the live checkout
+// every refused code here waited out the whole 10 s window (22132: 11 s on
+// 2026-11-03), and the same sentence drawn again for the next code was "already
+// on the page", not this code's answer.
+describe('franklinplanner: a refusal read beside a configured box ends the wait', () => {
+    it('the first refused code is judged in a few seconds, not the full window', async () => {
+        storeRefusesEveryCode()
+
+        const t0 = performance.now()
+        const res = await applyCoupon('CHEER', FRANKLIN_REC)
+
+        expect(res.errorIsNew).toBe(true)
+        expect(performance.now() - t0).toBeLessThan(6000)
+    }, 20000)
+
+    it('the same sentence drawn again for the next code is that code’s answer, and quick', async () => {
+        storeRefusesEveryCode()
+
+        await applyCoupon('CHEER', FRANKLIN_REC)
+        document.querySelector('input[name="redeemableCode"]').value = ''
+        const t0 = performance.now()
+        const second = await applyCoupon('22132', FRANKLIN_REC)
+
+        expect(second.errorMsg).toBe(REFUSAL)
+        expect(second.errorIsNew).toBe(true)
+        expect(performance.now() - t0).toBeLessThan(6000)
+    }, 30000)
+
+    it('a working code still wins when the gift-card refusal comes first and the total drops seconds later', async () => {
+        // Live 2026-11-04: BigCommerce tries every code as a gift certificate
+        // first ("Gift Certificate code `FPBDAY` is invalid") and only then
+        // applies it as a coupon; the total can take a few seconds to move.
+        document
+            .querySelector('[data-test="redeemableEntry-submit"]')
+            .addEventListener('click', () => {
+                setTimeout(() => {
+                    const box = document.createElement('div')
+                    box.className = 'alertBox alertBox--error'
+                    box.innerHTML =
+                        '<div class="alertBox-column alertBox-message" role="alert"></div>'
+                    box.firstChild.textContent =
+                        'Gift Certificate code `FPBDAY` is invalid'
+                    document.getElementById('field').prepend(box, '\n')
+                }, 150)
+                setTimeout(() => {
+                    document.querySelector(
+                        '[data-test="cart-total"]',
+                    ).textContent = 'GRAND TOTAL (USD) $15.60'
+                }, 3000)
+            })
+
+        const res = await applyCoupon('FPBDAY', FRANKLIN_REC)
+
+        expect(res.success).toBe(true)
+        expect(res.newTotal).toBe(15.6)
+    }, 20000)
+
+    it('a sentence that was already up before the submit and is not drawn again still waits and is not quoted as new', async () => {
+        // Furniture: the alert is on the page from the start, and the click
+        // changes nothing.
+        const box = document.createElement('div')
+        box.className = 'alertBox alertBox--error'
+        box.innerHTML =
+            '<div class="alertBox-column alertBox-message" role="alert"></div>'
+        box.firstChild.textContent = REFUSAL
+        document.getElementById('field').prepend(box, '\n')
+
+        const res = await applyCoupon('CHEER', FRANKLIN_REC)
+
+        expect(res.errorIsNew).toBe(false)
+    }, 20000)
 })
