@@ -15,6 +15,11 @@
 //   - any other user's identifiers
 //   - internal catalog row ids (a coupon's primary key tells the user nothing
 //     and hands out our catalog's internal keyspace)
+//   - internal derived keys (a coupon box proposal's `box_hash` is a SHA-256
+//     of the selectors the export already carries)
+//   - a store request's requester email or user agent (the request is matched
+//     to the account, but the address on a row is whatever was typed into the
+//     form, so it is not exported back)
 //
 // The export therefore names a coupon by the STORE and CODE the user actually
 // saw, never by `couponId`. Adding a field to this file means adding it to the
@@ -41,6 +46,10 @@ export const FORBIDDEN_EXPORT_KEYS: readonly string[] = [
     'id_token',
     'access_token',
     'refresh_token',
+    'boxhash',
+    'submittedbyuserid',
+    'requesteremail',
+    'useragent',
 ]
 
 /** Keys that are legitimately named `id` but are the user's OWN account id —
@@ -83,6 +92,38 @@ export interface AccountExport {
         code: string | null
         outcome: string
         reportedAt: string
+    }[]
+    /** Codes this person submitted to the catalog (T-12391), every status. */
+    submittedCodes: {
+        storeDomain: string | null
+        code: string
+        /** The catalog's current status for the code. */
+        status: string
+        expired: boolean
+        /** How it was submitted: 'checkout' or 'manual' (shopperCoupons.ts). */
+        source: string | null
+        submittedAt: string
+    }[]
+    /** Store requests matched to this account by siteSuggestionIdentityWhere
+     * (T-12391). Only the request itself: the domain, where it stands, when. */
+    storeRequests: {
+        domain: string
+        status: string
+        requestedAt: string
+    }[]
+    /** Coupon boxes this person's extension proposed for a store with no
+     * config (coupon_box_proposals, T-12391): the store, the page host, and
+     * the CSS selectors it found. */
+    couponBoxProposals: {
+        storeDomain: string
+        host: string
+        selectors: {
+            input: string
+            apply: string | null
+            toggle: string | null
+            total: string
+        }
+        proposedAt: string
     }[]
 }
 
@@ -164,6 +205,24 @@ export interface AccountExportInput {
         createdAt: Date
         coupon: { site: string | null; code: string } | null
     }[]
+    submittedCodes: {
+        site: string | null
+        code: string
+        status: string
+        expired: boolean
+        submissionSource: string | null
+        submittedAt: Date
+    }[]
+    siteSuggestions: { domain: string; status: string; createdAt: Date }[]
+    couponBoxProposals: {
+        storeName: string
+        host: string
+        input: string
+        apply: string | null
+        toggle: string | null
+        total: string
+        createdAt: Date
+    }[]
 }
 
 /**
@@ -196,8 +255,10 @@ export function exportableAcquisition(
  *
  * Note what is dropped on the way through: `SavingsEvent.id`,
  * `SavingsEvent.couponId`, `SavingsEvent.clientEventId`, `CouponReport.id`,
- * `CouponReport.couponId`, `FavoriteStore.userId` and `Coupon.id`. Every one
- * is an internal key that says nothing to the person reading their own data.
+ * `CouponReport.couponId`, `FavoriteStore.userId`, `Coupon.id`,
+ * `Coupon.submittedByUserId`, `SiteSuggestion.id`, `CouponBoxProposal.userId`
+ * and `CouponBoxProposal.boxHash`. Every one is an internal key that says
+ * nothing to the person reading their own data.
  */
 export function buildAccountExport(
     input: AccountExportInput,
@@ -236,6 +297,30 @@ export function buildAccountExport(
             code: row.coupon?.code ?? null,
             outcome: row.outcome,
             reportedAt: row.createdAt.toISOString(),
+        })),
+        submittedCodes: input.submittedCodes.map(row => ({
+            storeDomain: row.site,
+            code: row.code,
+            status: row.status,
+            expired: row.expired,
+            source: row.submissionSource,
+            submittedAt: row.submittedAt.toISOString(),
+        })),
+        storeRequests: input.siteSuggestions.map(row => ({
+            domain: row.domain,
+            status: row.status,
+            requestedAt: row.createdAt.toISOString(),
+        })),
+        couponBoxProposals: input.couponBoxProposals.map(row => ({
+            storeDomain: row.storeName,
+            host: row.host,
+            selectors: {
+                input: row.input,
+                apply: row.apply,
+                toggle: row.toggle,
+                total: row.total,
+            },
+            proposedAt: row.createdAt.toISOString(),
         })),
     }
 }

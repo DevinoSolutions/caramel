@@ -25,6 +25,7 @@
 // for the ingest route, which drops the entry after a store-config upsert
 // so a freshly pushed selector is served without waiting out the TTL.
 import { AUTO_DETECT_ORIGIN } from '@/lib/catalog/applyCatalogRows'
+import { couponInputNamesOtherField } from '@/lib/catalog/storeConfigSanity'
 import { listSupportedStoreConfigs } from '@/lib/couponsRepo'
 import { requiredCapabilityFor } from '@/lib/extensionCapabilityGates'
 import { createHash } from 'node:crypto'
@@ -51,7 +52,12 @@ let generation = 0
 async function build(): Promise<SupportedStoresPayload> {
     // One row per store, highest-priority active config that has xpath
     // selectors (excludes API-only configs which the extension can't use).
-    const rows = await listSupportedStoreConfigs()
+    // A config whose coupon input is a ZIP, email, search or gift-card-only
+    // field is left out, so the extension treats the store as config-less
+    // (storeConfigSanity.ts). The ingest log names each one as it is pushed.
+    const rows = (await listSupportedStoreConfigs()).filter(
+        r => !couponInputNamesOtherField(r.coupon_input_xpath),
+    )
     const entries = rows.map(r => ({
         domain: r.store_name,
         couponInput: r.coupon_input_xpath,

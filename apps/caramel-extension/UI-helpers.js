@@ -310,6 +310,30 @@ ${noLoading ? '' : loadingHTML}`
     }
 }
 
+/* Said on the testing card while the finder looks for the promo box on a store
+ * no config describes (T-10535). The card is the same one that says "Checking
+ * this store for codes…"; only its status line changes. The look can take a few
+ * seconds, and a card that sat on "Checking…" through it read as a stall. */
+export const STORE_NOT_SET_UP_STATUS =
+    "This store isn't set up yet, we're figuring out how it works…"
+
+/* Said on the copy-a-code card when the finder looked for the promo box on the
+ * CART of a store no config describes and found none (T-10535). Many stores
+ * take a code only at checkout, and their cart says so; the finder looks again
+ * there (one more server ask, coupon-box-discovery.js askKey) and the prompt
+ * comes back when it may. The codes stay listed to copy. */
+export const CODES_AT_CHECKOUT_MESSAGE =
+    'This store takes promo codes at checkout. Caramel will look for the box there and offer to try these codes. Copy one below to paste it yourself.'
+
+/* Replaces the testing card's status line, nothing else. A no-op when the card
+ * is not up. */
+// Called from coupon-runner.js.
+export function setTestingModalStatus(text) {
+    const host = caramelOwnHost('caramel-testing-overlay')
+    const statusEl = host?.shadowRoot?.querySelector('#caramel-test-status')
+    if (statusEl) statusEl.textContent = text
+}
+
 /* Updates the testing modal's status text + progress bar width. */
 // Called from coupon-runner.js.
 export async function updateTestingModal(currentIndex, total, code) {

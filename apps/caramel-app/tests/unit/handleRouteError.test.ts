@@ -86,6 +86,21 @@ describe('handleRouteError', () => {
         expect(context.tags.method).toBeUndefined()
     })
 
+    it('passes level and fingerprint to Sentry only when given', () => {
+        handleRouteError(new Error('x'))
+        const [, plain] = captureExceptionMock.mock.calls[0]
+        expect('level' in plain).toBe(false)
+        expect('fingerprint' in plain).toBe(false)
+
+        handleRouteError(new Error('y'), {
+            level: 'warning',
+            fingerprint: ['a', 'b'],
+        })
+        const [, tagged] = captureExceptionMock.mock.calls[1]
+        expect(tagged.level).toBe('warning')
+        expect(tagged.fingerprint).toEqual(['a', 'b'])
+    })
+
     it('merges extra headers (e.g. CORS) with x-request-id rather than dropping them', () => {
         const res = handleRouteError(new Error('x'), {
             headers: { 'Access-Control-Allow-Origin': 'https://example.com' },

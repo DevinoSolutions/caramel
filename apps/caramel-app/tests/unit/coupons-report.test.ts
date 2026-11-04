@@ -20,132 +20,146 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 // deleted dedup check pass every assertion here. The real query SHAPE is
 // pinned separately (see "the dedup lookup is scoped to…"), because a fake can
 // only ever prove the logic, never the SQL.
-const { prismaMock, txMock, reportRows, catalogIds, getSessionMock } =
-    vi.hoisted(() => {
-        interface ReportRow {
-            id: string
-            couponId: string
-            userId: string | null
-            outcome: string
-            createdAt: Date
-        }
-        const rows: ReportRow[] = []
-        // Catalog ids that "exist" — coupon_signals deliberately carries no FK
-        // to `coupons`, so the aggregate write gates itself on a catalog row; an
-        // id absent from this set is the unknown-coupon case (the statement
-        // writes and returns no row: 404, nothing written).
-        const ids = new Set<string>()
+const {
+    prismaMock,
+    txMock,
+    reportRows,
+    catalogIds,
+    catalogCodes,
+    getSessionMock,
+} = vi.hoisted(() => {
+    interface ReportRow {
+        id: string
+        couponId: string
+        userId: string | null
+        outcome: string
+        createdAt: Date
+    }
+    const rows: ReportRow[] = []
+    // Catalog ids that "exist" — coupon_signals deliberately carries no FK
+    // to `coupons`, so the aggregate write gates itself on a catalog row; an
+    // id absent from this set is the unknown-coupon case (the statement
+    // writes and returns no row: 404, nothing written).
+    const ids = new Set<string>()
+    // The catalog code of an id (couponsRepo.readCatalogCode's SELECT),
+    // read only when a failure reason looks like it carries a code.
+    const codes = new Map<string, string>()
 
-        // The aggregate coupon_signals write is ONE raw statement that is also
-        // the existence gate (couponsRepo.writeCouponSignal): its first bound
-        // value is the coupon id. A known id returns the row's fail_weight
-        // (0 here, so no quorum bookkeeping follows), an unknown id returns no
-        // row, exactly as `INSERT ... SELECT ... WHERE EXISTS ... RETURNING`.
-        const txSignalWrite = vi.fn(
-            async (query: { sql: string; values: unknown[] }) =>
-                ids.has(String(query.values[0])) ? [{ failWeight: 0 }] : [],
-        )
+    // The aggregate coupon_signals write is ONE raw statement that is also
+    // the existence gate (couponsRepo.writeCouponSignal): its first bound
+    // value is the coupon id. A known id returns the row's fail_weight
+    // (0 here, so no quorum bookkeeping follows), an unknown id returns no
+    // row, exactly as `INSERT ... SELECT ... WHERE EXISTS ... RETURNING`.
+    const txSignalWrite = vi.fn(
+        async (query: { sql: string; values: unknown[] }) => {
+            const id = String(query.values[0])
+            if (query.sql.includes('SELECT code FROM coupons')) {
+                const code = codes.get(id)
+                return code === undefined ? [] : [{ code }]
+            }
+            return ids.has(id) ? [{ failWeight: 0 }] : []
+        },
+    )
 
-        const tx = {
-            // recordFailed's quorum bookkeeping (couponSignals.ts). This file
-            // pins the ROUTE's wiring, so these are canned test doubles; the
-            // quorum arithmetic itself is pinned in coupon-failure-quorum.test.ts
-            // against an in-memory reporters table, and in the integration suite
-            // against real Postgres.
-            $queryRaw: txSignalWrite,
-            // couponsRepo.lockShopperUser's pg_advisory_xact_lock statement.
-            $executeRaw: vi.fn(async () => 0),
-            couponSignal: {
-                update: vi.fn(async () => ({})),
-            },
+    const tx = {
+        // recordFailed's quorum bookkeeping (couponSignals.ts). This file
+        // pins the ROUTE's wiring, so these are canned test doubles; the
+        // quorum arithmetic itself is pinned in coupon-failure-quorum.test.ts
+        // against an in-memory reporters table, and in the integration suite
+        // against real Postgres.
+        $queryRaw: txSignalWrite,
+        // couponsRepo.lockShopperUser's pg_advisory_xact_lock statement.
+        $executeRaw: vi.fn(async () => 0),
+        couponSignal: {
+            update: vi.fn(async () => ({})),
+        },
+        couponSignalReporter: {
+            findMany: vi.fn(async () => []),
+            upsert: vi.fn(async () => ({})),
+            aggregate: vi.fn(async () => ({ _sum: { weight: 1 } })),
+            deleteMany: vi.fn(async () => ({ count: 0 })),
+        },
+        couponReport: {
+            findFirst: vi.fn(
+                async (args: {
+                    where: {
+                        couponId: string
+                        userId: string | null
+                        outcome?: string
+                        createdAt: { gte: Date }
+                    }
+                }) => {
+                    const { couponId, userId, outcome, createdAt } = args.where
+                    return (
+                        rows.find(
+                            row =>
+                                row.couponId === couponId &&
+                                row.userId === userId &&
+                                (outcome === undefined ||
+                                    row.outcome === outcome) &&
+                                row.createdAt >= createdAt.gte,
+                        ) ?? null
+                    )
+                },
+            ),
+            // workedStampCapSpent's daily count.
+            count: vi.fn(
+                async (args: {
+                    where: {
+                        userId: string
+                        outcome: string
+                        createdAt: { gt: Date }
+                    }
+                }) =>
+                    rows.filter(
+                        row =>
+                            row.userId === args.where.userId &&
+                            row.outcome === args.where.outcome &&
+                            row.createdAt > args.where.createdAt.gt,
+                    ).length,
+            ),
+            create: vi.fn(
+                async (args: {
+                    data: {
+                        couponId: string
+                        userId: string
+                        outcome: string
+                    }
+                }) => {
+                    const row = {
+                        id: `report-${rows.length + 1}`,
+                        ...args.data,
+                        createdAt: new Date(),
+                    }
+                    rows.push(row)
+                    return row
+                },
+            ),
+        },
+    }
+
+    return {
+        reportRows: rows,
+        catalogIds: ids,
+        catalogCodes: codes,
+        txMock: tx,
+        prismaMock: {
+            // Both paths write the signal through a transaction client (the
+            // writers wrap their own quorum bookkeeping in one); the only
+            // difference between them is the coupon_reports attribution row.
+            // The global retention sweep goes through the singleton client.
             couponSignalReporter: {
-                findMany: vi.fn(async () => []),
-                upsert: vi.fn(async () => ({})),
-                aggregate: vi.fn(async () => ({ _sum: { weight: 1 } })),
                 deleteMany: vi.fn(async () => ({ count: 0 })),
             },
-            couponReport: {
-                findFirst: vi.fn(
-                    async (args: {
-                        where: {
-                            couponId: string
-                            userId: string | null
-                            outcome?: string
-                            createdAt: { gte: Date }
-                        }
-                    }) => {
-                        const { couponId, userId, outcome, createdAt } =
-                            args.where
-                        return (
-                            rows.find(
-                                row =>
-                                    row.couponId === couponId &&
-                                    row.userId === userId &&
-                                    (outcome === undefined ||
-                                        row.outcome === outcome) &&
-                                    row.createdAt >= createdAt.gte,
-                            ) ?? null
-                        )
-                    },
-                ),
-                // workedStampCapSpent's daily count.
-                count: vi.fn(
-                    async (args: {
-                        where: {
-                            userId: string
-                            outcome: string
-                            createdAt: { gt: Date }
-                        }
-                    }) =>
-                        rows.filter(
-                            row =>
-                                row.userId === args.where.userId &&
-                                row.outcome === args.where.outcome &&
-                                row.createdAt > args.where.createdAt.gt,
-                        ).length,
-                ),
-                create: vi.fn(
-                    async (args: {
-                        data: {
-                            couponId: string
-                            userId: string
-                            outcome: string
-                        }
-                    }) => {
-                        const row = {
-                            id: `report-${rows.length + 1}`,
-                            ...args.data,
-                            createdAt: new Date(),
-                        }
-                        rows.push(row)
-                        return row
-                    },
-                ),
-            },
-        }
-
-        return {
-            reportRows: rows,
-            catalogIds: ids,
-            txMock: tx,
-            prismaMock: {
-                // Both paths write the signal through a transaction client (the
-                // writers wrap their own quorum bookkeeping in one); the only
-                // difference between them is the coupon_reports attribution row.
-                // The global retention sweep goes through the singleton client.
-                couponSignalReporter: {
-                    deleteMany: vi.fn(async () => ({ count: 0 })),
-                },
-                $transaction: vi.fn(
-                    async (fn: (client: typeof tx) => Promise<unknown>) =>
-                        fn(tx),
-                ),
-            },
-            getSessionMock: vi.fn(
-                async (_opts: { headers: Headers }) => null as unknown,
+            $transaction: vi.fn(
+                async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx),
             ),
-        }
-    })
+        },
+        getSessionMock: vi.fn(
+            async (_opts: { headers: Headers }) => null as unknown,
+        ),
+    }
+})
 vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
 // withRoute lazy-imports better-auth only when a route declares `auth`; this
 // stands in for the whole auth graph so the route's session resolution is
@@ -211,6 +225,7 @@ beforeEach(() => {
     txMock.couponReport.create.mockClear()
     reportRows.length = 0
     catalogIds.clear()
+    catalogCodes.clear()
     catalogIds.add(KNOWN_COUPON)
     catalogIds.add('43')
     anonymous()
@@ -448,6 +463,93 @@ describe('POST /api/coupons/[id]/report — app-owned trust signal (W1)', () => 
             'last_fail_reason = EXCLUDED.last_fail_reason',
         )
         expect(query.sql).not.toContain('work_count')
+    })
+
+    describe('storeReason redaction (T-9959)', () => {
+        /** The reason bound into the stored coupon_signals write. */
+        async function storedReasonFor(storeReason: string): Promise<unknown> {
+            const res = await POST(
+                reportRequest(KNOWN_COUPON, { outcome: 'failed', storeReason }),
+            )
+            expect(res.status).toBe(200)
+            const writes = txMock.$queryRaw.mock.calls
+                .map(call => call[0])
+                .filter(query => query.sql.includes('last_fail_reason'))
+            expect(writes).toHaveLength(1)
+            return writes[0]!.values[1]
+        }
+
+        it("keeps the reported catalog code but redacts the shopper's own", async () => {
+            catalogCodes.set(KNOWN_COUPON, 'FALL20')
+
+            expect(
+                await storedReasonFor(
+                    'Code FALL20 cannot be combined with MYCODE5',
+                ),
+            ).toBe('Code FALL20 cannot be combined with [code]')
+        })
+
+        it('matches the catalog code case-insensitively', async () => {
+            catalogCodes.set(KNOWN_COUPON, 'fall20')
+
+            expect(
+                await storedReasonFor('FALL20 cannot be combined with Mine7'),
+            ).toBe('FALL20 cannot be combined with [code]')
+        })
+
+        it('redacts every code-shaped token when the coupon has no catalog code to keep', async () => {
+            expect(
+                await storedReasonFor(
+                    'Code FALL20 cannot be combined with X9Y',
+                ),
+            ).toBe('Code [code] cannot be combined with [code]')
+        })
+
+        it('stores a plain-English reason untouched and never looks up the code', async () => {
+            expect(await storedReasonFor('Minimum spend $50 not met')).toBe(
+                'Minimum spend $50 not met',
+            )
+            expect(
+                txMock.$queryRaw.mock.calls.some(call =>
+                    call[0].sql.includes('SELECT code FROM coupons'),
+                ),
+            ).toBe(false)
+        })
+
+        it('a code-shaped reason whose catalog lookup REJECTS is a 500, writes nothing, and the retry succeeds', async () => {
+            catalogCodes.set(KNOWN_COUPON, 'FALL20')
+            const reason = 'FALL20 cannot be combined with MYCODE5'
+            txMock.$queryRaw.mockRejectedValueOnce(new Error('db down'))
+
+            const failed = await POST(
+                reportRequest(KNOWN_COUPON, {
+                    outcome: 'failed',
+                    storeReason: reason,
+                }),
+            )
+
+            expect(failed.status).toBe(500)
+            // Only the failed lookup ran: no signal write, no reporter row.
+            expect(txMock.$queryRaw).toHaveBeenCalledTimes(1)
+            expect(txMock.$queryRaw.mock.calls[0]![0].sql).toContain(
+                'SELECT code FROM coupons',
+            )
+            expect(txMock.couponSignalReporter.upsert).not.toHaveBeenCalled()
+
+            // The dedupe slot was given back, so the retry counts and is redacted.
+            expect(await storedReasonFor(reason)).toBe(
+                'FALL20 cannot be combined with [code]',
+            )
+        })
+
+        it('redacts for a signed-in reporter too (the transactional path)', async () => {
+            signedInAs('user-1')
+            catalogCodes.set(KNOWN_COUPON, 'FALL20')
+
+            expect(
+                await storedReasonFor('FALL20 stacks badly with MYCODE5'),
+            ).toBe('FALL20 stacks badly with [code]')
+        })
     })
 
     it('a non-numeric id (abc) → 400, nothing written', async () => {

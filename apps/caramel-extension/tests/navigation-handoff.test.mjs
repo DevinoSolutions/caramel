@@ -344,6 +344,21 @@ describe('store-detect.js — the page after the navigation', () => {
         expect(code).toBe('THEO20')
     })
 
+    it('a drop the store takes back on the new page is not a win (T-11366)', async () => {
+        await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
+        setTotalText('Order Total $59.12')
+        // The store reverses the code moments after the page loads.
+        setTimeout(() => setTotalText('Order Total $73.90'), 200)
+
+        await startCheckoutDetection()
+
+        expect(reportedOutcomes).toEqual([])
+        expect(recordedSavings).toEqual([])
+        const [amount, code] = finalModalCalls.at(-1)
+        expect(amount).toBe(0)
+        expect(code).toBeNull()
+    })
+
     it('banks the measured win and credits the coupon', async () => {
         await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
         setTotalText('Order Total $59.12')

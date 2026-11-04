@@ -17,6 +17,7 @@ vi.mock('@/lib/openrouter', async importOriginal => {
 })
 
 import { classifyCart } from '@/lib/cartClassifier'
+import { OpenRouterError } from '@/lib/openrouter'
 import { runEvalSuite } from '../../evals/scorers'
 
 interface Fixture {
@@ -121,5 +122,48 @@ describe('cartClassifier eval harness — mocked full pipeline (F-012)', () => {
             'network exploded',
         )
         expect(suite.primaryMatchRate).toBe(0)
+    })
+})
+
+describe('classifyCart model-call failures (CARAMEL-3E, T-10497)', () => {
+    it('an AbortError from chat becomes a timed-out OpenRouterError keeping its cause', async () => {
+        const abort = new DOMException('aborted', 'AbortError')
+        chatMock.mockReset()
+        chatMock.mockRejectedValueOnce(abort)
+
+        const err = await classifyCart({ domain: 'timeout.example' }).catch(
+            (e: unknown) => e,
+        )
+
+        expect(err).toBeInstanceOf(OpenRouterError)
+        const failure = err as OpenRouterError
+        expect(failure.timedOut).toBe(true)
+        expect(failure.message).toBe('classify timed out after 7000 ms')
+        expect(failure.cause).toBe(abort)
+    })
+
+    it('another chat failure is wrapped as a NOT timed-out OpenRouterError', async () => {
+        chatMock.mockReset()
+        chatMock.mockRejectedValueOnce(new Error('network exploded'))
+
+        const err = await classifyCart({ domain: 'boom.example' }).catch(
+            (e: unknown) => e,
+        )
+
+        expect(err).toBeInstanceOf(OpenRouterError)
+        expect((err as OpenRouterError).timedOut).toBe(false)
+        expect((err as OpenRouterError).message).toBe(
+            'classify failed: network exploded',
+        )
+    })
+
+    it('an OpenRouterError thrown by chat is rethrown as is', async () => {
+        const original = new OpenRouterError('provider 500', 500)
+        chatMock.mockReset()
+        chatMock.mockRejectedValueOnce(original)
+
+        await expect(classifyCart({ domain: 'asis.example' })).rejects.toBe(
+            original,
+        )
     })
 })

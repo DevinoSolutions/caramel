@@ -40,14 +40,17 @@
 // gates all stay in the calling route (`withRoute` config + the route body).
 import { Prisma } from '@/generated/prisma/client'
 import { STORE_CONFIG_STILL_SERVED_SQL } from '@/lib/catalog/applyCatalogRows'
+import { couponPlainText } from '@/lib/couponPlainText'
 import {
     FAILING_MIN_FAIL_WEIGHT,
     FAILING_WINDOW_DAYS,
     KEEPS_FAILING_MIN_FAIL_WEIGHT,
+    PROVEN_COUPON_STATUSES,
     RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
 import {
+    CatalogCodeRowSchema,
     CatalogStoreNameRowSchema,
     CouponIdRowSchema,
     type CouponListRow,
@@ -76,6 +79,8 @@ import {
     StoreConfigRowSchema,
     StoreCouponAggregateRowSchema,
     StoreListRowSchema,
+    type SubmittedCodeRow,
+    SubmittedCodeRowSchema,
     TotalCountRowSchema,
     WorkedCountRowSchema,
     parseCouponRows,
@@ -160,20 +165,47 @@ const failingSignalIdsSql = (minFailWeight: number) => Prisma.sql`(id IN (
 ))`
 
 /**
+ * Proof before rating, inside one store's list: codes the verification service
+ * proved working first (PROVEN_COUPON_STATUSES), then the restricted ones, then
+ * the unverified rest. `rating` is the SCRAPER SOURCE's score, and most sources
+ * leave it 0 (~144k of the catalog's rows on 2026-10-29), so on its own it ranked
+ * shopmicas.com's codes verified that morning (SARA12, ANGE12) below 20
+ * unverified or one-time ones rated 3.9-4. The extension fetches page 1 (20
+ * codes) and tries about 8, so it never reached them: "Auto-apply didn't stick"
+ * on a store holding 62 proven codes, while the same build applied SARA12
+ * ($50.00 -> $44.00) the moment it was served first. Across the catalog, 298 of
+ * the 1,697 stores holding a proven code ranked their first one below 8th.
+ *
+ * Among proven codes the most recently proven lead. `updated_at` is the
+ * pipeline row's own timestamp (the ingest's only-if-newer key) and a verdict
+ * is what moves it on a proven row, so it is the freshest proof we hold. The
+ * tier alone was not enough on shopmicas: its 20 highest-rated codes were also
+ * `valid`, but one-time referral codes last proven 2026-10-27, and they still
+ * filled page 1 ahead of the codes proven that day.
+ */
+const proofTierSql = () => {
+    const proven = Prisma.join([...PROVEN_COUPON_STATUSES])
+    return Prisma.sql`(status IN (${proven})) DESC, CASE WHEN status IN (${proven}) THEN updated_at END DESC NULLS LAST, (status IN (${Prisma.join([...RESTRICTED_COUPON_STATUSES])})) DESC`
+}
+
+/**
  * The order of ONE store's codes: recently-failing codes sink below the rest
  * (false sorts first), and the keeps-failing ones (collapsed by the page and the
- * popup) sink below those, each group in rankingOrderSql() order. Sunk, never
- * hidden: the visibility predicate is untouched. It lives in SQL, not as a
- * post-fetch sort, because these lists are paginated (store page: first 20, then
- * /api/coupons pages) and a sort after the fetch could only reorder one page —
- * a failing code on page 1 would still outrank a good one on page 2.
+ * popup) sink below those; inside each group proven codes lead (proofTierSql),
+ * then rankingOrderSql() breaks ties. A shopper's failure report outranks the
+ * pipeline's proof: a code proven yesterday that shoppers report failing today
+ * still sinks. Sunk, never hidden: the visibility predicate is untouched. It
+ * lives in SQL, not as a post-fetch sort, because these lists are paginated
+ * (store page: first 20, then /api/coupons pages) and a sort after the fetch
+ * could only reorder one page — a failing code on page 1 would still outrank a
+ * good one on page 2.
  *
  * Store-scoped reads only. A site-less listing (the /coupons browse/search
- * page) keeps rankingOrderSql() alone: the extra key would force a sort over
+ * page) keeps rankingOrderSql() alone: the extra keys would force a sort over
  * the whole catalog for a page nobody uses to apply codes.
  */
 const storeRankingOrderSql = () =>
-    Prisma.sql`${failingSinkSql()} ASC, ${keepsFailingSql()} ASC, ${rankingOrderSql()}`
+    Prisma.sql`${failingSinkSql()} ASC, ${keepsFailingSql()} ASC, ${proofTierSql()}, ${rankingOrderSql()}`
 
 /**
  * coupons/stats/route.ts's census predicate. Deliberately NOT
@@ -463,13 +495,19 @@ export async function countStoreCodesWorkedWithinDays(
  * is usually nothing (couponVerificationText.ts has the prod vocabulary that
  * made this necessary), and a title that is only a button label or scraped
  * page chrome is replaced by one built from the row (couponTitleText.ts).
+ * The title and description are decoded to plain text first: the supplier
+ * stores some HTML-escaped (couponPlainText.ts).
  * Both listing reads go through it, so /api/coupons (the extension popup,
  * agents) and the SSR pages agree.
  */
 function forShoppers(rows: CouponListRow[]): CouponListRow[] {
     return rows.map(row => ({
         ...row,
-        title: shopperCouponTitle(row),
+        title: shopperCouponTitle({
+            ...row,
+            title: couponPlainText(row.title),
+        }),
+        description: couponPlainText(row.description),
         verificationMessage: shopperVerificationText(
             row.status,
             row.verificationMessage,
@@ -789,7 +827,13 @@ export async function listRecentlyWorkedCoupons(
         RecentlyWorkedCouponRowSchema,
         rawRows,
         'coupons.recently-worked',
-    ).map(row => ({ ...row, title: shopperCouponTitle(row) }))
+    ).map(row => ({
+        ...row,
+        title: shopperCouponTitle({
+            ...row,
+            title: couponPlainText(row.title),
+        }),
+    }))
 }
 
 /** api/sites/search-supported/route.ts POST — fixed LIMIT 20. The route's empty-query early return (`{sites:[]}` without querying) stays there; this fn assumes a non-empty `q`. */
@@ -1041,6 +1085,26 @@ export async function writeFailedSignal(
         },
         'coupon-signal.write-failed',
     )
+}
+
+/**
+ * The catalog code of coupon `couponId`, or null when it is not a catalog row.
+ * Read by couponSignals.redactedStoreReason so a store's failure text can keep
+ * the code being reported while every other code-shaped token is redacted.
+ * Status-agnostic, like the signal writers.
+ */
+export async function readCatalogCode(
+    couponId: string,
+    client: CouponSignalSqlClient = prisma,
+): Promise<string | null> {
+    const rows = parseCouponRows(
+        CatalogCodeRowSchema,
+        await client.$queryRaw(Prisma.sql`
+            SELECT code FROM coupons WHERE id = ${couponId}::text
+        `),
+        'coupon-signal.read-catalog-code',
+    )
+    return rows[0]?.code ?? null
 }
 
 /**
@@ -1332,6 +1396,82 @@ export async function findCatalogStoreNames(
         'coupon-box-save.catalog-store-names',
     )
     return Array.from(new Set(rows.map(row => row.name)))
+}
+
+/**
+ * api/account/export GET — the codes this shopper submitted
+ * (submitShopperCoupon), newest first, for "Download your data" (T-12391).
+ * Read-only.
+ *
+ * EVERY status, deliberately without visibleCouponsWhere(): the export answers
+ * "what did I give you", so a code since marked invalid or expired is still the
+ * shopper's and is still listed, with its current status. Scoped by
+ * `submitted_by_user_id = userId` alone, which the (submitted_by_user_id,
+ * created_at) index answers; supplier rows carry NULL there and never match.
+ * No `id` is selected: the export never hands out catalog keys.
+ */
+export async function listCodesSubmittedByUser(
+    userId: string,
+): Promise<SubmittedCodeRow[]> {
+    const rawRows = await prisma.$queryRaw(Prisma.sql`
+        SELECT site, code, status, expired,
+               submission_source AS "submissionSource",
+               created_at AS "submittedAt"
+        FROM coupons
+        WHERE submitted_by_user_id = ${userId}
+        ORDER BY created_at DESC, id DESC
+    `)
+    return parseCouponRows(
+        SubmittedCodeRowSchema,
+        rawRows,
+        'account.submitted-codes',
+    )
+}
+
+/**
+ * api/account/overview GET — how many catalog codes still carry this shopper's
+ * account (submitShopperCoupon), so the danger zone knows "Delete my data" has
+ * something to do and can say what (T-12392). Read-only, and the SAME predicate
+ * unlinkCodesSubmittedByUser writes with, so the button and the route cannot
+ * disagree. Every status: an expired code still names the shopper.
+ */
+export async function countCodesSubmittedByUser(
+    userId: string,
+): Promise<number> {
+    const [row] = parseCouponRows(
+        TotalCountRowSchema,
+        await prisma.$queryRaw(Prisma.sql`
+            SELECT COUNT(*)::int AS total
+            FROM coupons
+            WHERE submitted_by_user_id = ${userId}
+        `),
+        'account.submitted-codes-count',
+    )
+    return row?.total ?? 0
+}
+
+/**
+ * api/account/data/delete POST — "Delete my data" takes the shopper off the
+ * codes they submitted (submitShopperCoupon). Owner-directed 2026-11-03
+ * (T-12392): the codes stay in the catalog for everyone, only the link to the
+ * person goes. It is the same state deleting the ACCOUNT already leaves them in
+ * (the foreign key is ON DELETE SET NULL): `submission_source` stays set, so
+ * the row still reads as shopper-submitted, never as a supplier row.
+ *
+ * A sanctioned catalog write (CLAUDE.md, Hard boundaries), and the narrowest
+ * one: one column, only on the caller's own rows, only ever to NULL. Returned
+ * UNAWAITED so the route runs it inside its one transaction with the other
+ * deletes; awaited on its own, a failure after them would tell the shopper
+ * nothing was removed while their savings were already gone.
+ */
+export function unlinkCodesSubmittedByUser(
+    userId: string,
+): Prisma.PrismaPromise<number> {
+    return prisma.$executeRaw(Prisma.sql`
+        UPDATE coupons
+        SET submitted_by_user_id = NULL
+        WHERE submitted_by_user_id = ${userId}
+    `)
 }
 
 export type SubmitShopperCouponArgs = {

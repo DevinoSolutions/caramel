@@ -19,6 +19,10 @@
 // Eval-gated: evals/couponBoxPick.eval.ts runs THIS module (prompt, parsing,
 // index validation — imported, never copied) against labelled real cart pages.
 // Change the prompt or the model only through that suite (evals/README.md).
+import {
+    redactCodeShapedTokens,
+    stripFormatChars,
+} from '@/lib/codeShapedTokens'
 import { createCouponBoxAnswerCache } from '@/lib/couponBoxPickAnswerCache'
 import { env } from '@/lib/env'
 import { firstJsonObject } from '@/lib/llmJson'
@@ -148,13 +152,21 @@ const LINE_BREAK = /\r\n|[\n\r\u2028\u2029]/
 // constructor because this project's compile target rejects the literal `u`
 // flag; every runtime we run on supports it.
 const ANY_DIGIT = new RegExp('\\p{N}', 'gu')
+// Order matters: invisible format characters go first (they would split an
+// address or a code), then emails (a code-shaped local part would otherwise break
+// the address into something EMAIL_SHAPED no longer matches), then tokens that
+// mix letters and digits, or letters and the extension's own `#` mask ("Remove
+// SAVE10" / "Remove SAVE##" is an applied-code chip: it must not survive as
+// "SAVE#"; old extension builds keep sending it), then the digits.
 function scrubText(text: string): string {
-    return text.replace(EMAIL_SHAPED, '[email]').replace(ANY_DIGIT, '#')
+    return redactCodeShapedTokens(
+        stripFormatChars(text).replace(EMAIL_SHAPED, '[email]'),
+    ).replace(ANY_DIGIT, '#')
 }
 
-/** Every digit becomes `#` and anything email-shaped becomes `[email]`,
- * except the `[n]` index at the start of a node line (the extension maps the
- * pick back through it). */
+/** Every digit becomes `#`, anything email-shaped becomes `[email]` and any
+ * token mixing letters and digits becomes `[code]`, except the `[n]` index at
+ * the start of a node line (the extension maps the pick back through it). */
 export function scrubOutline(outline: string): string {
     return outline
         .split(LINE_BREAK)

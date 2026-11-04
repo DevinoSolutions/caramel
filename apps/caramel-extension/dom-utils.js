@@ -437,7 +437,7 @@ export function caramelFindMoney(text) {
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
 export function getPrice(selector, { returnLargest } = {}) {
-    let el = qOne(selector)
+    let el = caramelPriceElement(selector)
     if (!el && typeof selector === 'string' && selector.includes('[id=')) {
         const id = selector.match(/\[id=['"]([^'"]+)['"]\]/)?.[1]
         if (id) el = document.getElementById(id)
@@ -889,6 +889,72 @@ export async function caramelTakeAppliedWin(maxAgeMs = 120000) {
     }
 }
 
+/* A discount-link run the store's own page reloads under (T-13322).
+ *
+ * The link path measures every code on one page and reloads only once, on
+ * purpose, after its win. A store theme can reload the cart page by itself
+ * when the cart changes under it: neweracap.com, Firefox, 1.4.34 gate
+ * (2026-11-03), reloaded at try 5 of 8 with FREE (-$55.99) already on the
+ * cart. The run died with the document, and the shopper got the best code
+ * with no card and the "Try Caramel" pill back, as if nothing had run.
+ *
+ * So the run keeps what it knows here while it probes, and the page the reload
+ * puts up picks it up (store-detect.js _caramelResumeLinkRun). Nothing in it is
+ * reported as a saving: the next page reads its own cart, as the run does.
+ * Cleared on every way the run ends on its own page, so our own reload after a
+ * win (which hands over through 'applied' instead) never resumes it. A record
+ * that was already resumed once is not resumed again: a theme that reloads on
+ * every cart change cannot keep a run going. */
+// Consumed by coupon-runner.js (cross-file content-script call).
+export async function caramelHoldLinkRun(state) {
+    _caramelHint('link_run', true)
+    await caramelTabHandoff('set', 'link_run', { ...state, t: Date.now() })
+}
+// Consumed by coupon-runner.js (cross-file content-script call).
+export async function caramelClearLinkRun() {
+    if (!caramelHandoffMayExist('link_run')) return
+    await caramelTabHandoff('clear', 'link_run')
+    _caramelHint('link_run', false)
+}
+const _caramelIsCode = v => typeof v === 'string' && v.length > 0
+const _caramelIsMinor = v => Number.isInteger(v) && v >= 0
+// Consumed by store-detect.js (cross-file content-script call).
+export async function caramelTakeLinkRun(maxAgeMs = 120000) {
+    const st = await _caramelTakeHandoff('link_run')
+    if (!st || typeof st !== 'object') return null
+    if (!(Date.now() - (st.t || 0) < maxAgeMs)) return null
+    // The shopper pressed × before the reload: the run is over.
+    if (_caramelRunStopped()) return null
+    // The run's own list, in its own order: { code, id } for each code.
+    const planned = Array.isArray(st.planned)
+        ? st.planned
+              .filter(c => c && _caramelIsCode(c.code))
+              .map(c => ({ code: c.code, id: c.id ?? null }))
+        : []
+    if (!planned.length || !_caramelIsMinor(st.base)) return null
+    if (!_caramelIsMinor(st.items) || st.items < 1) return null
+    if (!_caramelIsMinor(st.next) || st.next > planned.length) return null
+    const best = _caramelIsCode(st.bestCode) && _caramelIsMinor(st.bestTotal)
+    const arrived =
+        st.arrivedWith && _caramelIsCode(st.arrivedWith.code)
+            ? st.arrivedWith
+            : null
+    return {
+        base: st.base,
+        items: st.items,
+        planned,
+        next: st.next,
+        bestCode: best ? st.bestCode : null,
+        bestId: best ? (st.bestId ?? null) : null,
+        bestTotal: best ? st.bestTotal : st.base,
+        currency: typeof st.currency === 'string' ? st.currency : null,
+        arrivedWith: arrived,
+        measured: _caramelIsMinor(st.measured) ? st.measured : 0,
+        sawHollowDrop: st.sawHollowDrop === true,
+        resumed: st.resumed === true,
+    }
+}
+
 /* --------------------------------------------------  run continuity
  *
  * One click should test more than one code.
@@ -1117,4 +1183,47 @@ export function qAll(sel, root) {
     } catch {
         return []
     }
+}
+
+/* The first element a config's selector LIST matches, trying each selector in
+ * the list's order (T-12490). A config lists the store's own total first and a
+ * broad fallback after it; querySelector(list) instead returns the first match
+ * in the PAGE, and BigCommerce draws the Subtotal's [data-test="cart-price-value"]
+ * above [data-test="cart-total"]: store.franklinplanner.com read $17.95 while
+ * FPBDAY took the grand total to $14.36. Splits on top-level commas only, never
+ * inside (), [] or quotes, so :is(a, b), [x="a,b"] and an XPath part stay whole. */
+// An XPath part is evaluated as XPath (qOne), so a list mixing CSS and XPath,
+// which querySelector threw on, reads its parts too. `accept` skips a match.
+export function qFirstOfList(sel, root, accept = Boolean) {
+    let depth = 0
+    let quote = ''
+    let from = 0
+    for (let i = 0; sel && i <= sel.length; i++) {
+        const ch = sel[i]
+        if (ch === '\\') i++
+        else if (quote) quote = ch === quote ? '' : quote
+        else if (ch === '"' || ch === "'") quote = ch
+        else if (ch === '(' || ch === '[') depth++
+        else if (ch === ')' || ch === ']') depth--
+        else if (!depth && (ch === ',' || i === sel.length)) {
+            const el = qOne(sel.slice(from, i).trim(), root)
+            if (accept(el)) return el
+            from = i + 1
+        }
+    }
+    return null
+}
+
+// The element a priceContainer is read from (getPrice, and the element the
+// apply wait watches): the first part in list order whose match is shown and
+// holds an amount, else one that holds an amount, else the first match. A
+// first part that matches an empty skeleton or a hidden twin must not hide a
+// later part's total (page order used to reach it).
+const _caramelHasMoney = el => !!el && caramelFindMoney(el.innerText).length > 0
+export function caramelPriceElement(sel) {
+    return (
+        qFirstOfList(sel, null, el => _caramelHasMoney(el) && _isVisible(el)) ||
+        qFirstOfList(sel, null, _caramelHasMoney) ||
+        qFirstOfList(sel)
+    )
 }

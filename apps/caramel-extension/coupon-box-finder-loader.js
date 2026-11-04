@@ -24,6 +24,7 @@ import {
     currentBrowser,
     log,
     logError,
+    recordTiming,
     sleep,
 } from './caramel-base.js'
 import {
@@ -33,21 +34,78 @@ import {
     caramelSetLastPrices,
     getPrice,
 } from './dom-utils.js'
+import {
+    FINDER_FLAG_MEMORY_KEY,
+    finderFlagFromMemory,
+} from './finder-flag-memory.js'
 
 /* Is the finder switched on? The background answers from its cached features
- * read; any failure to ask is answered as off. Asked once per page. */
+ * read. Asked once per page.
+ *
+ * A background that does not answer is asked once more, with a shorter wait
+ * (T-10668). On a loaded machine the first question can go unanswered while
+ * the worker wakes and reads the features; by the second, the worker is up
+ * and its read has usually filled the cache. Two failed asks fall back on the
+ * last flag the background read from the server, when that is under 30
+ * minutes old (finder-flag-memory.js); with none, the finder is off. The
+ * failure is recorded either way. */
+const FLAG_RETRY_WAIT_MS = 5000
+const FLAG_MEMORY_WAIT_MS = 3000
 let _discoveryOn = null
+
+const askDiscoveryOn = waitMs =>
+    caramelSendMessage({ action: 'couponBoxDiscoveryEnabled' }, waitMs).then(
+        resp => resp?.enabled === true,
+    )
+
+// The remembered flag (true, false), or null for none, unreadable or late.
+// An unreadable memory is recorded; a late one shows as remembered: null in
+// the FINDER_FLAG_UNREADABLE record.
+function rememberedDiscoveryOn() {
+    return new Promise(resolve => {
+        const unreadable = err => {
+            logError('FINDER_FLAG_MEMORY_UNREADABLE', err)
+            resolve(null)
+        }
+        setTimeout(() => resolve(null), FLAG_MEMORY_WAIT_MS)
+        try {
+            currentBrowser.storage.local.get([FINDER_FLAG_MEMORY_KEY], res => {
+                const err = currentBrowser.runtime.lastError
+                if (err) return unreadable(err.message || err)
+                resolve(
+                    finderFlagFromMemory(
+                        res?.[FINDER_FLAG_MEMORY_KEY],
+                        Date.now(),
+                    ),
+                )
+            })
+        } catch (err) {
+            unreadable(err)
+        }
+    })
+}
+
+async function readDiscoveryOn() {
+    let first
+    try {
+        return await askDiscoveryOn()
+    } catch (e) {
+        first = String(e)
+    }
+    try {
+        return await askDiscoveryOn(FLAG_RETRY_WAIT_MS)
+    } catch (e) {
+        const remembered = await rememberedDiscoveryOn()
+        const meta = { error: String(e), first, remembered }
+        log('FINDER_FLAG_UNREADABLE', meta)
+        recordTiming('FINDER_FLAG_UNREADABLE', meta)
+        return remembered === true
+    }
+}
+
 // Called from coupon-runner.js and store-detect.js.
 export function caramelCouponBoxDiscoveryOn() {
-    if (!_discoveryOn)
-        _discoveryOn = caramelSendMessage({
-            action: 'couponBoxDiscoveryEnabled',
-        })
-            .then(resp => resp?.enabled === true)
-            .catch(e => {
-                log('FINDER_FLAG_UNREADABLE', { error: String(e) })
-                return false
-            })
+    if (!_discoveryOn) _discoveryOn = readDiscoveryOn()
     return _discoveryOn
 }
 

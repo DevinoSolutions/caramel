@@ -41,6 +41,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
+import android.os.SystemClock
+import android.util.Log
 import android.webkit.WebView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,6 +60,7 @@ import com.devino.caramel.web.WebSessionLifecycle
 import com.devino.caramel.web.ShellHost
 import com.devino.caramel.web.ShellRoutes
 import com.devino.caramel.web.ShellTab
+import com.devino.caramel.web.SignInLoopGuard
 import com.devino.caramel.web.clearWebSessionState
 import com.devino.caramel.web.createShellWebView
 import com.devino.caramel.web.loadGuarded
@@ -110,6 +113,14 @@ fun CaramelApp(
     var loadError by remember { mutableStateOf<String?>(null) }
     // Bumped to rebuild the WebView after its renderer process died.
     var webViewGeneration by remember { mutableIntStateOf(0) }
+    // The sign-in loop cap (T-10055). Not keyed on webViewGeneration: a rebuilt WebView keeps the count and the latch.
+    val signInLoop = remember { SignInLoopGuard() }
+    var parkedOnSignIn by remember { mutableStateOf(false) }
+    // Every explicit tap that loads or signs in calls this first, so the tap's own load runs unparked.
+    val shopperTapped: () -> Unit = {
+        signInLoop.userTapped()
+        parkedOnSignIn = false
+    }
 
     // The current WebView, readable from the host object built before it.
     val webViewHolder = remember { arrayOfNulls<WebView>(1) }
@@ -125,8 +136,13 @@ fun CaramelApp(
     }
     // Every load goes through the sink guard (WebView.loadGuarded); a refusal is reported, not dropped. admitLoad refuses
     // a redeem URL the handoff did not issue, and any other load cancels a pending handoff (the latest tap wins).
-    val navigate: (String) -> Unit = { url ->
-        if (!container.webSession.admitLoad(url)) {
+    // [origin] says who asked: while the sign-in loop cap has parked the shell (T-10055), an AUTOMATIC load (home after a
+    // WebView rebuild or a session change, an incoming link, a late handoff's redeem URL) is skipped and the handoff dropped.
+    val navigate: (String, SignInLoopGuard.LoadOrigin) -> Unit = { url, origin ->
+        if (!signInLoop.admitsLoad(origin)) {
+            Log.w(TAG, "Skipped an automatic load: the shell is parked on sign-in until the shopper taps")
+            container.webSession.cancelPending()
+        } else if (!container.webSession.admitLoad(url)) {
             currentOnNotice("Caramel did not open a sign-in link because the app did not create it.")
         } else if (webViewHolder[0]?.loadGuarded(url) != true) {
             currentOnNotice("Caramel did not open a page because it is not on grabcaramel.com.")
@@ -136,7 +152,7 @@ fun CaramelApp(
     // What to do with a handoff attempt; a failure is already on screen through webSession.failure.
     val applyHandoffStep: (HandoffStep) -> Unit = { step ->
         when (step) {
-            is HandoffStep.Load -> navigate(step.redeemUrl)
+            is HandoffStep.Load -> navigate(step.redeemUrl, SignInLoopGuard.LoadOrigin.AUTOMATIC)
             HandoffStep.SignInRequired -> showSignIn = true
             is HandoffStep.Failed, HandoffStep.Superseded -> Unit
         }
@@ -160,7 +176,9 @@ fun CaramelApp(
 
     // Signing in natively while a token is still set (the link fallback) signs the old one out first, so its web session
     // and its server session end before another account can sign in.
+    // A tap on Continue with Apple/Google (however the sheet opened) unparks first, so the handoff the sign-in starts may load.
     val signInWith: (OAuthProvider) -> Unit = { provider ->
+        shopperTapped()
         showSignIn = false
         scope.launch {
             val hadToken = container.session.token != null
@@ -200,8 +218,23 @@ fun CaramelApp(
                 }
             }
 
-            override fun interceptSignInRoute(url: String): Boolean =
-                when (ShellRoutes.authAction(url, currentSession.isSignedIn)) {
+            override fun interceptSignInRoute(url: String): Boolean {
+                val action = ShellRoutes.authAction(url, currentSession.isSignedIn)
+                if (action == AuthAction.NONE) return false
+                // T-10055: every automatic sign-in request counts; past the cap the shell parks on "sign in"
+                // (no prompt, no handoff, no posted home load) until the shopper taps.
+                when (signInLoop.automaticSignInRequest(SystemClock.elapsedRealtime())) {
+                    SignInLoopGuard.Admission.ADMITTED -> Unit
+                    SignInLoopGuard.Admission.PARKED_NOW -> {
+                        // TODO(T-10055): Sentry is not linked into the Android shell; add ONE breadcrumb and ONE
+                        // captureMessage here (this runs once per park), tagged with the page path and versionCode.
+                        Log.e(TAG, "Sign-in loop stopped: more than ${SignInLoopGuard.MAX_AUTOMATIC_REQUESTS} automatic sign-in requests in ${SignInLoopGuard.WINDOW_MILLIS / 1000} s; parked on sign-in until the shopper taps")
+                        parkedOnSignIn = true
+                        return true
+                    }
+                    SignInLoopGuard.Admission.PARKED -> return true
+                }
+                return when (action) {
                     AuthAction.NONE -> false
                     AuthAction.START_NATIVE_SIGN_IN -> {
                         showSignIn = true
@@ -222,6 +255,9 @@ fun CaramelApp(
                         true
                     }
                 }
+            }
+
+            override fun isParkedOnSignIn(): Boolean = signInLoop.isParked
 
             override fun onRefusedRedeemNavigation() {
                 currentOnNotice("Caramel did not follow a sign-in link that the app did not create.")
@@ -260,15 +296,25 @@ fun CaramelApp(
     LaunchedEffect(webView, requestedUrl) {
         if (requestedUrl != null) {
             started = true
-            navigate(requestedUrl)
+            navigate(requestedUrl, SignInLoopGuard.LoadOrigin.AUTOMATIC)
             onRequestedUrlConsumed()
         } else if (!started) {
             started = true
-            navigate(ShellRoutes.homeUrl())
+            navigate(ShellRoutes.homeUrl(), SignInLoopGuard.LoadOrigin.AUTOMATIC)
         }
     }
 
     BackHandler(enabled = canGoBack) { webView.goBack() }
+
+    // Only ever called from a tap (a tab, Try again), after shopperTapped().
+    val openTab: (ShellTab) -> Unit = { tab ->
+        if (tab.needsWebSession && session.isSignedIn && !container.webSession.active) {
+            // Signed in natively, no web session yet: link it first, landing on this tab.
+            startHandoff(tab.startPath)
+        } else {
+            navigate(ShellRoutes.urlFor(tab), SignInLoopGuard.LoadOrigin.SHOPPER_TAP)
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -277,13 +323,9 @@ fun CaramelApp(
                     NavigationBarItem(
                         selected = selectedTab == tab,
                         onClick = {
+                            shopperTapped()
                             selectedTab = tab
-                            if (tab.needsWebSession && session.isSignedIn && !container.webSession.active) {
-                                // Signed in natively, no web session yet: link it first, landing on this tab.
-                                startHandoff(tab.startPath)
-                            } else {
-                                navigate(ShellRoutes.urlFor(tab))
-                            }
+                            openTab(tab)
                         },
                         icon = { Icon(tab.icon(), contentDescription = null) },
                         label = { Text(tab.label) },
@@ -307,6 +349,7 @@ fun CaramelApp(
             notice?.let { ErrorBanner(it, retryTitle = "Dismiss") { onNotice(null) } }
             handoffFailure?.let {
                 ErrorBanner(it) {
+                    shopperTapped()
                     container.webSession.dismissFailure()
                     startHandoff(selectedTab.startPath)
                 }
@@ -329,7 +372,30 @@ fun CaramelApp(
                 }
                 loadError?.let { message ->
                     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
-                        ErrorBanner(message) { webView.reload() }
+                        ErrorBanner(message) {
+                            shopperTapped()
+                            webView.reload()
+                        }
+                    }
+                }
+                // Parked by the sign-in loop cap (T-10055): covers the page (a Surface takes the touches) until a tap.
+                if (parkedOnSignIn) {
+                    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text("Sign in to see this page", style = MaterialTheme.typography.titleMedium)
+                            Button(onClick = {
+                                shopperTapped()
+                                showSignIn = true
+                            }) { Text("Sign in") }
+                            TextButton(onClick = {
+                                shopperTapped()
+                                openTab(selectedTab)
+                            }) { Text("Try again") }
+                        }
                     }
                 }
             }
@@ -374,6 +440,7 @@ fun CaramelApp(
                             AccountAction.SIGN_IN -> Button(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
+                                    shopperTapped()
                                     showAccount = false
                                     showSignIn = true
                                 },
@@ -401,7 +468,8 @@ fun CaramelApp(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
                                     showAccount = false
-                                    navigate(ShellRoutes.privacyUrl())
+                                    shopperTapped()
+                                    navigate(ShellRoutes.privacyUrl(), SignInLoopGuard.LoadOrigin.SHOPPER_TAP)
                                 },
                             ) { Text("Privacy policy") }
                         }
@@ -434,3 +502,5 @@ fun CaramelApp(
         )
     }
 }
+
+private const val TAG = "CaramelShell"

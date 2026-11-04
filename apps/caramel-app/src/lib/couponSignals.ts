@@ -30,6 +30,7 @@
 // coupon id as a string, matching the app's Coupon.id: string.
 import { Prisma, type PrismaClient } from '@/generated/prisma/client'
 import { authSecret } from '@/lib/authSecret'
+import { hasCodeShapedToken, redactStoreReason } from '@/lib/codeShapedTokens'
 import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
     FAILING_WINDOW_MS,
@@ -37,6 +38,7 @@ import {
     keepsFailing,
 } from '@/lib/coupons'
 import {
+    readCatalogCode,
     writeFailedSignal,
     writeUsageSignal,
     writeWorkedSignal,
@@ -333,13 +335,21 @@ async function recordFailedIn(
     const hash = reporterHash(reporter)
     const weight = reporterWeight(reporter)
     // `reason` is already length-bounded by the report route's zod body schema
-    // (trim().max(200)); passed straight through — no second-guessing a value
-    // the boundary already validated.
+    // (trim().max(200)). It is the STORE's own error text, reported without
+    // consent, and a store can echo the shopper's own code back in it ("X cannot
+    // be combined with MYCODE5"), so it is redacted BEFORE it is stored
+    // (T-9959): every code-shaped token goes except the catalog code being
+    // reported. The catalog lookup only runs when something in the text looks
+    // like a code, so a plain-English reason costs no extra query.
+    const storedReason =
+        reason !== null && hasCodeShapedToken(reason, { contextualCaps: true })
+            ? redactStoreReason(reason, await readCatalogCode(couponId, tx))
+            : reason
     // The aggregate upsert comes FIRST: its row lock serialises concurrent
     // reports of this coupon before the quorum is recomputed. It is also the
     // catalog existence gate: an unknown id writes nothing (reporter row
     // included) and the whole report is refused.
-    if (!(await writeFailedSignal(couponId, reason, tx))) return false
+    if (!(await writeFailedSignal(couponId, storedReason, tx))) return false
     await tx.couponSignalReporter.upsert({
         where: {
             couponId_outcome_reporterHash: {

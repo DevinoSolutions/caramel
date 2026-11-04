@@ -346,6 +346,8 @@ export default async function StoreCouponsPage({
                 initialTotal={total}
                 disableInitialFetch
                 pageSize={STORE_PAGE_SIZE}
+                // The cards' "Xh ago" lines run on the server's clock (CARAMEL-18).
+                renderedAt={new Date().getTime()}
                 // `base` — not the raw slug — because that is the normalized
                 // store key favorites are filed under (the same value the
                 // canonical URL uses), so /coupons/www.nike.com and

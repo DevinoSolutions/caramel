@@ -1,5 +1,9 @@
 import { withRoute } from '@/lib/api/withRoute'
-import { countCouponsForStores } from '@/lib/couponsRepo'
+import { couponBoxProposalIdentityWhere } from '@/lib/couponBoxProposalIdentity'
+import {
+    countCodesSubmittedByUser,
+    countCouponsForStores,
+} from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import { summarizeReports } from '@/lib/profile/reportImpact'
 import { readSavingsSyncEnabled } from '@/lib/profile/savingsSyncPreference'
@@ -25,7 +29,9 @@ import { NextResponse } from 'next/server'
 // scoping is not literally `userId`: a request made while signed OUT carries no
 // user id, only the email typed into the form, so it is matched by the shared
 // predicate in src/lib/siteSuggestionIdentity.ts — the SAME one the delete
-// route scrubs with. There is still no path through this handler that reads
+// route scrubs with. Coupon box proposals are counted through
+// src/lib/couponBoxProposalIdentity.ts, the SAME predicate the delete route
+// deletes with. There is still no path through this handler that reads
 // another account's rows.
 
 export const GET = withRoute(
@@ -54,6 +60,8 @@ export const GET = withRoute(
             reportRows,
             syncEnabled,
             identifyingSuggestionCount,
+            couponBoxProposalCount,
+            submittedCodeCount,
         ] = await Promise.all([
             prisma.user.findUnique({
                 where: { id: userId },
@@ -118,6 +126,14 @@ export const GET = withRoute(
                     email: session.user.email ?? null,
                 }),
             }),
+            // A COUNT too: the danger zone only needs to know there are
+            // proposals for "Delete my data" to remove (T-12391).
+            prisma.couponBoxProposal.count({
+                where: couponBoxProposalIdentityWhere(userId),
+            }),
+            // A COUNT as well: the codes this account submitted that "Delete my
+            // data" would take it off (T-12392).
+            countCodesSubmittedByUser(userId),
         ])
 
         // Per-currency totals. Deliberately NOT summed into one number: a
@@ -185,6 +201,8 @@ export const GET = withRoute(
                 couponCount: couponCounts.get(row.storeName) ?? null,
             })),
             siteSuggestions: { identifyingCount: identifyingSuggestionCount },
+            couponBoxProposals: { count: couponBoxProposalCount },
+            submittedCodes: { linkedCount: submittedCodeCount },
             reports,
         }
 

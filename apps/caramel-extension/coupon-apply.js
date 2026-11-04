@@ -15,6 +15,7 @@ import {
     caramelDisclosureFor,
     caramelFormSubmitIsUnsafe,
     caramelIsForbiddenControl,
+    caramelPriceElement,
     caramelSubmitBesideInput,
     getPrice,
     pickBestMatch,
@@ -69,8 +70,15 @@ const GENERIC_REMOVE_SELECTORS_SCOPED =
 // deleted cart. If a store genuinely needs a remove button we can't scope, that
 // belongs in its config's `couponRemove`, where it is a deliberate per-store
 // decision rather than a blind default for every store.
+
+// "does not apply" as well as "doesn't apply" (T-13010). BigCommerce's checkout
+// refuses a code with "Coupon does not apply" in an alert beside the box;
+// store.franklinplanner.com, measured live 2026-11-03. Read as no answer at all,
+// every refused code waited out the whole window and the run stopped after two
+// codes (EARLY_PROBE), before FPBDAY, which takes $19.50 to $15.60. The same
+// phrase is in ERROR_WORDS_RE below.
 export const GENERIC_ERROR_TEXT_RE =
-    /\b(invalid|expired|not\s+(valid|applicable|eligible)|limited\s+to|cannot\s+be\s+(applied|redeemed)|doesn'?t\s+apply|no\s+eligible|enter\s+a\s+valid|nicht|ungültig|abgelaufen|expiré|expirado|caducado)\b/i
+    /\b(invalid|expired|not\s+(valid|applicable|eligible)|limited\s+to|cannot\s+be\s+(applied|redeemed)|does(?:n['’]?t|\s+not)\s+apply|no\s+eligible|enter\s+a\s+valid|nicht|ungültig|abgelaufen|expiré|expirado|caducado)\b/i
 // `abgelaufen` / `expiré` / `expirado` / `caducado` are the same word as
 // "expired" in the four European languages our catalogue actually covers, and
 // each one is unambiguous — unlike the bare `nicht` above, they cannot appear in
@@ -345,6 +353,21 @@ export async function removeAppliedCoupon(rec, options) {
 // two `.alert.alert--error` elements: a hidden empty placeholder and a
 // real one that fills with text. `qOne` would return the placeholder and
 // miss the real error. Iterate so we always observe the live one.
+// Did a config's own errorIndicator say `msg`? Its answers are read by its own
+// selector every time, so only a refusal read BESIDE the box (the generic
+// reader, detectCouponError) is kept as one the store may draw again
+// (_caramelStoreAnswers, T-13100).
+function _caramelSaidByIndicator(rec, msg) {
+    const el = _firstVisibleErrorEl(rec)
+    const said = (el?.innerText || '').trim()
+    return (
+        !!said &&
+        !!msg &&
+        _isVisible(el) &&
+        (said.includes(msg) || msg.includes(said))
+    )
+}
+
 function _firstVisibleErrorEl(rec) {
     if (!rec.errorIndicator) return null
     const all = qAll(rec.errorIndicator)
@@ -435,8 +458,198 @@ export function caramelQuoteIsAttributable(quote, priorText) {
     return !_caramelNormalizeQuote(priorText).includes(q)
 }
 
+/* What the store drew after we submitted, for a box read like a found one
+ * (_caramelReadsLikeFound): a refusal it gave an earlier code and puts up
+ * again is its answer to this one, even in the very words already on the page.
+ * fullsource.com, 1.4.30 (2026-10-31, T-11368): "This coupon code has expired
+ * or is invalid" stayed up between codes, so from the third code on the text
+ * was "already there", each refused code waited out the full 10s, and the run
+ * budget was gone before FREESHIP, the code that worked.
+ *
+ * Drawn again means: the node saying it (or one around it) was inserted, its
+ * text was set (even to the same words), or it was shown after being hidden
+ * (hidden, aria-hidden, display/visibility, a hiding class, a dialog's open;
+ * watched on the nodes saying an earlier answer, _caramelAnswerNodes). Any
+ * other attribute change (a form's "loading" class) is not an answer.
+ * Only what happens from arm() on counts: applyCoupon arms it right before its
+ * click, so a store that re-draws the box as the code is typed does not answer
+ * for it. One watch at a time: a new snapshot stops the last one.
+ *
+ * Only words the store already gave as its answer count
+ * (_caramelStoreAnswers): a store that re-draws its whole promo section brings
+ * its standing hint along ("Enter a valid promo code to get free shipping"),
+ * and that hint is furniture however often it is drawn. Until the page has
+ * given one, nothing is watched: a code tried before any refusal (the first,
+ * or every one up to the code that works) costs the page nothing.
+ *
+ * A refusal read this way is weaker evidence than new words: a checkout that
+ * re-draws its promo section while it works (kipling-usa.com, Shopify, on the
+ * #633 build) brings the last code's refusal back with it, and the discount
+ * lands seconds later. So an answer that rested only on such a re-draw (the
+ * drawn node holds the promo box itself: watch.wholeBox) gives the total
+ * CARAMEL_REDRAW_WAIT_MS to move, not CARAMEL_ANSWER_GRACE_MS, while a refusal
+ * drawn on its own (its node, its text, its visibility: watch.own) keeps the
+ * short grace. The wait after a re-drawn total (T-10533) ends only on new
+ * words. */
+let _caramelRedraws = null
+// Every refusal this page gave as its answer to a code, normalised.
+const _caramelStoreAnswers = new Set()
+function _caramelGaveBefore(q) {
+    for (const a of _caramelStoreAnswers)
+        if (q.includes(a) || a.includes(q)) return true
+    return false
+}
+const _CARAMEL_HIDDEN_BY = {
+    hidden: v => v !== null,
+    'aria-hidden': v => v === 'true',
+    open: v => v === null,
+    style: v => /display\s*:\s*none|visibility\s*:\s*hidden/i.test(v || ''),
+    class: v =>
+        String(v || '')
+            .split(/\s+/)
+            .some(c => /^(.*[-_])?(hidden|hide|invisible)$|^d-none$/i.test(c)),
+}
+// The smallest elements (a text node's parent, or up to two levels above it,
+// short enough to be one message) whose text holds an earlier answer, shown
+// or hidden.
+function _caramelAnswerNodes() {
+    const found = new Set()
+    if (!document.body) return found
+    const answers = [..._caramelStoreAnswers]
+    const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+    for (let t = tw.nextNode(); t; t = tw.nextNode()) {
+        if (!t.data.trim()) continue
+        for (
+            let el = t.parentElement, d = 0;
+            el && d < 3;
+            el = el.parentElement, d++
+        ) {
+            const text = _caramelNormalizeQuote(el.textContent)
+            if (text.length > 400) break
+            if (answers.some(a => text.includes(a))) {
+                found.add(el)
+                break
+            }
+        }
+    }
+    return found
+}
+function _caramelWatchRedraws(rec) {
+    _caramelRedraws?.stop()
+    _caramelRedraws = null
+    if (
+        !_caramelStoreAnswers.size ||
+        typeof MutationObserver === 'undefined' ||
+        !document.documentElement
+    )
+        return null
+    const touched = new Set()
+    // Kept cheap: this runs on every batch of the page's own re-renders.
+    const note = node => {
+        const el = node?.nodeType === 1 ? node : node?.parentElement
+        if (el && touched.size < 1000) touched.add(el)
+    }
+    const take = records => {
+        for (const r of records) {
+            if (r.type === 'childList') r.addedNodes.forEach(note)
+            else if (r.type === 'characterData') note(r.target)
+            else {
+                const hiddenBy = _CARAMEL_HIDDEN_BY[r.attributeName]
+                if (
+                    hiddenBy(r.oldValue) &&
+                    !hiddenBy(r.target.getAttribute(r.attributeName))
+                )
+                    note(r.target)
+            }
+        }
+    }
+    const observer = new MutationObserver(take)
+    // Page-wide: nodes and text only. "Shown again" is watched only on the
+    // nodes now saying an earlier answer and the few levels around them: a
+    // page-wide watch of style and class changes with their old values is
+    // paid by every re-render and animation frame of the store's own page, and
+    // a successful code at kipling-usa.com took 1-3.5 s longer under it
+    // (2026-10-31, the first #633 build: 6.6-9.4 s against 5.9-6.1 s).
+    observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+    })
+    for (const said of _caramelAnswerNodes())
+        for (
+            let n = said, d = 0;
+            n && n !== document.body && d < 4;
+            n = n.parentElement, d++
+        )
+            observer.observe(n, {
+                attributes: true,
+                attributeOldValue: true,
+                attributeFilter: Object.keys(_CARAMEL_HIDDEN_BY),
+            })
+    const watch = {
+        // What the re-drawn refusals that answered for this code were drawn
+        // in: a node of their own, or one holding the promo box.
+        own: false,
+        wholeBox: false,
+        arm() {
+            observer.takeRecords()
+            touched.clear()
+        },
+        // Does a shown element drawn since arm() say `quote`?
+        saysAgain(quote) {
+            take(observer.takeRecords())
+            const q = _caramelNormalizeQuote(quote)
+            if (!q || !_caramelGaveBefore(q)) return false
+            // The words without spaces, matched against textContent first:
+            // it needs no layout, and this runs on every poll of the wait.
+            const bare = q.replace(/\s/g, '')
+            const holds = el =>
+                (el.textContent || '')
+                    .replace(/\s/g, '')
+                    .toLowerCase()
+                    .includes(bare)
+            const box = pickBestMatch(rec.couponInput)
+            let said = false
+            for (const el of touched)
+                if (
+                    el.isConnected &&
+                    holds(el) &&
+                    // Our own prompt and cards are never the store's answer.
+                    !el.closest('[id^="caramel"]') &&
+                    _isVisible(el) &&
+                    _caramelNormalizeQuote(
+                        el.innerText ?? el.textContent,
+                    ).includes(q)
+                ) {
+                    said = true
+                    // No box to be found (a found box's marks went with the
+                    // re-draw) is read as the box re-drawn.
+                    if (!box || el.contains(box)) watch.wholeBox = true
+                    else return (watch.own = true)
+                }
+            return said
+        },
+        stop() {
+            observer.disconnect()
+            touched.clear()
+            if (_caramelRedraws === watch) _caramelRedraws = null
+        },
+    }
+    _caramelRedraws = watch
+    return watch
+}
+
+/* caramelQuoteIsAttributable, or the store drew the quote again after we
+ * submitted (see _caramelWatchRedraws). */
+function _caramelSaidSinceSubmit(quote, priorText) {
+    return (
+        caramelQuoteIsAttributable(quote, priorText) ||
+        !!_caramelRedraws?.saysAgain(quote)
+    )
+}
+
 const ERROR_WORDS_RE =
-    /\b(invalid|expired|not valid|doesn'?t apply|cannot be applied|cannot apply|already used|no longer|reached the limit|minimum|coupon code is required|wrong code)\b/i
+    /\b(invalid|expired|not valid|does(?:n['’]?t| not) apply|cannot be applied|cannot apply|already used|no longer|reached the limit|minimum|coupon code is required|wrong code)\b/i
 
 // The text of every innermost SHOWN element under scope that carries a
 // rejection phrase: the store's sentences, without the label or button around
@@ -546,6 +759,10 @@ const CARAMEL_FINDER_HOLD_MS = 1500
 const CARAMEL_FINDER_HOLD_READS =
     CARAMEL_FINDER_HOLD_MS / CARAMEL_FINDER_READ_MS
 const CARAMEL_FINDER_SETTLE_READS = 12
+// How long a finder-picked box keeps waiting after its total area re-draws
+// with the same number (T-10533): Shopify checkouts land the discount 2-4 s
+// after that re-draw.
+const CARAMEL_REDRAW_WAIT_MS = 4000
 // How long a disabled Apply button gets to be enabled after the code is typed.
 const CARAMEL_APPLY_ENABLE_WAIT_MS = 1500
 
@@ -572,6 +789,208 @@ export function _caramelRefusesTheCode(text, code) {
             !/\bcombin|\bstack/i.test(s)
         )
     })
+}
+
+// A store refusing a code because a discount is already on the order ("X
+// couldn't be used with your existing discounts", "Cannot be combined with
+// other offers", "Ein Rabatt wurde bereits angewendet"). The runner reads it as
+// a sign that an earlier code landed after its own wait (T-10544).
+// Sentences arrive with their whitespace collapsed (_caramelSentencesOf), so a
+// space is a space. "cumulab" is French, Spanish and Italian at once.
+// The words for a discount; "code" is only in the second, because "try other
+// codes" is a plain refusal.
+const _CARAMEL_DISCOUNT_WORDS =
+    '(discount|offer|promo|coupon|voucher|deal|reduction)'
+const _CARAMEL_CODE_WORDS = '(discount|offer|promo|coupon|voucher|code)'
+const CARAMEL_EXISTING_DISCOUNT_RE = new RegExp(
+    String.raw`\b(existing|current|other) ${_CARAMEL_DISCOUNT_WORDS}|already (been )?applied(?! to (an?|another|a previous|a prior) order)|already (has|have|contains?) an? ${_CARAMEL_DISCOUNT_WORDS}|n.?t (be )?(combined|stacked|used (together )?with [^.!?]{0,30}${_CARAMEL_CODE_WORDS})|(not |non-?)(combin|stack)able|only one ${_CARAMEL_CODE_WORDS}|one ${_CARAMEL_CODE_WORDS}s? per order|nicht (mit (anderen|bestehenden|weiteren)|kombinierbar)|kombiniert werden|bereits (ein (rabatt|gutschein)|angewendet)|cumulab|ne peut (pas )?.tre (combin|cumul)|autres? (r.duction|remise|promotion|offre)|d.j. appliqu|no (se )?pueden? (combinar|acumular)|otr[oa]s? (descuento|cup|promoci|oferta)|ya (est. |se ha |ha sido )?aplicad|non (pu.|possono) essere (combinat|cumulat)|altri (sconti|codici|coupon|buoni)|gi. applicat|niet (te )?(combineren|stapelen)|niet (worden )?gecombineerd|andere (korting|actie|aanbieding)|\bal toegepast`,
+    'i',
+)
+// Every sentence is either that refusal or neutral: a sentence that also calls
+// the code invalid or expired, or one that accepts it ("Promo code applied.
+// Cannot be combined with other offers."), is not this answer.
+export function caramelRefusedForExistingDiscount(text) {
+    const said = _caramelSentencesOf(String(text || ''))
+    return (
+        said.some(s => CARAMEL_EXISTING_DISCOUNT_RE.test(s)) &&
+        !said.some(
+            s =>
+                !CARAMEL_EXISTING_DISCOUNT_RE.test(s) &&
+                (_CARAMEL_REFUSES_CODE_RE.test(s) ||
+                    (_CARAMEL_ACCEPTED_RE.test(s) &&
+                        !_CARAMEL_NEGATION_RE.test(s))),
+        )
+    )
+}
+
+// Which of `codes` the order shows as applied, the most recent first: a word
+// of an applied row (the config's, or the generic ones) or of a Shopify
+// checkout's reduction tag ("ADRIANR15 AdrianR15") equal to the code, any case.
+// Shopify's current checkout has no #reduction-tags: each code is a tag group
+// (<div id="tag-0" role="group">FREE FREE<button aria-label="Remove FREE"
+// data-event-name="remove_discount_code">) in the "Discount code or gift
+// card" list (neweracap.com, live 2026-10-30). Only a group whose button
+// removes a discount code counts, so an applied gift card names nothing; the
+// button's label is read too, as it names the code on its own.
+const _CARAMEL_SHOPIFY_REMOVE_CODE =
+    'button[data-event-name="remove_discount_code"]'
+
+/* Any other checkout (T-11601): the code is named in a row of the order that
+ * either carries its own remove control, or speaks of a discount beside a
+ * negative amount. gant.co.uk (SFCC, 2026-10-31) showed "GB14 - As a
+ * subscriber ... Remove" with the line at -£10; store.franklinplanner.com
+ * (BigCommerce) "Coupon discount Remove -$3.59" over the code. Never a row in
+ * a cart line, a gift card, a row that refuses the code, a store notice
+ * (alert or error box), a form holding a field (our own input box), or our
+ * own UI (shadow roots are not walked; a light-DOM host is skipped). */
+const _CARAMEL_ROW_MAX_TEXT = 400
+const _CARAMEL_ROW_MAX_UP = 5
+const _CARAMEL_REMOVE_LABEL_RE = /\b(remove|delete)\b/i
+// A bare × counts only when the control's own markup says it removes (SFRA's
+// button.remove-coupon): a store's banner closes with one too.
+const _CARAMEL_REMOVE_GLYPH_RE = /^[×✕✖✗⨯x]$/i
+const _CARAMEL_CLOSE_LABEL_RE = /\b(close|dismiss|hide)\b/i
+const _CARAMEL_ORDER_DISCOUNT_RE =
+    /\b(discount|coupon|promo(tion)?|voucher|code|sav(e|ed|ing|ings)|reduction|offer|off)\b/i
+const _CARAMEL_NEGATIVE_AMOUNT_RE =
+    /(?:^|[^\p{L}\p{N}])[-−–]\s?(?:[A-Z]{0,3}\s?)?[$£€¥₹]?\s?\d/u
+const _CARAMEL_NOTICE_SEL =
+    '[role="alert"], [class*="error" i], [class*="alert" i]'
+const _CARAMEL_FORM_FIELD_SEL = 'input:not([type="hidden"]), textarea, select'
+
+function _caramelIsRemoveControl(el) {
+    if (!_isVisible(el)) return false
+    const label = (
+        el.getAttribute('aria-label') ||
+        el.getAttribute('title') ||
+        el.innerText ||
+        el.textContent ||
+        ''
+    ).trim()
+    const attrs = [...el.attributes].map(a => a.value).join(' ')
+    return (
+        (_CARAMEL_REMOVE_LABEL_RE.test(label) ||
+            (_CARAMEL_REMOVE_GLYPH_RE.test(label) &&
+                _CARAMEL_REMOVE_LABEL_RE.test(attrs))) &&
+        !_CARAMEL_CLOSE_LABEL_RE.test(label) &&
+        !/gift/i.test(attrs)
+    )
+}
+
+// Is `start` (an element whose own text holds `code`) inside a row of the
+// order that shows the code applied?
+function _caramelOrderRowShows(start, code, couponInput) {
+    if (start.closest('[id^="caramel"]')) return false
+    const notice = start.closest(_CARAMEL_NOTICE_SEL)
+    if (
+        notice &&
+        (notice.innerText ?? notice.textContent ?? '').length <=
+            _CARAMEL_ROW_MAX_TEXT
+    )
+        return false
+    let el = start
+    for (let up = 0; up < _CARAMEL_ROW_MAX_UP && el; up++) {
+        if (el === document.body) return false
+        const text = (el.innerText ?? el.textContent ?? '').trim()
+        if (text.length > _CARAMEL_ROW_MAX_TEXT) return false
+        if ([...el.querySelectorAll(_CARAMEL_FORM_FIELD_SEL)].some(_isVisible))
+            return false
+        if (
+            /gift ?card/i.test(text) ||
+            caramelRowReadsRejected(el) ||
+            _caramelRefusesTheCode(text, code)
+        )
+            return false
+        const removes = [...el.querySelectorAll(_CARAMEL_CONTROLS)].filter(
+            _caramelIsRemoveControl,
+        )
+        if (removes.some(b => !_caramelInCartLine(b, [b], couponInput)))
+            return true
+        if (
+            _CARAMEL_ORDER_DISCOUNT_RE.test(text) &&
+            _CARAMEL_NEGATIVE_AMOUNT_RE.test(text)
+        )
+            return true
+        el = el.parentElement
+    }
+    return false
+}
+
+// The codes of `codes` (upper case) that some order row shows applied.
+function _caramelCodesInOrderRows(rec, codes) {
+    const want = new Set(codes.map(c => String(c).toUpperCase()))
+    const shown = new Set()
+    if (!want.size || !document.body) return shown
+    const couponInput = pickBestMatch(rec?.couponInput)
+    const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+    )
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const parent = n.parentElement
+        if (!parent || parent.closest('script, style, noscript, template'))
+            continue
+        for (const word of n.textContent
+            .toUpperCase()
+            .split(/[^\p{L}\p{N}_-]+/u)) {
+            if (
+                want.has(word) &&
+                !shown.has(word) &&
+                _isVisible(parent) &&
+                _caramelOrderRowShows(parent, word, couponInput)
+            )
+                shown.add(word)
+        }
+    }
+    return shown
+}
+
+export function caramelCodeOnOrder(rec, codes) {
+    const words = new Set(
+        [
+            ...qAll(findAppliedSelector(rec)),
+            ...qAll('#reduction-tags li, [id^="reduction-tag-"]'),
+            ...qAll(_CARAMEL_SHOPIFY_REMOVE_CODE).map(b =>
+                b.closest('[role="group"]'),
+            ),
+        ]
+            .filter(el => el && _isVisible(el) && !caramelRowReadsRejected(el))
+            .flatMap(el =>
+                [
+                    el.innerText ?? el.textContent,
+                    el
+                        .querySelector(_CARAMEL_SHOPIFY_REMOVE_CODE)
+                        ?.getAttribute('aria-label'),
+                ]
+                    .join(' ')
+                    .toUpperCase()
+                    .split(/[^\p{L}\p{N}_-]+/u),
+            ),
+    )
+    for (let i = codes.length - 1; i >= 0; i--)
+        if (words.has(String(codes[i]).toUpperCase())) return codes[i]
+    const rows = _caramelCodesInOrderRows(rec, codes)
+    for (let i = codes.length - 1; i >= 0; i--)
+        if (rows.has(String(codes[i]).toUpperCase())) return codes[i]
+    return null
+}
+
+// The finder's total read after `code` was submitted. caramelFinderTotalNow
+// reads a $0.00 total as NaN, since zero is what a half-drawn summary shows.
+// It counts as 0 only when the order names the code, the same rule as the
+// late credit in coupon-runner.js: neweracap.com's "Free" took the order to
+// $0.00 in its own attempt and was ruled out (T-11045). The row read is the
+// one caramelFinderTotalNow kept marked, and only while it is shown.
+export function _caramelFinderTotalAfter(rec, code) {
+    const now = caramelFinderTotalNow(rec)
+    if (!Number.isNaN(now) || !code) return now
+    const el = caramelPriceElement(rec.priceContainer)
+    return el &&
+        _isVisible(el) &&
+        getPrice(rec.priceContainer, { returnLargest: true }) === 0 &&
+        caramelCodeOnOrder(rec, [code])
+        ? 0
+        : now
 }
 
 function _caramelRejectionSentences(scope) {
@@ -615,7 +1034,7 @@ function _caramelRejectionSentences(scope) {
 function _caramelSmallestSaying(scope, priorText) {
     const texts = _caramelRejectionSentences(scope)
     const best =
-        texts.find(t => caramelQuoteIsAttributable(t, priorText)) || texts[0]
+        texts.find(t => _caramelSaidSinceSubmit(t, priorText)) || texts[0]
     return best && best.length <= 200 ? best : null
 }
 
@@ -700,7 +1119,7 @@ function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
             // (measured live 2026-10-22).
             if (readsLikeFound) {
                 const said = _caramelSmallestSaying(scope, priorText)
-                if (said && caramelQuoteIsAttributable(said, priorText))
+                if (said && _caramelSaidSinceSubmit(said, priorText))
                     return said
                 standing ??= said
                 scope = scope.parentElement
@@ -776,7 +1195,7 @@ function _caramelPageAlertSaying(alertsBefore) {
         if (
             said &&
             _caramelNamesCoupon(said) &&
-            caramelQuoteIsAttributable(said, before)
+            _caramelSaidSinceSubmit(said, before)
         )
             return said
     }
@@ -862,6 +1281,9 @@ export function caramelSnapshotCart(rec, code = '') {
     const alertsBefore = _caramelReadsLikeFound(rec)
         ? _caramelPageAlertsNow()
         : null
+    // Watched from here: the shopper's click (code-capture.js) is already the
+    // submit. applyCoupon re-arms it at its own click.
+    const redraws = _caramelWatchRedraws(rec)
     return {
         hasPriceCfg,
         original,
@@ -873,6 +1295,7 @@ export function caramelSnapshotCart(rec, code = '') {
         errorBaseline,
         priorAreaText,
         alertsBefore,
+        redraws,
     }
 }
 
@@ -989,12 +1412,15 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // Looked up again on every read (waitForTotalChange): a store may answer
     // by drawing a new total element.
     const findPriceEl = () =>
-        qOne(rec.priceContainer) ||
+        caramelPriceElement(rec.priceContainer) ||
         document.getElementById(
             rec.priceContainer.match(/\[id=['"]([^'"]+)['"]\]/)?.[1] || '',
         )
     const priceEl = hasPriceCfg ? findPriceEl() : null
     const waiters = [waitForCartSignal(APPLY_WAIT_MS)]
+    // Set once the first waiter answers: the others stop reading the page
+    // instead of polling it until APPLY_WAIT_MS, into the next code's try.
+    let verdictDecided = false
     // A box the finder picked has no error or success selector of its own.
     // Two waiters stand in for them:
     //   · its small container (rec.caramelAnswer) saying a NEW rejection
@@ -1028,7 +1454,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
             const said = _caramelRejectionSentences(answerEl)
             return remarked
                 ? said
-                      .filter(s => caramelQuoteIsAttributable(s, pageBefore))
+                      .filter(s => _caramelSaidSinceSubmit(s, pageBefore))
                       .join(' ¶ ')
                 : said.join(' ¶ ')
         }
@@ -1037,14 +1463,21 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         waiters.push(
             (async () => {
                 const startedAt = performance.now()
-                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                while (
+                    !verdictDecided &&
+                    performance.now() - startedAt < APPLY_WAIT_MS
+                ) {
                     const now = rejections()
                     // "Promo code applied. Cannot be combined with other
                     // offers." is an acceptance with a caveat: leave the
-                    // verdict to the total.
+                    // verdict to the total. The same words drawn again are
+                    // the store's answer too (_caramelWatchRedraws).
                     if (
                         now &&
-                        now !== before &&
+                        (now !== before ||
+                            _caramelRejectionSentences(answerEl).some(
+                                s => !!_caramelRedraws?.saysAgain(s),
+                            )) &&
                         !_caramelSaysAccepted(answerEl.innerText, shownBefore)
                     )
                         return 'answered'
@@ -1054,17 +1487,23 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
             })(),
         )
     }
-    // A saved box (_caramelReadsLikeFound) has no rec.caramelAnswer: the
+    // A saved box (_caramelReadsLikeFound) has no rec.caramelAnswer, and a
+    // configured box's errorIndicator can miss the store's alert (BigCommerce's
+    // "Coupon does not apply", store.franklinplanner.com, T-13100): the
     // refusal is looked for around its input on each read, by the very reader
     // the verdict uses below, so the wait and the verdict agree on what the
     // store said. Only a sentence that was not there before we submitted ends
     // the wait.
-    if (_caramelReadsLikeFound(rec) && !rec.caramelFound) {
+    if (!rec.caramelFound) {
         waiters.push(
             (async () => {
                 const startedAt = performance.now()
-                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                while (
+                    !verdictDecided &&
+                    performance.now() - startedAt < APPLY_WAIT_MS
+                ) {
                     await sleep(200)
+                    if (verdictDecided) break
                     const said = detectCouponError(
                         rec,
                         errorBaseline,
@@ -1072,8 +1511,14 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                         priorAreaText,
                         null,
                     )
-                    if (said && caramelQuoteIsAttributable(said, priorAreaText))
-                        return 'answered'
+                    if (!said) continue
+                    const saved = _caramelReadsLikeFound(rec)
+                    // A configured box whose own errorIndicator said it is
+                    // judged the way it always was; this waiter is for the
+                    // refusal the indicator missed.
+                    if (!saved && _caramelSaidByIndicator(rec, said)) continue
+                    if (_caramelSaidSinceSubmit(said, priorAreaText))
+                        return saved ? 'answered' : 'answered-beside'
                 }
                 return 'answer-timeout'
             })(),
@@ -1085,8 +1530,12 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         waiters.push(
             (async () => {
                 const startedAt = performance.now()
-                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                while (
+                    !verdictDecided &&
+                    performance.now() - startedAt < APPLY_WAIT_MS
+                ) {
                     await sleep(200)
+                    if (verdictDecided) break
                     if (_caramelPageAlertSaying(alertsBefore)) return 'answered'
                 }
                 return 'alert-timeout'
@@ -1097,9 +1546,13 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         waiters.push(
             (async () => {
                 const startedAt = performance.now()
-                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                while (
+                    !verdictDecided &&
+                    performance.now() - startedAt < APPLY_WAIT_MS
+                ) {
                     await sleep(250)
-                    const now = caramelFinderTotalNow(rec)
+                    if (verdictDecided) break
+                    const now = _caramelFinderTotalAfter(rec, code)
                     if (Number.isFinite(now) && now !== original)
                         return 'total-moved'
                 }
@@ -1114,22 +1567,85 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // once misread by the loop as a cart "signal" (sawSignal=true), defeating
     // the no-signal early-exit and making dead checkouts churn all 8 codes
     // (~80-100s) instead of bailing after ~2 (~20s).
-    if (priceEl)
+    //
+    // For a box the finder picked, new text that still reads as the SAME total
+    // is a re-draw, not the store's answer: a checkout that re-draws its
+    // summary row right after Apply ended the wait there, the unchanged total
+    // ruled the code out, and the discount landed a moment later
+    // (kipling-usa.com 2026-10-30, T-10533: the order carried -$11.24 while
+    // the shopper was told nothing worked). So after such a re-draw the wait
+    // goes on, for at most CARAMEL_REDRAW_WAIT_MS, until the total reads as a
+    // different number or the store refuses THIS code (a sentence that was not
+    // on the page before we submitted). A reading the finder cannot parse (a
+    // skeleton row mid re-draw) is not an answer either. The cap bounds what a
+    // refused code costs when its refusal is not recognised.
+    if (priceEl && rec.caramelFound)
+        waiters.push(
+            (async () => {
+                const startedAt = performance.now()
+                const left = () =>
+                    APPLY_WAIT_MS - (performance.now() - startedAt)
+                const via = await waitForTotalChange(
+                    findPriceEl,
+                    priceEl.textContent,
+                    left(),
+                )
+                if (via !== 'text-changed' || !Number.isFinite(original))
+                    return via
+                const redrawAt = performance.now()
+                for (;;) {
+                    // Zero or less is a placeholder caught mid-render, unless
+                    // the order names the code (_caramelFinderTotalAfter);
+                    // `now >= 0` also turns away an unreadable NaN.
+                    const now = _caramelFinderTotalAfter(rec, code)
+                    if (now >= 0 && now !== original) return via
+                    const said = detectCouponError(
+                        rec,
+                        errorBaseline,
+                        code,
+                        priorAreaText,
+                        alertsBefore,
+                    )
+                    // New words only: a re-draw brings the last code's
+                    // refusal back with it (_caramelWatchRedraws).
+                    if (said && caramelQuoteIsAttributable(said, priorAreaText))
+                        return via
+                    if (
+                        left() <= 0 ||
+                        performance.now() - redrawAt >= CARAMEL_REDRAW_WAIT_MS
+                    )
+                        return via
+                    await sleep(200)
+                }
+            })(),
+        )
+    else if (priceEl)
         waiters.push(
             waitForTotalChange(findPriceEl, priceEl.textContent, APPLY_WAIT_MS),
         )
 
     const via = await Promise.race(waiters)
+    verdictDecided = true
     log('Wait finished via', via)
     // A refusal-shaped sentence can come a moment before the total it
     // belongs with ("Limit one offer per order" printed as the code applies).
-    // Give the total a short grace to move before the verdict is read.
-    if (via === 'answered' && _caramelReadsLikeFound(rec) && hasPriceCfg) {
+    // Give the total a short grace to move before the verdict is read, and
+    // the longer re-draw wait when the answer was only a refusal brought back
+    // by a re-drawn promo box (_caramelWatchRedraws). A refusal read beside a
+    // configured box gets the longer wait too: BigCommerce first says "Gift
+    // Certificate code `X` is invalid" for EVERY code, a working one included,
+    // and only then applies it as a coupon (store.franklinplanner.com, T-13100).
+    if ((via === 'answered' || via === 'answered-beside') && hasPriceCfg) {
         const startedAt = performance.now()
-        while (performance.now() - startedAt < CARAMEL_ANSWER_GRACE_MS) {
+        const grace =
+            via === 'answered-beside' ||
+            (snapshot.redraws?.wholeBox && !snapshot.redraws.own)
+                ? CARAMEL_REDRAW_WAIT_MS
+                : CARAMEL_ANSWER_GRACE_MS
+        while (performance.now() - startedAt < grace) {
             await sleep(250)
             const now = rec.caramelFound
-                ? caramelFinderTotalNow(rec)
+                ? _caramelFinderTotalAfter(rec, code)
                 : getPrice(rec.priceContainer, { returnLargest: true })
             if (Number.isFinite(now) && now !== original) break
         }
@@ -1146,11 +1662,11 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // box as a proven one for every later shopper on the store. An unmoved
     // total settles as before, so a refused code costs nothing more.
     if (rec.caramelFound && hasPriceCfg) {
-        let last = caramelFinderTotalNow(rec)
+        let last = _caramelFinderTotalAfter(rec, code)
         let held = 0
         for (let t = 0; t < CARAMEL_FINDER_SETTLE_READS; t++) {
             await sleep(CARAMEL_FINDER_READ_MS)
-            const now = caramelFinderTotalNow(rec)
+            const now = _caramelFinderTotalAfter(rec, code)
             if (!Number.isFinite(now) || now !== last) {
                 held = 0
                 last = now
@@ -1197,7 +1713,16 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     const answeredByRow = !!rowAnswer
     // Quotable only if the store said it BECAUSE of us (see
     // _caramelCouponAreaText). Detection above is deliberately untouched.
-    const errorIsNew = caramelQuoteIsAttributable(errorMsg, priorAreaText)
+    // Or the store drew it again for this code (_caramelWatchRedraws): the
+    // last read of the watch, which ends here.
+    const errorIsNew = _caramelSaidSinceSubmit(errorMsg, priorAreaText)
+    snapshot.redraws?.stop()
+    if (
+        errorIsNew &&
+        !answeredByRow &&
+        (_caramelReadsLikeFound(rec) || !_caramelSaidByIndicator(rec, errorMsg))
+    )
+        _caramelStoreAnswers.add(_caramelNormalizeQuote(errorMsg))
     if (errorMsg && !errorIsNew) {
         // opts.redact: a SHOPPER-typed code (code-capture.js) never reaches a
         // log line, and neither does the page text, which can quote it. The
@@ -1209,7 +1734,7 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                 : {
                       code,
                       text: String(errorMsg).slice(0, 140),
-                      reason: 'this text was already on the page before we submitted — it is the store’s furniture, not its verdict',
+                      reason: 'this text was already on the page before we submitted and the store did not draw it again — it is the store’s furniture, not its verdict',
                   },
         )
     }
@@ -1217,9 +1742,10 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     let priceDropped = false
     if (hasPriceCfg) {
         // A finder record reads through the same guards as its waiters: the
-        // same row, a positive amount. A refused read leaves no prices.
+        // same row, a positive amount (or a zero the order names the code
+        // for). A refused read leaves no prices.
         const afterLargest = rec.caramelFound
-            ? caramelFinderTotalNow(rec)
+            ? _caramelFinderTotalAfter(rec, code)
             : getPrice(rec.priceContainer, { returnLargest: true })
         const afterPrices =
             rec.caramelFound && isNaN(afterLargest)
@@ -1252,8 +1778,15 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         newTotal = moved.length ? Math.max(...moved) : afterLargest
         priceDropped = !isNaN(newTotal) && newTotal < original
         // A finder-read total of zero or less is a placeholder caught mid-
-        // render (see caramelFinderTotalNow), never a measured saving.
-        if (rec.caramelFound && !(newTotal > 0)) priceDropped = false
+        // render (see caramelFinderTotalNow), never a measured saving, unless
+        // it is a $0.00 the order names this code for (afterLargest is 0 only
+        // then, see _caramelFinderTotalAfter).
+        if (
+            rec.caramelFound &&
+            !(newTotal > 0) &&
+            !(newTotal === 0 && afterLargest === 0)
+        )
+            priceDropped = false
         // A drop read off a new deduction line, beside the store's own fresh
         // rejection of the code, is not a saving (see finderTotal).
         if (rec.caramelNetted && errorIsNew) priceDropped = false
@@ -1464,6 +1997,9 @@ export async function applyCoupon(code, rec) {
                 if (applyBtn.disabled)
                     log('AUTO_INSERT_APPLY_STILL_DISABLED', { code })
             }
+            // What the store draws from the click on answers this code; what
+            // it drew as the code was typed does not.
+            snapshot.redraws?.arm()
             try {
                 const r = applyBtn.getBoundingClientRect()
                 const cx = r.x + r.width / 2
@@ -1585,9 +2121,37 @@ export async function applyCoupon(code, rec) {
 //   GET /discount/{code}    -> attaches the code to the session server-side
 // Any site that isn't that platform simply fails the /cart.js shape probe and
 // the normal config-selector DOM flow below runs unchanged.
+
+/* Every store request the discount-link path awaits gets a deadline (T-12600).
+ *
+ * The run awaits each request in turn, and fetch() has no deadline of its own.
+ * neweracap.com in Firefox (1.4.32, 2026-11-02): the card stopped at "Trying
+ * coupon 6 of 8" and never moved, because one /discount/ request was never
+ * answered. A store that does not answer now ends that one request; the run
+ * carries on and ends with a card that says what the cart shows.
+ *
+ * The signal also covers reading the body. The fallback's timer is never
+ * cleared, for that reason: r.json() on a body that stops arriving is the same
+ * hang as a request that never answers. Safari 15 has no AbortSignal.timeout,
+ * so it gets the AbortController form. */
+export const CARAMEL_STORE_REQUEST_MS = 10000
+export function _caramelStoreFetch(url, opts) {
+    let signal
+    if (typeof AbortSignal.timeout === 'function') {
+        signal = AbortSignal.timeout(CARAMEL_STORE_REQUEST_MS)
+    } else {
+        const c = new AbortController()
+        setTimeout(() => c.abort(), CARAMEL_STORE_REQUEST_MS)
+        signal = c.signal
+    }
+    return fetch(url, { ...opts, signal })
+}
+
 export async function probeCartJson() {
     try {
-        const r = await fetch('/cart.js', { credentials: 'same-origin' })
+        const r = await _caramelStoreFetch('/cart.js', {
+            credentials: 'same-origin',
+        })
         if (!r.ok) return null
         const j = await r.json()
         if (
@@ -1705,7 +2269,7 @@ export function _unmarkTriedCode(code) {
 // Cross-file content-script call — per-file analysis can't see it.
 export async function _caramelClearCartDiscounts() {
     try {
-        const r = await fetch('/cart/update.js', {
+        const r = await _caramelStoreFetch('/cart/update.js', {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
@@ -1728,12 +2292,42 @@ export async function applyViaDiscountLink(code) {
     // A later code simply replaces the session's discount, so probing several
     // codes leaves at most one (possibly ineffective) code attached — inert.
     try {
-        await fetch('/discount/' + encodeURIComponent(code), {
-            credentials: 'same-origin',
-            redirect: 'follow',
-        })
-        return await probeCartJson()
+        const r = await _caramelStoreFetch(
+            '/discount/' + encodeURIComponent(code),
+            { credentials: 'same-origin', redirect: 'follow' },
+        )
+        // The storefront page the redirect lands on is never read, and fetch()
+        // resolves on its headers: left alone, its body went on loading under
+        // the next codes' requests until the deadline cut it (neweracap.com,
+        // 1.4.33: two /discount/ requests open at once, ended together at
+        // 11-14 s). The code has landed by now, so stop it here.
+        await _caramelDropBody(r)
     } catch {
-        return null
+        // No answer is not "didn't apply": the store may have taken the code
+        // before the request ran out of time. The cart decides. It counts as a
+        // measurement only if the cart names the code, because a cart that
+        // does not name it may still be about to.
+        const cart = await probeCartJson()
+        return _caramelCartNamesCode(cart, code) ? cart : null
     }
+    return await probeCartJson()
+}
+
+// Stop loading a response body nobody will read. A body that is already
+// closed or errored has nothing left to stop, so cancel's rejection then says
+// nothing about the request; it is the only error this lets go.
+async function _caramelDropBody(r) {
+    try {
+        await r?.body?.cancel()
+    } catch {
+        // already closed or errored: nothing left to stop
+    }
+}
+
+// Does the cart list `code` among its discount codes, live or not?
+function _caramelCartNamesCode(cart, code) {
+    const want = String(code).toUpperCase()
+    return (
+        Array.isArray(cart?.discount_codes) ? cart.discount_codes : []
+    ).some(e => String(e?.code ?? '').toUpperCase() === want)
 }

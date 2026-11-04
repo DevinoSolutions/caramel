@@ -614,7 +614,7 @@ describe('flags on, no config: the money rule holds whatever box was used', () =
             expect(t.page.filter(e => e.startsWith('submit:'))).toEqual([])
             if (c.untouched)
                 expect(document.getElementById(c.untouched).value).toBe('')
-            expect(lastModal().message).toMatch(/couldn't find the promo box/)
+            expect(lastModal().message).toMatch(/takes promo codes at checkout/)
             handedOver()
             expect(t.overlay).toBe(false)
             expect(location.pathname).toBe('/cart')

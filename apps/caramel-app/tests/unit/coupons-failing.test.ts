@@ -4,6 +4,8 @@ import {
     isRecentlyFailing,
     KEEPS_FAILING_MIN_FAIL_WEIGHT,
     keepsFailing,
+    PROVEN_COUPON_STATUSES,
+    RESTRICTED_COUPON_STATUSES,
 } from '@/lib/coupons'
 import { listCoupons, listStoreCoupons } from '@/lib/couponsRepo'
 import { formatFailedAgo } from '@/lib/relativeTime'
@@ -331,9 +333,9 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
         // A success is NOT compared here: it clears failures through the worked
         // quorum folded into fail_weight, so one forged success cannot un-sink.
         expect(order).not.toContain('last_worked_at')
-        // false (not failing) sorts first; the ranking order breaks ties.
+        // false (not failing) sorts first; proof, then the ranking order, break ties.
         expect(order).toMatch(
-            /\)\) ASC, rating DESC, created_at DESC, id DESC\s+LIMIT/,
+            /\)\) ASC, \(status IN \(\?\)\) DESC, CASE WHEN status IN \(\?\) THEN updated_at END DESC NULLS LAST, \(status IN \(\?(,\s*\?)*\)\) DESC, rating DESC, created_at DESC, id DESC\s+LIMIT/,
         )
         // The thresholds are the coupons.ts constants, bound as parameters.
         expect(values).toContain(FAILING_MIN_FAIL_WEIGHT)
@@ -348,7 +350,7 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
         // Two coupon_signals subqueries (sink, then collapse), both ASC, then ranking.
         expect(order.match(/FROM coupon_signals s/g)).toHaveLength(2)
         expect(order).toMatch(
-            /\)\) ASC,\s*\(id IN \(\s*SELECT s\.coupon_id[\s\S]*\)\) ASC, rating DESC, created_at DESC, id DESC\s+LIMIT/,
+            /\)\) ASC,\s*\(id IN \(\s*SELECT s\.coupon_id[\s\S]*\)\) ASC, \(status IN [\s\S]*\) DESC, rating DESC, created_at DESC, id DESC\s+LIMIT/,
         )
         // Each subquery binds its own fail_weight threshold, in sink-then-collapse order.
         expect(values.indexOf(FAILING_MIN_FAIL_WEIGHT)).toBeGreaterThanOrEqual(
@@ -359,6 +361,28 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
         )
     })
 
+    it('proven codes lead each group, freshest proof first, then restricted ones, BEFORE rating (shopmicas.com, 2026-10-29: codes proven that day ranked below 20 older or unverified ones)', async () => {
+        await listStoreCoupons('example.com', 20)
+
+        const { sql, values } = listQuery()
+        const order = orderBy(sql)
+        // After both failing sinks, before the rating order.
+        expect(order).toMatch(
+            /\)\) ASC, \(status IN \(\?\)\) DESC, CASE WHEN status IN \(\?\) THEN updated_at END DESC NULLS LAST, \(status IN \(\?(,\s*\?)*\)\) DESC, rating DESC, created_at DESC, id DESC\s+LIMIT/,
+        )
+        // Among proven codes, the most recently proven lead (updated_at is
+        // the pipeline row's own timestamp, moved by each verdict).
+        // The statuses come from coupons.ts, bound as parameters, proven first.
+        const proven = values.indexOf(PROVEN_COUPON_STATUSES[0])
+        expect(PROVEN_COUPON_STATUSES).toEqual(['valid'])
+        expect(proven).toBeGreaterThanOrEqual(0)
+        for (const status of RESTRICTED_COUPON_STATUSES) {
+            expect(values.lastIndexOf(status)).toBeGreaterThan(proven)
+        }
+        // Proof only ORDERS: the WHERE (and so the count) is unchanged.
+        expect(beforeOrderBy(sql)).not.toMatch(/\) DESC/)
+    })
+
     it('listCoupons with a site uses the same sinking order', async () => {
         await listCoupons({ baseSite: 'example.com', limit: 20, skip: 20 })
 
@@ -367,7 +391,7 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
             /^ORDER BY \(id IN \(\s*SELECT s\.coupon_id/,
         )
         expect(orderBy(sql)).toContain(
-            ') ASC, rating DESC, created_at DESC, id DESC',
+            ') DESC, rating DESC, created_at DESC, id DESC',
         )
     })
 

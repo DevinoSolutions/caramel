@@ -44,6 +44,7 @@ describe('CouponCard — worked-ago trust line (W1)', () => {
 
         render(
             <CouponCard
+                now={Date.now()}
                 coupon={{ ...baseCoupon, lastWorkedAt: twoHoursAgo }}
                 index={0}
             />,
@@ -53,7 +54,7 @@ describe('CouponCard — worked-ago trust line (W1)', () => {
     })
 
     it('renders no worked-ago line when lastWorkedAt is absent (the normal W1 state)', () => {
-        render(<CouponCard coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
 
         expect(screen.queryByText(/worked/i)).toBeNull()
     })
@@ -65,6 +66,7 @@ describe('CouponCard — worked-ago trust line (W1)', () => {
 
         render(
             <CouponCard
+                now={Date.now()}
                 coupon={{ ...baseCoupon, lastWorkedAt: eightDaysAgo }}
                 index={0}
             />,
@@ -76,7 +78,7 @@ describe('CouponCard — worked-ago trust line (W1)', () => {
 
 describe('CouponCard — discount badge claim integrity', () => {
     it('shows the real discount when the catalog has one', () => {
-        render(<CouponCard coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
 
         expect(screen.getByText('10%')).toBeTruthy()
         expect(screen.getByText('off')).toBeTruthy()
@@ -85,6 +87,7 @@ describe('CouponCard — discount badge claim integrity', () => {
     it('falls back to a number-free DEAL badge when no discount amount exists (never a fabricated "20%")', () => {
         render(
             <CouponCard
+                now={Date.now()}
                 coupon={{ ...baseCoupon, discount_amount: null }}
                 index={0}
             />,
@@ -106,6 +109,7 @@ describe('CouponCard — "Just worked" is Verified, never beside "Unverified"', 
 
         render(
             <CouponCard
+                now={Date.now()}
                 coupon={{ ...pending, lastWorkedAt: tenMinutesAgo }}
                 index={0}
             />,
@@ -120,7 +124,7 @@ describe('CouponCard — "Just worked" is Verified, never beside "Unverified"', 
     })
 
     it('the same code with no recent apply stays Unverified', () => {
-        render(<CouponCard coupon={pending} index={0} />)
+        render(<CouponCard now={Date.now()} coupon={pending} index={0} />)
 
         expect(screen.getByText('Unverified')).toBeTruthy()
         expect(screen.queryByText('✓ Verified')).toBeNull()
@@ -133,6 +137,7 @@ describe('CouponCard — "Just worked" is Verified, never beside "Unverified"', 
 
         render(
             <CouponCard
+                now={Date.now()}
                 coupon={{ ...pending, lastWorkedAt: twoDaysAgo }}
                 index={0}
             />,
@@ -149,13 +154,14 @@ describe('CouponCard: keeps-failing codes lose the green Verified badge', () => 
         new Date(Date.now() - h * 60 * 60 * 1000).toISOString()
 
     it('a verified code shows the Verified badge', () => {
-        render(<CouponCard coupon={verified} index={0} />)
+        render(<CouponCard now={Date.now()} coupon={verified} index={0} />)
         expect(screen.getByText(/Verified/)).toBeTruthy()
     })
 
     it('the same code flagged keepsFailing shows the "Reported not working" hint and NO Verified badge', () => {
         render(
             <CouponCard
+                now={Date.now()}
                 coupon={{
                     ...verified,
                     keepsFailing: true,
@@ -173,6 +179,7 @@ describe('CouponCard: keeps-failing codes lose the green Verified badge', () => 
     it('a merely-failing code (not keepsFailing) keeps its badge: only the collapse tier drops it', () => {
         render(
             <CouponCard
+                now={Date.now()}
                 coupon={{
                     ...verified,
                     keepsFailing: false,
@@ -193,6 +200,7 @@ describe('CouponCard — "New customers only" label', () => {
     it('shows the label when the coupon is flagged newCustomersOnly', () => {
         render(
             <CouponCard
+                now={Date.now()}
                 coupon={{ ...baseCoupon, newCustomersOnly: true }}
                 index={0}
             />,
@@ -204,11 +212,12 @@ describe('CouponCard — "New customers only" label', () => {
     it('shows no label when the flag is false or absent', () => {
         render(
             <CouponCard
+                now={Date.now()}
                 coupon={{ ...baseCoupon, newCustomersOnly: false }}
                 index={0}
             />,
         )
-        render(<CouponCard coupon={baseCoupon} index={1} />)
+        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={1} />)
 
         expect(screen.queryByText('New customers only')).toBeNull()
     })
@@ -235,7 +244,7 @@ describe('CouponCard: "Get Coupon Code" when the clipboard is refused', () => {
                 new DOMException('Document is not focused.', 'NotAllowedError'),
             ),
         )
-        render(<CouponCard coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
 
         fireEvent.click(screen.getByRole('button', { name: 'Get Coupon Code' }))
 
@@ -253,7 +262,7 @@ describe('CouponCard: "Get Coupon Code" when the clipboard is refused', () => {
 
     it('a successful write still says the code was copied', async () => {
         setClipboard(() => Promise.resolve())
-        render(<CouponCard coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
 
         fireEvent.click(screen.getByRole('button', { name: 'Get Coupon Code' }))
 
@@ -263,5 +272,47 @@ describe('CouponCard: "Get Coupon Code" when the clipboard is refused', () => {
         expect(toastMock.success).toHaveBeenCalledWith('Coupon code copied!')
         expect(toastMock.info).not.toHaveBeenCalled()
         expect(screen.getByText('Did it work?')).toBeTruthy()
+    })
+})
+
+// CARAMEL-18: the card's relative-time lines are computed from the `now` it is
+// given (the server's render time), never from the machine's clock. A visitor
+// whose clock was 3 h ahead got "Reported not working 14h ago" where the server
+// HTML said "11h ago", and React threw a hydration error (#418) on the store
+// page. Reproduced on prod 2026-11-03 with the page clock shifted +3 h.
+describe('CouponCard — relative time follows the page clock, not the machine clock (CARAMEL-18)', () => {
+    const HOUR = 60 * 60 * 1000
+    const serverNow = Date.parse('2026-11-03T16:00:00Z')
+
+    afterEach(() => {
+        vi.useRealTimers()
+    })
+
+    it('renders the same "Reported not working" text when the browser clock is 3 h ahead', () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(serverNow + 3 * HOUR)
+        const failing = {
+            ...baseCoupon,
+            failWeight: 5,
+            lastFailedAt: new Date(serverNow - 11 * HOUR).toISOString(),
+        }
+
+        render(<CouponCard now={serverNow} coupon={failing} index={0} />)
+
+        expect(screen.getByText('Reported not working 11h ago')).toBeTruthy()
+        expect(screen.queryByText(/14h ago/)).toBeNull()
+    })
+
+    it('renders the same "Worked Xh ago" text when the browser clock is 3 h behind', () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(serverNow - 3 * HOUR)
+        const worked = {
+            ...baseCoupon,
+            lastWorkedAt: new Date(serverNow - 5 * HOUR).toISOString(),
+        }
+
+        render(<CouponCard now={serverNow} coupon={worked} index={0} />)
+
+        expect(screen.getByText('Worked 5h ago')).toBeTruthy()
     })
 })

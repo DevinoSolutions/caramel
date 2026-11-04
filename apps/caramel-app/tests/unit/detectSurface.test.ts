@@ -1,10 +1,13 @@
 import {
+    appShellSuperProperties,
     canAdvertiseInstall,
     detectAppShell,
     detectSurface,
     EXTENSION_MESSAGE_TYPES,
     type SurfaceInput,
 } from '@/lib/surface/detectSurface'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 // Fleet growth-prompts spec §A: nothing that advertises the app may render
@@ -125,5 +128,112 @@ describe('canAdvertiseInstall', () => {
         // effect runs would cost far more than a momentary CTA for the few
         // who already have the extension.
         expect(canAdvertiseInstall('unknown')).toBe(true)
+    })
+})
+
+// T-10055: the shells append a SEPARATE " CaramelBuild/<build>" token after the
+// CaramelApp one. Both existing detectors must keep matching a UA that has it.
+describe('CaramelBuild token', () => {
+    const buildUA = (platform: string) =>
+        `Mozilla/5.0 (iPhone) Mobile/15E148 CaramelApp/1.6.0 (${platform}) CaramelBuild/42`
+
+    it('is read once the CaramelApp token matched', () => {
+        expect(detectAppShell(buildUA('ios'))).toEqual({
+            version: '1.6.0',
+            platform: 'ios',
+            build: '42',
+        })
+    })
+
+    it('leaves the build off a shell that predates the token', () => {
+        const shell = detectAppShell('Mobile/15E148 CaramelApp/1.6.0 (ios)')
+        expect(shell).toEqual({ version: '1.6.0', platform: 'ios' })
+        expect(shell).not.toHaveProperty('build')
+    })
+
+    it('still detects every platform with the token present', () => {
+        for (const p of ['ios', 'macos', 'android', 'fire'] as const) {
+            expect(detectAppShell(buildUA(p))?.platform).toBe(p)
+            expect(detectSurface({ ...web, userAgent: buildUA(p) })).toBe(
+                'app-shell',
+            )
+        }
+    })
+
+    it('keeps a period-separated CFBundleVersion whole, as a string', () => {
+        for (const build of ['42', '42.1', '42.1.7']) {
+            const shell = detectAppShell(
+                `Mobile CaramelApp/1.6.0 (ios) CaramelBuild/${build} Safari`,
+            )
+            expect(shell?.build).toBe(build)
+        }
+    })
+
+    it('rejects a build with more than three parts or a dangling period', () => {
+        const base = 'Mobile CaramelApp/1.6.0 (ios)'
+        for (const build of ['1.2.3.4', '42.', '.5', '4..2']) {
+            expect(
+                detectAppShell(`${base} CaramelBuild/${build}`),
+            ).not.toHaveProperty('build')
+        }
+    })
+
+    it('ignores a build token with no CaramelApp token', () => {
+        expect(detectAppShell('Safari CaramelBuild/42')).toBeNull()
+    })
+
+    it('rejects a non-numeric or run-together build token', () => {
+        const base = 'Mobile CaramelApp/1.6.0 (ios)'
+        expect(detectAppShell(`${base} CaramelBuild/abc`)).not.toHaveProperty(
+            'build',
+        )
+        expect(detectAppShell(`${base} XCaramelBuild/42`)).not.toHaveProperty(
+            'build',
+        )
+        expect(detectAppShell(`${base} CaramelBuild/42x`)).not.toHaveProperty(
+            'build',
+        )
+    })
+
+    it('still matches the inline pre-hydration script in app/layout.tsx', () => {
+        // The inline script is a template string, so lift its regex literal out
+        // of the source and un-escape the template's doubled backslashes.
+        const source = readFileSync(
+            join(process.cwd(), 'src/app/layout.tsx'),
+            'utf8',
+        )
+        const literal = /navigator\.userAgent\.match\(\/(.+?)\/\)/.exec(source)
+        expect(literal).not.toBeNull()
+        const inline = new RegExp(literal![1].split('\\\\').join('\\'))
+        for (const p of ['ios', 'macos', 'android', 'fire']) {
+            expect(inline.exec(buildUA(p))?.[1]).toBe(p)
+        }
+        expect(inline.exec('Mobile CaramelApp/1.6 (ios)')).toBeNull()
+    })
+})
+
+describe('appShellSuperProperties', () => {
+    it('carries the shell version and build next to surface and platform', () => {
+        expect(
+            appShellSuperProperties({
+                version: '1.6.0',
+                platform: 'ios',
+                build: '42',
+            }),
+        ).toEqual({
+            surface: 'app-shell',
+            app_platform: 'ios',
+            app_shell_version: '1.6.0',
+            app_build: '42',
+        })
+    })
+
+    it('omits app_build for a shell that sent none, and never touches app_version', () => {
+        const props = appShellSuperProperties({
+            version: '1.5.0',
+            platform: 'android',
+        })
+        expect(props).not.toHaveProperty('app_build')
+        expect(props).not.toHaveProperty('app_version')
     })
 })

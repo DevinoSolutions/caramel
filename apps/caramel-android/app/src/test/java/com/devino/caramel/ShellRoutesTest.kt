@@ -8,6 +8,7 @@ import com.devino.caramel.web.ShellIntents
 import com.devino.caramel.web.ShellRoutes
 import com.devino.caramel.web.ShellTab
 import com.devino.caramel.web.ShellUserAgent
+import com.devino.caramel.web.SignInLoopGuard
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -91,13 +92,23 @@ class ShellRoutesTest {
     }
 
     @Test
-    fun userAgentSuffixNamesTheVersionAndPlatform() {
-        assertEquals(" CaramelApp/1.6.0 (android)", ShellUserAgent.suffix("1.6.0", "Google"))
-        assertEquals(" CaramelApp/1.6.0 (android)", ShellUserAgent.suffix("1.6.0", null))
-        assertEquals(" CaramelApp/1.6.0 (fire)", ShellUserAgent.suffix("1.6.0", "Amazon"))
-        assertEquals(" CaramelApp/1.6.0 (fire)", ShellUserAgent.suffix("1.6.0", "amazon"))
-        assertEquals(" CaramelApp/1.6.0 (android)", ShellUserAgent.suffix("1.6.0", "Amazonas Phones"))
-        assertEquals("Mozilla/5.0 (Linux; Android 14) CaramelApp/1.6.0 (android)", ShellUserAgent.append("Mozilla/5.0 (Linux; Android 14)", "1.6.0", "Google"))
+    fun userAgentSuffixNamesTheVersionPlatformAndBuild() {
+        assertEquals(" CaramelApp/1.6.0 (android) CaramelBuild/42", ShellUserAgent.suffix("1.6.0", "Google", 42))
+        assertEquals(" CaramelApp/1.6.0 (android) CaramelBuild/42", ShellUserAgent.suffix("1.6.0", null, 42))
+        assertEquals(" CaramelApp/1.6.0 (fire) CaramelBuild/42", ShellUserAgent.suffix("1.6.0", "Amazon", 42))
+        assertEquals(" CaramelApp/1.6.0 (fire) CaramelBuild/42", ShellUserAgent.suffix("1.6.0", "amazon", 42))
+        assertEquals(" CaramelApp/1.6.0 (android) CaramelBuild/42", ShellUserAgent.suffix("1.6.0", "Amazonas Phones", 42))
+        assertEquals("Mozilla/5.0 (Linux; Android 14) CaramelApp/1.6.0 (android) CaramelBuild/42", ShellUserAgent.append("Mozilla/5.0 (Linux; Android 14)", "1.6.0", "Google", 42))
+    }
+
+    @Test
+    fun theBuildIsASeparateTokenAfterTheCaramelAppOne() {
+        // The web matcher needs whitespace (or the end) right after "(<platform>)"; the build token's leading space gives it.
+        val userAgent = ShellUserAgent.append("Mozilla/5.0", "1.6.0", "Google", 7)
+        val appMatcher = Regex("""(?:^|\s)CaramelApp/(\d+\.\d+\.\d+) \((ios|macos|android|fire)\)(?:\s|$)""")
+        val buildMatcher = Regex("""(?:^|\s)CaramelBuild/(\d+)(?:\s|$)""")
+        assertEquals("android", appMatcher.find(userAgent)?.groupValues?.get(2))
+        assertEquals("7", buildMatcher.find(userAgent)?.groupValues?.get(1))
     }
 
     @Test
@@ -213,5 +224,88 @@ class ShellRoutesTest {
         assertEquals(IntentTarget.Load("$origin/support"), ShellIntents.resolve(view, "$origin/support", null, cb))
         // A URL the guard refuses is still refused, not turned into a home load.
         assertTrue(ShellIntents.resolve(view, "https://evil.com/coupons", null, cb) is IntentTarget.Refused)
+    }
+}
+
+/** SignInLoopGuard: the Android sign-in loop cap (T-10055), twin of the iOS SignInLoopCoordinator cap. */
+class SignInLoopGuardTest {
+    private val start = 1_000_000L
+    private val second = 1_000L
+
+    private fun parkedGuard(): SignInLoopGuard {
+        val guard = SignInLoopGuard()
+        repeat(SignInLoopGuard.MAX_AUTOMATIC_REQUESTS) { lap ->
+            assertEquals(SignInLoopGuard.Admission.ADMITTED, guard.automaticSignInRequest(start + lap * second))
+        }
+        assertEquals(SignInLoopGuard.Admission.PARKED_NOW, guard.automaticSignInRequest(start + 4 * second))
+        return guard
+    }
+
+    @Test
+    fun theFifthAutomaticRequestInAMinuteParksAndIsReportedOnce() {
+        val guard = parkedGuard()
+        assertTrue(guard.isParked)
+        repeat(20) { lap ->
+            assertEquals(SignInLoopGuard.Admission.PARKED, guard.automaticSignInRequest(start + (5 + lap) * second))
+        }
+    }
+
+    @Test
+    fun slowRequestsNeverPark() {
+        val guard = SignInLoopGuard()
+        repeat(20) { lap ->
+            assertEquals(SignInLoopGuard.Admission.ADMITTED, guard.automaticSignInRequest(start + lap * 20 * second))
+        }
+        assertFalse(guard.isParked)
+    }
+
+    @Test
+    fun theWindowSlides() {
+        val guard = SignInLoopGuard()
+        repeat(SignInLoopGuard.MAX_AUTOMATIC_REQUESTS) { lap -> guard.automaticSignInRequest(start + lap * second) }
+        assertEquals(SignInLoopGuard.Admission.ADMITTED, guard.automaticSignInRequest(start + SignInLoopGuard.WINDOW_MILLIS + 3_500))
+    }
+
+    @Test
+    fun theLatchSurvivesTimeAndAWebViewReset() {
+        // CaramelApp keeps one guard across WebView generations, so a reset is the same guard seeing more requests.
+        val guard = parkedGuard()
+        for (later in listOf(SignInLoopGuard.WINDOW_MILLIS + 5 * second, 3_600_000L, 86_400_000L)) {
+            assertEquals(SignInLoopGuard.Admission.PARKED, guard.automaticSignInRequest(start + later))
+            assertTrue(guard.isParked)
+            assertFalse(guard.admitsLoad(SignInLoopGuard.LoadOrigin.AUTOMATIC))
+        }
+    }
+
+    @Test
+    fun aParkedShellRefusesAutomaticLoadsButNotATap() {
+        // The home load after a WebView rebuild or a session change, and a late handoff's redeem URL, are AUTOMATIC.
+        val guard = SignInLoopGuard()
+        assertTrue(guard.admitsLoad(SignInLoopGuard.LoadOrigin.AUTOMATIC))
+        val parked = parkedGuard()
+        assertFalse(parked.admitsLoad(SignInLoopGuard.LoadOrigin.AUTOMATIC))
+        assertTrue(parked.admitsLoad(SignInLoopGuard.LoadOrigin.SHOPPER_TAP))
+        assertTrue("a tap does not unpark by loading; userTapped does", parked.isParked)
+    }
+
+    @Test
+    fun aSignInTapLetsTheHandoffThatFollowsLoad() {
+        // Parked, then Account & privacy > Sign in > Continue: each tap calls userTapped, so the handoff's
+        // redeem URL (an AUTOMATIC load once the sign-in lands) is admitted.
+        val guard = parkedGuard()
+        guard.userTapped()
+        assertTrue(guard.admitsLoad(SignInLoopGuard.LoadOrigin.AUTOMATIC))
+    }
+
+    @Test
+    fun aTapUnparksAndStartsTheCountOver() {
+        val guard = parkedGuard()
+        guard.userTapped()
+        assertFalse(guard.isParked)
+        assertTrue(guard.admitsLoad(SignInLoopGuard.LoadOrigin.AUTOMATIC))
+        repeat(SignInLoopGuard.MAX_AUTOMATIC_REQUESTS) { lap ->
+            assertEquals(SignInLoopGuard.Admission.ADMITTED, guard.automaticSignInRequest(start + (6 + lap) * second))
+        }
+        assertEquals(SignInLoopGuard.Admission.PARKED_NOW, guard.automaticSignInRequest(start + 10 * second))
     }
 }

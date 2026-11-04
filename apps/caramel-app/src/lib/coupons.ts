@@ -121,6 +121,16 @@ export const VISIBLE_COUPON_STATUSES: readonly CouponStatus[] =
 export const RESTRICTED_COUPON_STATUSES: readonly CouponStatus[] =
     STATUS_TABLE.filter(s => s.restricted).map(s => s.status)
 
+/**
+ * The statuses the verification service PROVED working on the store (the
+ * green tier: 'valid'). A store's list ranks these first, then the restricted
+ * ones, then the unverified rest (couponsRepo.ts storeRankingOrderSql): the
+ * extension tries the top of page 1, so a proven code ranked below unverified
+ * ones is a code no shopper's auto-apply ever reaches.
+ */
+export const PROVEN_COUPON_STATUSES: readonly CouponStatus[] =
+    STATUS_TABLE.filter(s => s.tier === 'green').map(s => s.status)
+
 const VISIBLE_SET: ReadonlySet<string> = new Set(VISIBLE_COUPON_STATUSES)
 const RESTRICTED_SET: ReadonlySet<string> = new Set(RESTRICTED_COUPON_STATUSES)
 

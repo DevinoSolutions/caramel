@@ -198,6 +198,29 @@ const submitRoute = withRoute(
             }
         }
 
+        // 'manual' is the website's own form and skips the checkout consent
+        // proof by design, so it must come from the website: withRoute's
+        // `origin: true` already refused a cross-origin web page, and here a
+        // MISSING Origin (a bearer client with no browser) and an EXTENSION
+        // Origin are refused too. Otherwise a captured code could be labelled
+        // 'manual' to bypass the consent gate below. Extension submissions are
+        // 'checkout' only. This is NOT authentication: Origin is a header any
+        // non-browser client can set; it only keeps the honest extension (and a
+        // careless one) on the consented path.
+        if (body.source === 'manual') {
+            const origin = req.headers.get('origin')
+            if (!origin || isExtensionOrigin(req)) {
+                return respond(
+                    req,
+                    'bad-origin',
+                    NextResponse.json(
+                        { error: 'manual-source-site-only' },
+                        { status: 403 },
+                    ),
+                )
+            }
+        }
+
         if (body.source === 'checkout' && !env.SHOPPER_CODE_CAPTURE_ENABLED) {
             return respond(
                 req,

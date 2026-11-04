@@ -173,9 +173,16 @@ export const RESTRICTED_STATUSES = new Set(CaramelCoupons.RESTRICTED_STATUSES)
  * Normalises once, here, so every consumer (apply loop, manual list, copy
  * button) sees the same clean value. Internal spaces are LEFT ALONE — a few
  * stores really do issue codes containing them. Codes left empty are dropped;
- * an empty code can only ever waste an attempt. */
+ * an empty code can only ever waste an attempt.
+ *
+ * A code the list holds twice is kept once, at its first (best-ranked) place,
+ * matched without regard to case as stores match it (T-13010). The catalog can
+ * hold one code under two ids: store.franklinplanner.com served CHEER, TREAT,
+ * SAVE10, SHIP49 and CPT15 twice each (2026-11-02), so "coupon 2 of 8" typed
+ * CHEER again, and the copy list showed TREAT twice. */
 export function _caramelCleanCodes(list) {
     if (!Array.isArray(list)) return list
+    const seen = new Set()
     return list
         .map(c => {
             if (!c || typeof c.code !== 'string') return c
@@ -188,7 +195,14 @@ export function _caramelCleanCodes(list) {
                 .trim()
             return code === c.code ? c : { ...c, code }
         })
-        .filter(c => !c || typeof c.code !== 'string' || c.code.length > 0)
+        .filter(c => {
+            if (!c || typeof c.code !== 'string') return true
+            if (!c.code.length) return false
+            const key = c.code.toUpperCase()
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+        })
 }
 
 /* What a coupon is plausibly worth on THIS cart, in the cart's own money.
@@ -222,13 +236,40 @@ export function caramelEstimatedValue(coupon, totalMinor) {
     return total ? Math.min(cash, total) : amount
 }
 
-/* Best-first ordering. Stable, so codes we can't value keep their original
- * order — an unvalued coupon is unknown, not worthless, and sinking it below a
- * known-tiny one would be its own way of losing money. */
+/* The status tier the app ranks a store's list by (couponsRepo.ts
+ * proofTierSql): proven (green) first, then restricted (amber), then the rest.
+ * Read from the shared STATUS_META, so "proven" has one definition. */
+/* Best-first ordering, inside the order the app already chose.
+ *
+ * The app ranks a store's codes by proof: recently-failing codes sink, and
+ * inside each of those groups proven codes lead, freshest proof first. The
+ * apply loop tries only the first 8, so sorting the whole list by advertised
+ * value undid that: on 18 of 50 stores sampled 2026-11-02 a proven code fell
+ * out of the 8 behind higher-advertised unverified ones, and on 4 of them
+ * (hobbytron, vincecamuto, lillianvernon, katespade) none of the 8 tried was
+ * proven.
+ *
+ * So a code never crosses a tier boundary of the list as served: each run of
+ * same-tier codes is sorted by value, and the runs keep their order. A tier
+ * that drops back (a proven code after an unverified one) is where the app
+ * started a sunk group, and that boundary is kept too. Stable inside a run, so
+ * codes we can't value keep their original order: an unvalued coupon is
+ * unknown, not worthless, and sinking it below a known-tiny one would be its
+ * own way of losing money. */
 export function caramelRankByValue(list, totalMinor) {
+    let run = 0
+    let prevTier
     return (Array.isArray(list) ? list : [])
-        .map((c, i) => ({ c, i, v: caramelEstimatedValue(c, totalMinor) }))
-        .sort((a, b) => b.v - a.v || a.i - b.i)
+        .map((c, i) => {
+            // The app's three proof tiers: proven (green), restricted
+            // (amber), and every other status as one.
+            const t = CaramelCoupons.STATUS_META?.[c?.status]?.tier
+            const tier = t === 'green' || t === 'amber' ? t : ''
+            if (i && tier !== prevTier) run++
+            prevTier = tier
+            return { c, i, run, v: caramelEstimatedValue(c, totalMinor) }
+        })
+        .sort((a, b) => a.run - b.run || b.v - a.v || a.i - b.i)
         .map(x => x.c)
 }
 

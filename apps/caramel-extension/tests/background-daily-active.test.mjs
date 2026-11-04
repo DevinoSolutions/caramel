@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { FINDER_FLAG_MEMORY_KEY } from '../finder-flag-memory.js'
 
 /**
  * background.js `reportDailyActive` — the popup-open daily-active event,
@@ -184,7 +185,11 @@ describe('reportDailyActive — the server flag (fail closed)', () => {
 
             expect(await open()).toEqual({ skipped: 'disabled' })
             expect(telemetryCalls()).toEqual([])
-            expect(localSets).toEqual([])
+            // Every successful features read remembers the finder flag
+            // (finder-flag-memory.js); the daily-active path writes nothing.
+            expect(
+                localSets.filter(set => !(FINDER_FLAG_MEMORY_KEY in set)),
+            ).toEqual([])
             expect(localData[ID_KEY]).toBe(TEST_ID)
         },
     )
