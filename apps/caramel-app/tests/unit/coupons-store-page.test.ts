@@ -144,6 +144,8 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
                 failCount: 0,
                 failWeight: 0,
                 keepsFailing: false,
+                recentlyFailing: false,
+                recentlyRefused: false,
             },
         ])
         expect(couponsSectionEl.props.initialTotal).toBe(1)

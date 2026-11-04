@@ -50,7 +50,11 @@ const failingOne = (id: string) =>
         keepsFailing: true,
         failCount: 4,
         failWeight: 6,
-        lastFailedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        // 2h01m ago, not exactly 2h: the tests pass now={Date.now()} BEFORE this
+        // runs, so on a slow runner an exact 2h reads "1h ago" (flaked on main).
+        lastFailedAt: new Date(
+            Date.now() - 2 * 60 * 60 * 1000 - 60 * 1000,
+        ).toISOString(),
     })
 
 const filtersResponse = {

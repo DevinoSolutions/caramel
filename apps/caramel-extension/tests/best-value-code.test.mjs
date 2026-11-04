@@ -256,9 +256,24 @@ describe('best-first ordering', () => {
     // proofTierSql) and the link path tries only 8. Sorting the whole list by
     // advertised value pushed proven codes out of those 8.
     const served = [
-        { code: 'PROVEN5', status: 'valid', discount_type: 'PERCENTAGE', discount_amount: 5 },
-        { code: 'PROVEN15', status: 'valid', discount_type: 'PERCENTAGE', discount_amount: 15 },
-        { code: 'AMBER20', status: 'product_restriction', discount_type: 'PERCENTAGE', discount_amount: 20 },
+        {
+            code: 'PROVEN5',
+            status: 'valid',
+            discount_type: 'PERCENTAGE',
+            discount_amount: 5,
+        },
+        {
+            code: 'PROVEN15',
+            status: 'valid',
+            discount_type: 'PERCENTAGE',
+            discount_amount: 15,
+        },
+        {
+            code: 'AMBER20',
+            status: 'product_restriction',
+            discount_type: 'PERCENTAGE',
+            discount_amount: 20,
+        },
         ...Array.from({ length: 8 }, (_, i) => ({
             code: `UNVERIFIED${i}`,
             status: 'pending',
@@ -268,7 +283,9 @@ describe('best-first ordering', () => {
     ]
 
     it('keeps proven codes inside the 8 it tries, ahead of bigger unverified ones', () => {
-        const tried = caramelRankByValue(served, 10000).slice(0, 8).map(c => c.code)
+        const tried = caramelRankByValue(served, 10000)
+            .slice(0, 8)
+            .map(c => c.code)
 
         expect(tried.slice(0, 3)).toEqual(['PROVEN15', 'PROVEN5', 'AMBER20'])
     })
@@ -284,13 +301,99 @@ describe('best-first ordering', () => {
         // shopper failures; it stays below them.
         const ranked = caramelRankByValue(
             [
-                { code: 'FRESH', status: 'pending', discount_type: 'PERCENTAGE', discount_amount: 5 },
-                { code: 'SUNK', status: 'valid', discount_type: 'PERCENTAGE', discount_amount: 90 },
+                {
+                    code: 'FRESH',
+                    status: 'pending',
+                    discount_type: 'PERCENTAGE',
+                    discount_amount: 5,
+                },
+                {
+                    code: 'SUNK',
+                    status: 'valid',
+                    discount_type: 'PERCENTAGE',
+                    discount_amount: 90,
+                },
             ],
             10000,
         )
 
         expect(ranked.map(c => c.code)).toEqual(['FRESH', 'SUNK'])
+    })
+
+    // T-13810: the app orders a code a store refused after the unrefused codes
+    // of its own tier, and sinks a recently failing one below the rest, but a
+    // tier alone cannot show either boundary: same-tier codes used to merge
+    // into one run and the value sort lifted them straight back up.
+    it('never lifts a code the app sank above the codes of its own tier', () => {
+        const ranked = caramelRankByValue(
+            [
+                {
+                    code: 'OK5',
+                    status: 'pending',
+                    discount_type: 'PERCENTAGE',
+                    discount_amount: 5,
+                },
+                {
+                    code: 'SUNK40',
+                    status: 'pending',
+                    discount_type: 'PERCENTAGE',
+                    discount_amount: 40,
+                    recentlyFailing: true,
+                    recentlyRefused: true,
+                },
+            ],
+            10000,
+        )
+
+        expect(ranked.map(c => c.code)).toEqual(['OK5', 'SUNK40'])
+    })
+
+    it('keeps a code a store refused after the unrefused codes of its tier, and sorts each group by value', () => {
+        const ranked = caramelRankByValue(
+            [
+                {
+                    code: 'PROVEN10',
+                    status: 'valid',
+                    discount_type: 'PERCENTAGE',
+                    discount_amount: 10,
+                },
+                {
+                    code: 'PROVEN20',
+                    status: 'valid',
+                    discount_type: 'PERCENTAGE',
+                    discount_amount: 20,
+                },
+                {
+                    code: 'REFUSED30',
+                    status: 'valid',
+                    discount_type: 'PERCENTAGE',
+                    discount_amount: 30,
+                    recentlyRefused: true,
+                },
+                {
+                    code: 'REFUSED50',
+                    status: 'valid',
+                    discount_type: 'PERCENTAGE',
+                    discount_amount: 50,
+                    recentlyRefused: true,
+                },
+                {
+                    code: 'OPEN60',
+                    status: 'pending',
+                    discount_type: 'PERCENTAGE',
+                    discount_amount: 60,
+                },
+            ],
+            10000,
+        )
+
+        expect(ranked.map(c => c.code)).toEqual([
+            'PROVEN20',
+            'PROVEN10',
+            'REFUSED50',
+            'REFUSED30',
+            'OPEN60',
+        ])
     })
 
     it('survives a missing or ragged list', () => {
