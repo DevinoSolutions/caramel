@@ -267,7 +267,11 @@ module.exports = [
         // refused code 10-12 s -> a few s; a working code the store answers
         // with a gift-card refusal first still gets 4 s for its total).
         // Measured 112.39 kB locally, 112.44 kB in CI (+0.26 kB).
-        limit: '112.5 KB',
+        // 2026-11-04 (T-13810), raised 112.5 -> 112.7 kB: ranking by value
+        // keeps the app's refused and sunk groups as run boundaries, so a code
+        // the stores refused is not lifted back over its tier peers. Measured
+        // 112.52 kB locally (+0.13 kB).
+        limit: '112.7 KB',
         brotli: false,
     },
     {
