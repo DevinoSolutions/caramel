@@ -1,5 +1,6 @@
-import { expect, test, type Page, type Request } from '@playwright/test'
+import { type Page, type Request } from '@playwright/test'
 import { firstLinkedStoreDomain } from './support/stores'
+import { expect, test } from './support/test'
 
 // Third-party analytics stay off the page's critical path.
 //

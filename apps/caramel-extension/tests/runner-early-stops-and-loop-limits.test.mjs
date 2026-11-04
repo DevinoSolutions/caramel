@@ -347,7 +347,11 @@ describe('startApplyingCoupons — the no-signal early exit', () => {
 })
 
 describe('startApplyingCoupons — the wall-clock backstop', () => {
-    it('stops trying once 35 seconds are spent with nothing applied, and offers the rest', async () => {
+    // 2026-10-26 (T-9105): the first three codes are always tried, so a slow
+    // first refusal no longer ends the run on its own (it skipped TEXT15, the
+    // working second code, on bumbleandbumble.com); the budget stops it after
+    // them. Was: only CODE1 tried.
+    it('stops trying once 35 seconds are spent with nothing applied (after the first three codes), and offers the rest', async () => {
         stubs.getCoupons = async () => codeList(5)
         let clock = 0
         const now = vi.spyOn(performance, 'now').mockImplementation(() => clock)
@@ -363,7 +367,7 @@ describe('startApplyingCoupons — the wall-clock backstop', () => {
             now.mockRestore()
         }
 
-        expect(appliedCodes).toEqual(['CODE1'])
+        expect(appliedCodes).toEqual(['CODE1', 'CODE2', 'CODE3'])
         expect(finalModalCalls).toHaveLength(1)
         expect(finalModalCalls[0][4]).toHaveLength(5)
     })

@@ -7,7 +7,7 @@
 # ──────────────────────────────────────────────────────────────────────────
 
 # ---- base: pinned node + the EXACT pnpm from package.json packageManager ----
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 RUN apk add --no-cache libc6-compat
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -15,7 +15,9 @@ ENV PATH=$PNPM_HOME:$PATH
 # fail or bloat the image in a network-restricted layer).
 ENV HUSKY=0
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+# Node 25+ images no longer bundle corepack, so install a PINNED one first.
+RUN npm install -g corepack@0.36.0 \
+  && corepack enable && corepack prepare pnpm@9.0.0 --activate
 
 # ---- pruner: reduce the monorepo to the caramel-app subgraph ----
 FROM base AS pruner
@@ -49,7 +51,7 @@ COPY --from=pruner /git-sha.txt /git-sha.txt
 # LOCAL-SAFE or EMPTY only; NEVER a production identifier (public repo). Deploy
 # platforms pass real values via --build-arg. env.client.ts never throws on a
 # missing/empty public var, so empty defaults are safe.
-ARG NEXT_PUBLIC_BASE_URL=http://localhost:58000
+ARG NEXT_PUBLIC_BASE_URL=http://localhost:28000
 ARG NEXT_PUBLIC_SENTRY_DSN=
 ARG NEXT_PUBLIC_GOOGLE_ANALYTICS_ID=
 ARG NEXT_PUBLIC_API_ENCRYPTION_ENABLED=
@@ -109,7 +111,7 @@ RUN PRISMA_VERSION=$(node -p "require('./apps/caramel-app/package.json').depende
   && npm install --prefix /prisma-cli "prisma@${PRISMA_VERSION}" --no-save --no-audit --no-fund
 
 # ---- runner: minimal standalone server; migrate then serve ----
-FROM node:24-alpine AS runner
+FROM node:26-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000

@@ -28,7 +28,8 @@
 // point of the trust loop is to own this signal ourselves rather than mirror
 // (or mutate) the externally-owned catalog. Signals are keyed by the catalog
 // coupon id as a string, matching the app's Coupon.id: string.
-import type { Prisma, PrismaClient } from '@/generated/prisma/client'
+import { Prisma, type PrismaClient } from '@/generated/prisma/client'
+import { authSecret } from '@/lib/authSecret'
 import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
     FAILING_WINDOW_MS,
@@ -40,7 +41,6 @@ import {
     writeUsageSignal,
     writeWorkedSignal,
 } from '@/lib/couponsRepo'
-import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
 import * as Sentry from '@sentry/nextjs'
 import { createHmac } from 'node:crypto'
@@ -87,12 +87,7 @@ const REPORTER_KEY_DOMAIN = 'caramel:coupon-reporter:v1'
  * acceptable.
  */
 export function reporterHash(reporter: ReportReporter): string {
-    const secret = env.BETTER_AUTH_SECRET ?? env.JWT_SECRET
-    if (!secret) {
-        // env.ts's refine() makes this unreachable; a loud throw beats hashing
-        // under an empty key if that ever changes.
-        throw new Error('reporterHash: no BETTER_AUTH_SECRET or JWT_SECRET')
-    }
+    const secret = authSecret()
     const identity =
         reporter.kind === 'user' ? `u:${reporter.userId}` : `i:${reporter.ip}`
     const key = createHmac('sha256', secret)
@@ -378,12 +373,58 @@ const REPORTER_SWEEP_INTERVAL_MS = 60 * 60 * 1000
 const REPORTER_SWEEP_BACKOFF_MS = 5 * 60 * 1000
 /** A sweep that has not settled by now is reported and abandoned. */
 const REPORTER_SWEEP_TIMEOUT_MS = 60 * 1000
+/**
+ * The sweep deletes in bounded chunks, each chunk its OWN transaction, so a
+ * chunk that commits stays committed even if a later one fails or is cancelled
+ * (one big transaction would roll the whole backlog back on every retry and
+ * never progress). Postgres has no DELETE ... LIMIT, so a chunk is a keyed
+ * DELETE from a LIMIT-ed sub-select (deleteExpiredReporterChunk below).
+ */
+const REPORTER_SWEEP_CHUNK_ROWS = 5000
+/** Hard cap on chunks per run, so a pathological backlog cannot loop forever. */
+const REPORTER_SWEEP_MAX_CHUNKS = 100
+/**
+ * No new chunk starts once a run has been going this long. With the per-chunk
+ * wait + run limits below the worst case is budget + maxWait + timeout =
+ * 55 s, still inside REPORTER_SWEEP_TIMEOUT_MS: a healthy-but-large backlog
+ * ends its run cleanly instead of tripping the abandon-and-report path.
+ */
+export const REPORTER_SWEEP_LOOP_BUDGET_MS = 30 * 1000
+/**
+ * A run that stopped on a cap with rows left over is eligible again this soon
+ * (not in an hour). Nothing reschedules it: the next run still comes from the
+ * next report or the hourly forced timer.
+ */
+const REPORTER_SWEEP_BACKLOG_RETRY_MS = 60 * 1000
+/**
+ * Server-side cap on ONE chunk's DELETE (Postgres `statement_timeout`, set per
+ * transaction with SET LOCAL). Below the Prisma transaction timeout below: a
+ * slow chunk is cancelled by Postgres first, so it rejects with the real
+ * "canceling statement due to statement timeout" error instead of Prisma's
+ * generic transaction-expired one, and instead of hanging until the process
+ * restarts. A 5000-row indexed chunk finishes in well under a second, so 10 s
+ * means something is wrong (a lock, a bloated table).
+ */
+const REPORTER_SWEEP_STATEMENT_TIMEOUT_MS = 10 * 1000
+/**
+ * Prisma's interactive-transaction options for one chunk. `maxWait` is how long
+ * Prisma waits to be handed a pooled connection (its default is 2 s, which under
+ * load rejects with P2028 where a plain query would simply queue); `timeout` is
+ * how long the transaction may run (default 5 s). maxWait + timeout must stay
+ * under REPORTER_SWEEP_TIMEOUT_MS (pinned in coupon-failure-quorum.test.ts).
+ */
+const REPORTER_SWEEP_TRANSACTION_OPTIONS = {
+    maxWait: 10 * 1000,
+    timeout: 15 * 1000,
+} as const
 const REPORTER_SWEEP_AREA = 'couponSignals.sweepExpiredReporters'
 let nextReporterSweepAt = 0
-let reporterSweepInFlight: Promise<void> | null = null
-// The DELETE of a timed-out sweep, still running in Postgres. While it is set
-// NO caller (force included) starts another one, so at most one DELETE is ever
-// alive per module instance and the pool cannot fill with abandoned ones.
+let reporterSweepInFlight: Promise<ReporterSweepRun> | null = null
+// The sweep transaction of a timed-out sweep, still unsettled. The statement
+// timeout makes this rare (Postgres cancels the DELETE), but a dead socket
+// never answers, so this stays as defense in depth. While it is set NO caller
+// (force included) starts another one, so at most one DELETE is ever alive per
+// module instance and the pool cannot fill with abandoned ones.
 let abandonedDeletion: Promise<void> | null = null
 
 /**
@@ -393,53 +434,174 @@ let abandonedDeletion: Promise<void> | null = null
  * would keep its rows, so two callers run this global sweep: the report route
  * after its write has committed (not awaited: the response never waits for
  * retention), and the hourly timer in couponReporterRetention.ts, which keeps
- * the promise true in quiet periods. One DELETE, at most hourly per process,
- * and at most ONE in flight: while a sweep is running, every other caller gets
+ * the promise true in quiet periods. One run, at most hourly per process, and
+ * at most ONE in flight: while a sweep is running, every other caller gets
  * the running sweep's promise instead of starting its own DELETE
  * (single-flight is per module instance, so per bundle that loads this file).
  * It is deliberately outside the report's transaction (a retention failure
  * must not roll back a report that was valid) and it never rejects. A failure
  * is captured to Sentry and logged loudly and the next unforced try waits 5
  * minutes, so a persistent failure costs one attempt per 5 minutes, not one
- * per report. A DELETE that has not settled after 60 s is reported to Sentry
- * (tagged timeout), abandoned and backed off the same way, but it keeps running
- * in Postgres, so until it settles NO caller (force included) starts another
- * DELETE; a late rejection is reported too (tagged late). `force` skips the
- * throttle and the backoff (the timer's own hourly cadence is the throttle
- * there).
+ * per report. A run deletes in bounded chunks (deleteExpiredReporters), each in
+ * its own short transaction that first sets a Postgres `statement_timeout`
+ * (10 s, via SET LOCAL, so it dies with the transaction and never leaks onto
+ * the pooled connection): a chunk stuck on a lock or a bloated table is
+ * cancelled by Postgres, rejects, and takes the normal failure path above, so
+ * retention cannot stay off until a restart, and the chunks committed before
+ * it stay deleted, so a backlog still shrinks across retries. A run that hits
+ * its chunk or time cap with rows left is eligible again after a minute, not
+ * an hour (the next report or the hourly timer then picks it up).
+ * Defense in depth for a DELETE the server cannot cancel (a dead socket): one
+ * that has not settled after 60 s is reported to Sentry (tagged timeout),
+ * abandoned and backed off the same way, but until it settles NO caller (force
+ * included) starts another DELETE; a late rejection is reported too (tagged
+ * late). `force` skips the throttle and the backoff (the timer's own hourly
+ * cadence is the throttle there).
+ *
+ * Every run that actually executes emits exactly ONE summary line when it
+ * settles (0-row runs included), so "did the hourly sweep run?" is answerable
+ * from the container logs; a caller that joins an in-flight run gets the same
+ * result object and logs nothing. The promise resolves to that run's result
+ * (so the timer can check in to its Sentry cron monitor), or to an explicit
+ * `skipped` result when no run was started ('throttled', or 'abandoned' = a
+ * timed-out DELETE is still unsettled). A skipped call logs nothing here: it
+ * is not a run (the timer logs its own skipped tick). `trigger` only labels the
+ * summary line. A timer tick that joins an in-flight report-triggered run gets
+ * that run's result, so that hour's line can say trigger=report.
  */
 export function sweepExpiredReporters(
-    options: { force?: boolean } = {},
-): Promise<void> {
-    if (abandonedDeletion) return Promise.resolve()
+    options: { force?: boolean; trigger?: ReporterSweepTrigger } = {},
+): Promise<ReporterSweepRun | ReporterSweepSkipped> {
+    if (abandonedDeletion) {
+        return Promise.resolve({ outcome: 'skipped', reason: 'abandoned' })
+    }
     if (reporterSweepInFlight) return reporterSweepInFlight
     const now = new Date()
     if (!options.force && now.getTime() < nextReporterSweepAt) {
-        return Promise.resolve()
+        return Promise.resolve({ outcome: 'skipped', reason: 'throttled' })
     }
-    const sweep = runReporterSweep(now).finally(() => {
-        reporterSweepInFlight = null
-    })
+    const sweep = runReporterSweep(now, options.trigger ?? 'report').finally(
+        () => {
+            reporterSweepInFlight = null
+        },
+    )
     reporterSweepInFlight = sweep
     return sweep
 }
 
-async function runReporterSweep(now: Date): Promise<void> {
+/** Who started a sweep run; only labels the summary line. */
+export type ReporterSweepTrigger = 'timer' | 'report'
+
+/**
+ * How a run ended: ok (backlog clear), backlog (stopped at its cap with expired
+ * rows left), failed (a chunk threw), timeout (did not settle in time).
+ */
+export type ReporterSweepOutcome = 'ok' | 'backlog' | 'failed' | 'timeout'
+
+/** What one settled run reports to its caller. */
+export type ReporterSweepRun = {
+    outcome: ReporterSweepOutcome
+    deleted: number
+    /** Chunks committed: the closest counter we have to "scanned". */
+    chunks: number
+    durationMs: number
+}
+
+/** No run was started: throttled, or a timed-out DELETE is still unsettled. */
+export type ReporterSweepSkipped = {
+    outcome: 'skipped'
+    reason: 'throttled' | 'abandoned'
+}
+
+/** What one run has committed so far; survives a later chunk throwing. */
+type ReporterSweepProgress = { deleted: number; chunks: number }
+
+/**
+ * ONE chunk, in its own transaction: SET LOCAL statement_timeout (dies with the
+ * transaction, never leaks onto the pooled connection), then a keyed DELETE of
+ * at most REPORTER_SWEEP_CHUNK_ROWS expired rows. The outer `last_at < cutoff`
+ * is re-checked against the row's current version, so a reporter that
+ * re-reported between the sub-select and the DELETE is kept. SET LOCAL takes no
+ * bind parameter; the value is a module constant, never input, so Prisma.raw is
+ * safe. Returns the rows deleted; a failure (statement timeout included)
+ * rejects and rolls back only this chunk.
+ */
+function deleteExpiredReporterChunk(cutoff: Date): Promise<number> {
+    return prisma.$transaction(async tx => {
+        await tx.$executeRaw(
+            Prisma.sql`SET LOCAL statement_timeout = ${Prisma.raw(String(REPORTER_SWEEP_STATEMENT_TIMEOUT_MS))}`,
+        )
+        return tx.$executeRaw(
+            Prisma.sql`DELETE FROM coupon_signal_reporters
+                WHERE last_at < ${cutoff}
+                AND (coupon_id, outcome, reporter_hash) IN (
+                    SELECT coupon_id, outcome, reporter_hash
+                    FROM coupon_signal_reporters
+                    WHERE last_at < ${cutoff}
+                    LIMIT ${REPORTER_SWEEP_CHUNK_ROWS}
+                )`,
+        )
+    }, REPORTER_SWEEP_TRANSACTION_OPTIONS)
+}
+
+/**
+ * Chunk until one deletes fewer than a full chunk (the backlog is clear), the
+ * chunk cap is hit, or the loop budget is spent. The cutoff is fixed once per
+ * run so the target set cannot grow under the loop. `progress` is updated
+ * after every committed chunk, so when a later chunk throws (the error
+ * propagates; the caller reports it) the caller still knows how much this run
+ * deleted. Chunks already committed stay committed.
+ */
+async function deleteExpiredReporters(
+    now: Date,
+    progress: ReporterSweepProgress,
+): Promise<{ backlog: boolean }> {
+    const cutoff = new Date(now.getTime() - FAILING_WINDOW_MS)
+    const startedAt = Date.now()
+    while (progress.chunks < REPORTER_SWEEP_MAX_CHUNKS) {
+        const count = await deleteExpiredReporterChunk(cutoff)
+        progress.chunks++
+        progress.deleted += count
+        if (count < REPORTER_SWEEP_CHUNK_ROWS) return { backlog: false }
+        if (Date.now() - startedAt >= REPORTER_SWEEP_LOOP_BUDGET_MS) break
+    }
+    return { backlog: true }
+}
+
+async function runReporterSweep(
+    now: Date,
+    trigger: ReporterSweepTrigger,
+): Promise<ReporterSweepRun> {
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+    const progress: ReporterSweepProgress = { deleted: 0, chunks: 0 }
+    const startedAt = Date.now()
+    let outcomeLabel: ReporterSweepOutcome = 'failed'
+    // The ONE summary line per run (T-6398 / T-8983): logged when the run
+    // settles, 0-row runs included, so prod can prove the hourly sweep ran.
+    // `chunks` is the closest counter to "scanned" (rows are deleted, not read).
+    // `ran_at` is the run START time, emitted when the run settles.
+    const summarize = (): ReporterSweepRun => {
+        const run: ReporterSweepRun = {
+            outcome: outcomeLabel,
+            deleted: progress.deleted,
+            chunks: progress.chunks,
+            durationMs: Date.now() - startedAt,
+        }
+        console.info(
+            `[couponSignals] reporter retention sweep run ran_at=${now.toISOString()} trigger=${trigger} deleted=${run.deleted} chunks=${run.chunks} duration_ms=${run.durationMs} outcome=${run.outcome}`,
+        )
+        return run
+    }
     try {
-        const deletion = prisma.couponSignalReporter.deleteMany({
-            where: {
-                lastAt: { lt: new Date(now.getTime() - FAILING_WINDOW_MS) },
-            },
-        })
+        const deletion = deleteExpiredReporters(now, progress)
         const timedOut = new Promise<'timeout'>(resolve => {
             timeoutHandle = setTimeout(
                 () => resolve('timeout'),
                 REPORTER_SWEEP_TIMEOUT_MS,
             )
         })
-        const outcome = await Promise.race([deletion, timedOut])
-        if (outcome === 'timeout') {
+        const raceResult = await Promise.race([deletion, timedOut])
+        if (raceResult === 'timeout') {
             const error = new Error(
                 `reporter retention sweep did not settle within ${REPORTER_SWEEP_TIMEOUT_MS} ms`,
             )
@@ -449,32 +611,55 @@ async function runReporterSweep(now: Date): Promise<void> {
             console.error('[couponSignals]', error.message)
             abandonedDeletion = deletion
                 .then(
-                    () => undefined,
+                    () => {
+                        console.info(
+                            `[couponSignals] abandoned reporter retention sweep settled late deleted=${progress.deleted} chunks=${progress.chunks}`,
+                        )
+                    },
                     (late: unknown) => {
                         Sentry.captureException(late, {
                             tags: { area: REPORTER_SWEEP_AREA, late: 'true' },
                         })
+                        console.error(
+                            '[couponSignals] abandoned reporter retention sweep failed late:',
+                            late,
+                        )
                     },
                 )
                 .finally(() => {
                     abandonedDeletion = null
                 })
-            nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_BACKOFF_MS
-            return
+            nextReporterSweepAt = Date.now() + REPORTER_SWEEP_BACKOFF_MS
+            outcomeLabel = 'timeout'
+            return summarize()
         }
-        nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_INTERVAL_MS
+        outcomeLabel = raceResult.backlog ? 'backlog' : 'ok'
+        if (raceResult.backlog) {
+            console.warn(
+                `[couponSignals] reporter retention sweep stopped at its cap with expired rows left (eligible again after ${REPORTER_SWEEP_BACKLOG_RETRY_MS / 1000} s)`,
+            )
+        }
+        // Measured from the END of the run, not its start: a long run must not
+        // eat its own throttle/backoff window.
+        nextReporterSweepAt =
+            Date.now() +
+            (raceResult.backlog
+                ? REPORTER_SWEEP_BACKLOG_RETRY_MS
+                : REPORTER_SWEEP_INTERVAL_MS)
     } catch (error) {
         Sentry.captureException(error, {
             tags: { area: REPORTER_SWEEP_AREA },
+            extra: { ...progress },
         })
         console.error(
-            '[couponSignals] reporter retention sweep failed (retrying in 5 minutes):',
+            `[couponSignals] reporter retention sweep failed after deleting ${progress.deleted} expired rows in ${progress.chunks} chunks (retrying in 5 minutes):`,
             error,
         )
-        nextReporterSweepAt = now.getTime() + REPORTER_SWEEP_BACKOFF_MS
+        nextReporterSweepAt = Date.now() + REPORTER_SWEEP_BACKOFF_MS
     } finally {
         clearTimeout(timeoutHandle)
     }
+    return summarize()
 }
 
 /** Test-only: make the next sweepExpiredReporters call run. */

@@ -1,0 +1,31 @@
+# Agent-surface contract check (T-5785): every morning, probe https://grabcaramel.com
+# for the surfaces AI assistants read (llms.txt, the .md twins and Accept
+# negotiation with Vary: Accept, the Markdown alternate link, security.txt,
+# api-catalog, robots.txt access for the assistant crawlers, a real 404 for an
+# unknown twin). It reads PRODUCTION, so it never runs on a pull request: a red
+# run means the live site lost a surface. The checker and its messages live in
+# DevinoSolutions/ci-tooling (scripts/agent-surface/README.md).
+#
+# ci-lint: allow-schedule-main caramel is a public repo and runs every job on GitHub-hosted ubuntu-latest
+name: agent-surface
+
+on:
+  schedule:
+    # 05:43 UTC: clear of checks-app (03:17) and the 09:00 pair
+    # (ai-evals, watch-store-versions).
+    - cron: '43 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-surface-caller-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  agent-surface:
+    uses: DevinoSolutions/ci-tooling/.github/workflows/agent-surface.yml@v1
+    with:
+      origin: https://grabcaramel.com
+      runner: ubuntu-latest

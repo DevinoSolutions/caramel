@@ -32,10 +32,11 @@ import { NextResponse } from 'next/server'
 //     budget, so diagnostics traffic can never 429 a shopper's code submission.
 //   - cors: 'extension' + the OPTIONS preflight, so a preflighted
 //     extension-origin fetch can read the answer.
-//   - NO auth, on purpose: this is anonymous. The extension sends no bearer and
-//     no cookies, and the handler never reads a session, so nothing here can
-//     be joined to an account. The telemetry id is a random per-device id,
-//     not the install id (`iid`) and not a user id.
+//   - NO auth, on purpose: this is pseudonymous, not anonymous. The extension
+//     sends no bearer and no cookies, and the handler never reads a session, so
+//     this route never attaches an account to an event. The telemetry id is a
+//     random per-device id, not the install id (`iid`) and not a user id; it
+//     still singles out one device, and IP and user agent reach the logs.
 //
 // Consent proof (same pattern as POST /api/coupons/submit): the body must carry
 // consent = { choice: 'accepted', promptVersion >= the floor }, exactly the

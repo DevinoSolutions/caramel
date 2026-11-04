@@ -1,0 +1,57 @@
+name: Android devproof guard (never ships)
+
+# T-9413. apps/caramel-android has a DEV-ONLY `devproof` build type (a release clone: same R8 and resource
+# shrinking, applicationId com.devino.caramel.devproof, signed with the DEBUG key, pointed at dev.grabcaramel.com,
+# accepts a session bearer through the `devproof_session` intent extra). It exists so a SHRUNK build can be walked
+# signed in on an emulator before an android-v* tag; it must never reach a store.
+#
+# This workflow does two jobs, on pull requests only:
+#   1. proves the devproof variant compiles through R8 (assembleDevproof), which release-android-app.yml must NOT do:
+#      that file may not mention the variant at all;
+#   2. proves, on the BUILT artifacts (.github/workflows/scripts/android-devproof-guard.sh), that the store build has no
+#      suffix and no trace of the dev-proof path, that the devproof build does, and that the release workflow is clean.
+#
+# Deliberately: no `push`, no tag trigger and no `workflow_dispatch` (a devproof APK can only come from a PR run), no
+# secrets, no signing key, no store upload, and no artifact upload. The debug key the APK is signed with is the
+# per-runner Android debug keystore, which is public knowledge by design.
+on:
+  pull_request:
+    paths:
+      - 'apps/caramel-android/**'
+      - '.github/workflows/android-devproof-guard.yml'
+      - '.github/workflows/scripts/android-devproof-guard.sh'
+      - '.github/workflows/scripts/android-release-dex-clean.sh'
+      - '.github/workflows/release-android-app.yml'
+
+concurrency:
+  group: android-devproof-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ANDROID_DIR: apps/caramel-android
+
+jobs:
+  guard:
+    name: assembleDevproof (R8) + release/devproof invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      # assembleRelease is unsigned here (no keystore on a PR), exactly like the verify job of release-android-app.yml.
+      - name: assembleRelease (unsigned) + assembleDevproof
+        working-directory: ${{ env.ANDROID_DIR }}
+        run: ./gradlew --no-daemon assembleRelease assembleDevproof
+
+      - name: Release and devproof invariants
+        run: bash .github/workflows/scripts/android-devproof-guard.sh

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 
 // /docs — the documentation hub (T-7855). A fleet SEO/AEO probe found
 // https://grabcaramel.com/docs returning 404, and docs.grabcaramel.com is

@@ -6,7 +6,7 @@
 //
 // What it measures: OPTED-IN daily active Google Chrome installations — the
 // number of unique diagnostics ids per UTC `day`. It is NOT total DAU: the
-// extension sends it only after the shopper accepted anonymous usage
+// extension sends it only after the shopper accepted pseudonymous usage
 // diagnostics (usage-diagnostics-consent.js), only from Google Chrome, only
 // when the server's EXTENSION_DAU_TELEMETRY_ENABLED flag (served by
 // GET /api/extension/features) is on, and at most once per UTC day, triggered

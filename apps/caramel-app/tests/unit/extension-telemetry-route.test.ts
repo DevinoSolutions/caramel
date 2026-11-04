@@ -59,7 +59,7 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/rateLimit')>()
     return { ...actual, checkRateLimit: checkRateLimitMock }
 })
-// The route is anonymous: it must never resolve a session. If it ever does,
+// The route is unauthenticated: it must never resolve a session. If it ever does,
 // this double records the call and the test below fails.
 vi.mock('@/lib/auth/auth', () => ({
     auth: { api: { getSession: getSessionMock } },
@@ -178,7 +178,7 @@ describe('POST /api/extension/telemetry: the happy path', () => {
         }
     })
 
-    it('is anonymous: no session is resolved, whatever credentials the request carries', async () => {
+    it('is unauthenticated: no session is resolved, whatever credentials the request carries', async () => {
         await POST(
             telemetryRequest(validBody(), {
                 origin: EXTENSION_ORIGIN,
@@ -434,7 +434,7 @@ describe('POST /api/extension/telemetry: daily_active', () => {
         ).not.toBe(a)
     })
 
-    it('anonymous: credentials on the request change nothing and no session is read', async () => {
+    it('unauthenticated: credentials on the request change nothing and no session is read', async () => {
         await POST(
             telemetryRequest(dailyBody(), {
                 origin: EXTENSION_ORIGIN,

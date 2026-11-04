@@ -12,7 +12,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import com.devino.nativeauthtab.SignInBrowser
 import com.devino.caramel.core.AppConfig
+import com.devino.caramel.core.DevProofSession
+import com.devino.caramel.core.OAuthProvider
 import com.devino.caramel.ui.CaramelApp
 import com.devino.caramel.ui.CaramelTheme
 import com.devino.caramel.web.ExternalLink
@@ -21,6 +24,7 @@ import com.devino.caramel.web.HandoffStep
 import com.devino.caramel.web.IntentTarget
 import com.devino.caramel.web.ShellIntents
 import com.devino.caramel.web.ShellTab
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -33,8 +37,15 @@ class MainActivity : ComponentActivity() {
     // An AppLinkGuard-approved URL from an intent, waiting for the shell to load it.
     private var requestedUrl by mutableStateOf<String?>(null)
 
+    // DEV-ONLY (T-9413): the devproof build's session bearer from the launch intent. Never set outside that build.
+    private var devProofBearer by mutableStateOf<String?>(null)
+
     // A message for the shopper that is not a sign-in error (a refused or unopenable link).
     private var notice by mutableStateOf<String?>(null)
+
+    // The sign-in browser (fleet NativeAuthTab contract). A field so its Auth Tab result launcher is
+    // registered before the activity starts; an Auth Tab result lands here, a Custom Tab's in onNewIntent.
+    private val signInBrowser = SignInBrowser(this) { handleCallback(it) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,6 +59,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && !fromHistory) {
             handleCallback(intent)
             navigateFromIntent(intent)
+            readDevProofBearer(intent)
         }
         setContent {
             CaramelTheme {
@@ -58,7 +70,9 @@ class MainActivity : ComponentActivity() {
                     notice = notice,
                     onNotice = { notice = it },
                     onStartSignIn = ::openSignInTab,
+                    onStartGoogleSignIn = ::startGoogleSignIn,
                     onOpenOutside = ::openOutside,
+                    devProofBearer = devProofBearer,
                 )
             }
         }
@@ -69,6 +83,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleCallback(intent)
         navigateFromIntent(intent)
+        readDevProofBearer(intent)
     }
 
     override fun onStop() {
@@ -87,7 +102,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleCallback(intent: Intent?) {
-        val data = intent?.data ?: return
+        handleCallback(intent?.data ?: return)
+    }
+
+    private fun handleCallback(data: Uri) {
         if (data.scheme != AppConfig.SIGN_IN_SCHEME) return
         lifecycleScope.launch {
             // Only a callback that answers the pending sign-in ends the wait; a stray VIEW intent must
@@ -96,14 +114,47 @@ class MainActivity : ComponentActivity() {
                 awaitingBrowser = false
                 leftForBrowser = false
                 // The callback answered the sign-in but the exchange may still have failed (no token): only a
-                // stored bearer is handed to the WebView. The redeem URL loads through the shell's guarded sink
-                // (requestedUrl); a failed handoff shows its own retry banner, a dead bearer the sign-in error.
-                if (container.session.token != null) {
-                    val step = container.webSession.startFresh(ShellTab.DEALS.startPath)
-                    if (step is HandoffStep.Load) requestedUrl = step.redeemUrl
-                }
+                // stored bearer is handed to the WebView.
+                if (container.session.token != null) linkWebSessionToDeals()
             }
         }
+    }
+
+    /**
+     * Google signs in natively (Credential Manager's bottom sheet with the device's accounts). The
+     * browser tab is used only where this device cannot do that (no Play Services, as on Fire, or
+     * no Google account). [keepError] as in SessionStore.beginSignIn.
+     */
+    private fun startGoogleSignIn(keepError: Boolean) {
+        val session = container.session
+        lifecycleScope.launch {
+            session.beginNativeSignIn(keepError)
+            try {
+                when (val outcome = GoogleCredentialSignIn(this@MainActivity).requestIdToken()) {
+                    is GoogleCredentialSignIn.Outcome.Token -> {
+                        session.completeGoogleSignIn(outcome.idToken)
+                        if (session.token != null) linkWebSessionToDeals()
+                    }
+                    GoogleCredentialSignIn.Outcome.Cancelled -> session.cancelNativeSignIn()
+                    GoogleCredentialSignIn.Outcome.Unavailable ->
+                        session.beginSignIn(OAuthProvider.GOOGLE, keepError)?.let(::openSignInTab)
+                    is GoogleCredentialSignIn.Outcome.Failed -> session.reportError(outcome.message)
+                }
+            } catch (e: CancellationException) {
+                // The activity went away mid-sign-in: give the buttons back for the next one.
+                session.cancelNativeSignIn()
+                throw e
+            }
+        }
+    }
+
+    /**
+     * Hands a fresh native session to the WebView. The redeem URL loads through the shell's guarded
+     * sink (requestedUrl); a failed handoff shows its own retry banner, a dead bearer the sign-in error.
+     */
+    private suspend fun linkWebSessionToDeals() {
+        val step = container.webSession.startFresh(ShellTab.DEALS.startPath)
+        if (step is HandoffStep.Load) requestedUrl = step.redeemUrl
     }
 
     /**
@@ -126,10 +177,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * DEV-ONLY (T-9413, see [DevProofSession]): takes the session bearer from the `devproof_session` extra. Dead code
+     * unless `BuildConfig.DEV_PROOF`, so R8 strips it from release; a malformed extra is reported, not ignored.
+     */
+    private fun readDevProofBearer(intent: Intent?) {
+        if (!BuildConfig.DEV_PROOF) return
+        when (val extra = DevProofSession.parse(intent?.getStringExtra(DevProofSession.EXTRA_NAME))) {
+            DevProofSession.Extra.Absent -> Unit
+            DevProofSession.Extra.Malformed -> notice = "The ${DevProofSession.EXTRA_NAME} extra is not a session bearer."
+            is DevProofSession.Extra.Bearer -> devProofBearer = extra.token
+        }
+    }
+
     private fun openSignInTab(url: String) {
         try {
             awaitingBrowser = true
-            CustomTabsIntent.Builder().build().launchUrl(this, Uri.parse(url))
+            if (!signInBrowser.open(Uri.parse(url), AppConfig.SIGN_IN_SCHEME)) {
+                awaitingBrowser = false
+                container.session.reportError("No web browser is installed to complete the sign-in.")
+            }
         } catch (e: ActivityNotFoundException) {
             awaitingBrowser = false
             container.session.reportError("No web browser is installed to complete the sign-in: ${e.message}")

@@ -165,7 +165,7 @@ describe('our surfaces read left-to-right on a right-to-left store', () => {
         // Read from the shared table rather than mounting the prompt, which
         // needs the settings gate; the prompt is where the clipped descriptions
         // were actually seen.
-        const css = readFileSync(join(EXT_ROOT, 'UI-helpers.js'), 'utf8')
+        const css = readFileSync(join(EXT_ROOT, 'ui-shell.js'), 'utf8')
         const table = css.slice(css.indexOf('const CARAMEL_HOST_CSS'))
         expect(table.slice(0, table.indexOf('}'))).toMatch(/direction:ltr/)
     })

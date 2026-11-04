@@ -10,7 +10,7 @@
 // the store did not visibly accept the code, the capture never armed ...).
 // Those gates were console-only. This event makes each one a query.
 //
-// Consent-gated, anonymous by construction. The extension only sends after the
+// Consent-gated, pseudonymous by construction. The extension only sends after the
 // shopper pressed Allow on a popup card (usageDiagnosticsConsent, off by
 // default), and the request carries that consent as proof; the route refuses
 // (403 `consent-required`) without it, exactly like POST /api/coupons/submit.

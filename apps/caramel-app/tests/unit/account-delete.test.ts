@@ -60,8 +60,18 @@ const { getSessionMock } = vi.hoisted(() => ({
         async (_opts: { headers: Headers }) => null as unknown,
     ),
 }))
+// `options` mirrors prod's cookie naming (HTTPS => the __Secure- prefix) so
+// expireSessionCookies resolves the same names better-auth sets.
 vi.mock('@/lib/auth/auth', () => ({
-    auth: { api: { getSession: getSessionMock } },
+    auth: {
+        api: { getSession: getSessionMock },
+        options: {
+            advanced: {
+                useSecureCookies: true,
+                defaultCookieAttributes: { sameSite: 'none' },
+            },
+        },
+    },
 }))
 
 vi.mock('@/lib/rateLimit', async importOriginal => {
@@ -169,6 +179,49 @@ describe('POST /api/account/delete', () => {
         expect(prismaMock.user.deleteMany).toHaveBeenCalledWith({
             where: { id: USER_ID },
         })
+    })
+
+    // T-8946: the session rows cascade away, but better-auth's 5-minute cookie
+    // cache kept the browser signed in as the deleted account and the client
+    // re-identified it to PostHog. The response must expire every session
+    // cookie, including the chunks of an oversized session_data cache.
+    it('expires the session cookies, the cookie cache and its chunks in the response', async () => {
+        const res = await POST(
+            deleteRequest(
+                { confirm: 'DELETE' },
+                {
+                    cookie: [
+                        '__Secure-better-auth.session_token=tok',
+                        '__Secure-better-auth.session_data.0=part0',
+                        '__Secure-better-auth.session_data.1=part1',
+                        'cm_ft=keep',
+                    ].join('; '),
+                },
+            ),
+        )
+
+        expect(res.status).toBe(200)
+        const expired = new Map(
+            res.cookies.getAll().map(c => [c.name, c] as const),
+        )
+        for (const name of [
+            '__Secure-better-auth.session_token',
+            '__Secure-better-auth.session_data',
+            '__Secure-better-auth.session_data.0',
+            '__Secure-better-auth.session_data.1',
+            '__Secure-better-auth.dont_remember',
+        ]) {
+            expect(expired.get(name)).toMatchObject({
+                value: '',
+                maxAge: 0,
+                path: '/',
+                secure: true,
+                httpOnly: true,
+                sameSite: 'none',
+            })
+        }
+        // Only better-auth's cookies: first-party tracking is not ours to end.
+        expect(expired.has('cm_ft')).toBe(false)
     })
 
     it('scrubs the requester identity in the same transaction, before the user goes', async () => {

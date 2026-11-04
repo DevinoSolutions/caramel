@@ -106,6 +106,10 @@ describe('recordExtensionInstalled', () => {
             iid: IID,
             distinct_id: 'browser-id',
         })
+        // keepalive so leaving /welcome mid-request does not cancel the POST;
+        // browsers cap keepalive bodies at 64 KiB.
+        expect(init.keepalive).toBe(true)
+        expect(init.body.length).toBeLessThan(64 * 1024)
     })
 
     it('carries the first-touch source and first_* properties when the visitor has a record', async () => {
@@ -177,6 +181,38 @@ describe('recordExtensionInstalled', () => {
 
         fetchMock.mockRejectedValueOnce(new TypeError('network down'))
         expect(await recordExtensionInstalled(PARAMS)).toBe('failed')
+    })
+
+    it('a network failure on a visible page is reported as an error with page state', async () => {
+        fetchMock.mockRejectedValueOnce(new TypeError('Load failed'))
+        expect(await recordExtensionInstalled(PARAMS)).toBe('failed')
+        expect(sentryMock.captureException).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'Load failed' }),
+            expect.objectContaining({
+                level: 'error',
+                tags: {
+                    operation: 'extension_installed',
+                    step: 'server_report',
+                },
+                extra: expect.objectContaining({
+                    iid: IID,
+                    pageVisibility: 'visible',
+                }),
+            }),
+        )
+    })
+
+    it('a failure while the page is hidden (unloading) is still reported, as a warning', async () => {
+        vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+        fetchMock.mockRejectedValueOnce(new TypeError('Load failed'))
+        expect(await recordExtensionInstalled(PARAMS)).toBe('failed')
+        expect(sentryMock.captureException).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                level: 'warning',
+                extra: expect.objectContaining({ pageVisibility: 'hidden' }),
+            }),
+        )
     })
 
     it('with PostHog off it still posts (no distinct_id) so the server count survives a blocker', async () => {

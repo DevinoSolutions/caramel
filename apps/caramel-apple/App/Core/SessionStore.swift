@@ -1,5 +1,6 @@
 import AuthenticationServices
 import CryptoKit
+import os
 import Security
 import SwiftUI
 
@@ -60,6 +61,7 @@ struct PKCE {
 /// back here.
 @MainActor
 final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding {
+    private static let log = Logger(subsystem: "com.devino.Caramel", category: "sign-in")
     private var activeSession: ASWebAuthenticationSession?
 
     /// Presents the sheet and returns the callback URL it was redirected to.
@@ -106,7 +108,11 @@ final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding
     static func code(from callback: URL, expectedState: String) throws -> String {
         // The whole redirect target, not just the scheme: any URL on our scheme
         // would otherwise pass as the sign-in answer. It must be
-        // AppConfig.signInRedirectURI, ignoring only the query we asked for.
+        // AppConfig.signInRedirectURI, ignoring only the query we asked for and
+        // the fragment: a browser carries the previous URL's fragment over a
+        // redirect that has none (Fetch spec), and Google's sign-in leaves one
+        // ("#"). The fragment never reaches a server, and the state and PKCE
+        // checks below are what tie the callback to this request.
         guard let components = URLComponents(url: callback, resolvingAgainstBaseURL: false),
               let expected = URLComponents(string: AppConfig.signInRedirectURI),
               components.scheme == expected.scheme,
@@ -114,9 +120,12 @@ final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding
               components.path == expected.path,
               components.port == nil,
               components.user == nil,
-              components.password == nil,
-              components.fragment == nil
-        else { throw SignInError.unexpectedCallback }
+              components.password == nil
+        else {
+            // Only the address, never the query (it carries the code and state).
+            log.error("Sign-in callback refused: \(callback.scheme ?? "-", privacy: .public)://\(callback.host ?? "-", privacy: .public)\(callback.path, privacy: .public)")
+            throw SignInError.unexpectedCallback
+        }
         let items = components.queryItems ?? []
         func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
         if value("error") != nil { throw SignInError.providerRefused }

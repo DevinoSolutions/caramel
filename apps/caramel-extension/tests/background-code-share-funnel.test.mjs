@@ -200,7 +200,7 @@ describe('reportCodeShareFunnel: no send without accepted consent', () => {
 })
 
 describe('reportCodeShareFunnel: what is sent when the shopper opted in', () => {
-    it('posts the allowlisted event, the telemetry id and the consent proof - anonymously', async () => {
+    it('posts the allowlisted event, the telemetry id and the consent proof - pseudonymously', async () => {
         responses.push(ok({ captured: true }))
 
         expect(await invoke(STEP)).toEqual({ sent: true })
@@ -208,7 +208,7 @@ describe('reportCodeShareFunnel: what is sent when the shopper opted in', () => 
         const [call] = telemetryCalls()
         expect(call.url).toMatch(/\/api\/extension\/telemetry$/)
         expect(call.opts.method).toBe('POST')
-        // Anonymous: no bearer, no cookies, despite a stored sign-in token.
+        // Pseudonymous: no bearer, no cookies, despite a stored sign-in token.
         expect(call.opts.headers.Authorization).toBeUndefined()
         expect(call.opts.credentials).toBe('omit')
         const body = JSON.parse(call.opts.body)

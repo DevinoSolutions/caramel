@@ -35,6 +35,14 @@ class SignInTest {
     }
 
     @Test
+    fun ignoresAFragmentTheBrowserCarriedOverTheRedirect() {
+        assertEquals("abc", SignInCallback.code("com.devino.caramel://auth/callback?code=abc&state=s1#", "s1"))
+        assertEquals("abc", SignInCallback.code("com.devino.caramel://auth/callback?code=abc&state=s1#frag", "s1"))
+        // The state check still applies with a fragment.
+        assertEquals(SignInFailure.STATE_MISMATCH, failure("com.devino.caramel://auth/callback?code=abc&state=forged#"))
+    }
+
+    @Test
     fun decodesPercentEncodedValues() {
         assertEquals("a b+c", SignInCallback.code("com.devino.caramel://auth/callback?state=s%201&code=a%20b%2Bc", "s 1"))
     }
@@ -44,7 +52,6 @@ class SignInTest {
         assertEquals(SignInFailure.UNEXPECTED_CALLBACK, failure("com.devino.caramel://auth/other?code=abc&state=s1"))
         assertEquals(SignInFailure.UNEXPECTED_CALLBACK, failure("com.devino.caramel://evil/callback?code=abc&state=s1"))
         assertEquals(SignInFailure.UNEXPECTED_CALLBACK, failure("https://auth/callback?code=abc&state=s1"))
-        assertEquals(SignInFailure.UNEXPECTED_CALLBACK, failure("com.devino.caramel://auth/callback?code=abc&state=s1#frag"))
         assertEquals(SignInFailure.UNEXPECTED_CALLBACK, failure("com.devino.caramel://user@auth/callback?code=abc&state=s1"))
         assertEquals(SignInFailure.UNEXPECTED_CALLBACK, failure("com.devino.caramel://auth:80/callback?code=abc&state=s1"))
         assertEquals(SignInFailure.UNEXPECTED_CALLBACK, failure("not a url"))

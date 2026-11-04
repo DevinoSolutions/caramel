@@ -20,7 +20,7 @@ const baseURL =
     process.env.PLAYWRIGHT_BASE_URL ||
     process.env.BASE_URL ||
     process.env.NEXT_PUBLIC_BASE_URL ||
-    'http://localhost:58000'
+    'http://localhost:28000'
 const startServer = process.env.PLAYWRIGHT_START_SERVER !== 'false'
 const webServerTimeout = Number(process.env.PLAYWRIGHT_WEB_TIMEOUT ?? '180000')
 
@@ -50,7 +50,17 @@ export default defineConfig({
     ],
     use: {
         baseURL,
-        trace: 'on-first-retry',
+        // Traces hold the test account's cookies and request bodies. CI never
+        // uploads them (the repo is public); what a failed CI test leaves
+        // behind is the sanitized request list e2e/support/test.ts prints to
+        // the log (T-9427). On a developer machine, a deployed-site run
+        // (PLAYWRIGHT_START_SERVER=false) keeps the trace of the FAILED attempt,
+        // because 'on-first-retry' records only the retry, which is the one
+        // that passes.
+        trace:
+            startServer || process.env.CI
+                ? 'on-first-retry'
+                : 'retain-on-failure',
         screenshot: 'only-on-failure',
         // The app has first-class prefers-reduced-motion support: the 3D
         // hero/vault scenes render their static CSS posters instead of

@@ -1,4 +1,5 @@
-import { expect, type Page, test } from '@playwright/test'
+import { type Page } from '@playwright/test'
+import { expect, test } from './support/test'
 
 // Better-auth reports a failed sign-in by redirecting with `?error=<code>`.
 // Before this spec, production sent those redirects to `/?error=<code>` and

@@ -1,6 +1,12 @@
 import { defineConfig } from 'vitest/config'
 import { stampFor } from './scripts/environments.mjs'
 
+// T-8622: pin the runner's timezone before any worker starts (same rationale
+// as apps/caramel-app/vitest.config.ts: a main-process assignment reaches every
+// pool, `test.env` does not under threads). Overrides a TZ exported by the
+// shell. tests/timezone-pin.test.mjs proves it.
+process.env.TZ = 'UTC'
+
 // Unit baseline (F-004), ESM era (WXT P1, 2026-08-12): extension source files
 // are ES modules — suites import them directly. The `__CARAMEL_ENV__` define
 // mirrors wxt.config.ts so caramel-env.js resolves under vitest exactly as it

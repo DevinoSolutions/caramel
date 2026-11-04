@@ -26,12 +26,9 @@ with `ls` or a repo search without knowing the doc structure first.
 ## Where to look
 
 - **Dokploy** (deploy dashboard, logs, container status, rollback): the
-  team's Dokploy instance is `https://devino.basa-ulmer.ts.net/`.
-  TODO(human): confirm this is the instance hosting caramel-app, and record
-  the exact project/application name within it (this repo has zero tracked
-  Dokploy config — `git grep -i dokploy` across the whole tree turns up one
-  code comment and nothing else, so the app/project name cannot be derived
-  from source).
+  team's internal Dokploy instance (reachable only on the team network).
+  Prod is the "Caramel Prod Compose (LIVE)" compose service in the Caramel
+  project; see [Deploys & rollback](#deploys--rollback) for how it deploys.
 - **Sentry**: `https://sentry.devino.ca`, org `devino`, project `caramel`.
   Errors from caught route failures (`handleRouteError`, F-002) are tagged
   `route`/`method`/`requestId`; uncaught render errors reach it via
@@ -157,28 +154,50 @@ broken. Check Dokploy's Postgres container/managed DB status first.
 
 ## Deploys & rollback
 
-Deploys run through Dokploy. TODO(human): record the exact deploy trigger
-(push to `main`? manual redeploy button?) and the precise rollback
-procedure (Dokploy has a rollback-to-previous-deployment action in its UI —
-confirm the button location for this specific application) — this repo
-carries a DB-migration step (`prisma migrate deploy`, see
-`package.json`'s `db:migrate:deploy`) but **no app-deploy workflow, and no
-rollback automation or documentation existed anywhere in the tracked files
-before this doc** (confirmed: `git grep -i dokploy` across the repo,
-excluding `audit/`, returns a single code comment).
+Deploys run through Dokploy. Prod (grabcaramel.com, www and docs) is the
+**"Caramel Prod Compose (LIVE)"** compose service in the Caramel Dokploy
+project. It builds the root `docker-compose.yml` from `main`.
+
+**Prod deploys are manual by design: auto-deploy is OFF on the prod
+compose.** A push to `main` still reaches Dokploy through the GitHub App
+webhook, and Dokploy answers `200 {"message":"No apps to deploy"}`. Merging to
+`main` therefore never deploys by itself. Verified on 2026-10-27: #569 and #571
+sat undeployed until a deploy was queued by hand.
+
+Merge-to-main checklist (whoever merges does all of it):
+
+1. Right after the merge, take a backup of the prod compose's Postgres (the
+   compose backup in Dokploy), then queue ONE prod deploy of the compose.
+   Never queue in the 23:55-00:05Z window (a team-wide no-deploy rule for
+   the shared Dokploy host around 00:00Z). Keep at most one queued deploy per
+   service: if one is already waiting, leave it alone (it builds `main`'s HEAD
+   when it runs) and never re-queue.
+2. When the deploy is done, check that `https://grabcaramel.com/api/version`
+   reports the merged sha (or a descendant) and capture it.
+3. Re-run the failed E2E job of the newest merge commit on `main` that the
+   deploy carries, once. Never re-run several at once: a re-run in the same
+   concurrency group cancels any other in-flight one. On `main` the push-mode
+   E2E job checks once that prod already serves the commit or a descendant of
+   it (`DEPLOY_WAIT_TIMEOUT_SECONDS` is `0` there; ancestry is decided by
+   GitHub's compare API) and fails immediately when it does not, which is
+   every merge, because no deploy has run yet. Re-run it after step 2 passes.
+   One deploy usually carries several merges: older merge commits' E2E runs
+   stay red on the commit list by design (they would pass on a re-run, since
+   prod serves a descendant of them, but the newest one is enough).
 
 Since F-016 the root `docker-compose.yml` (`Dockerfile` +
 `docker-entrypoint.sh`) is the INTENDED deployment unit — local and CI build
-and run this exact graph, and prod is meant to run the same file as one
-platform compose service. The prod cutover onto it is still gated and
-human-run (never move prod traffic without explicit in-session confirmation);
-until it lands, prod stays on the current Dokploy/Nixpacks deploy.
+and run this exact graph, and prod runs the same file as one platform
+compose service. The prod cutover onto it was gated and human-run, and it
+happened on 2026-08-08 (moving prod traffic still needs explicit in-session
+confirmation).
 
-Until the TODO above is filled in, the safe manual sequence is:
+Rollback sequence:
 
 1. Confirm the outage via `/api/health/db` and Sentry.
-2. Open the Dokploy dashboard, find the caramel-app application, and use
-   its deployment history to redeploy the last known-good build.
+2. Open the Dokploy dashboard, find the prod compose (above), and use its
+   deployment history to redeploy the last known-good build. TODO(human):
+   confirm the exact rollback button for the compose service.
 3. Re-run the [post-deploy smoke check](#post-deploy-smoke-check) against
    the rolled-back deployment before declaring it resolved.
 4. If the regression was a DB migration, `prisma migrate deploy` is
@@ -366,12 +385,105 @@ BASE_URL=https://grabcaramel.com UPKUMA_HEALTH_SECRET=*** \
   pnpm --filter caramel-app run smoke
 ```
 
-`BASE_URL` defaults to `http://localhost:58000` (the local dev port) if
+`BASE_URL` defaults to `http://localhost:28000` (the local dev port) if
 unset. **Not wired into the Dokploy deploy pipeline** — this is a callable
 command a human (or a future CI/CD step) runs after a deploy, not an
 automatic gate. TODO(human): wire this into the actual Dokploy post-deploy
 hook once the deploy trigger itself (see "Deploys & rollback" above) is
 documented.
+
+## Android app (`apps/caramel-android`, com.devino.caramel)
+
+Native shell: grabcaramel.com in a WebView plus a native Google/Apple sign-in sheet. The workflow
+is `.github/workflows/release-android-app.yml` (PRs: debug build, unit tests, lint, unsigned
+release + `lintVitalRelease`; `android-v*` tags: signed AAB to the Play internal track). The
+owner pushes the tags; agents never do.
+
+**Gate: android-v\* tag requires: shrunk release smoke + signed-in/deletion walk on a Play image.**
+The walk is done on the SHRUNK build (R8 + resource shrinking, which is where a signed-in
+regression such as a stripped serializer shows up), signed in, through account deletion, on an
+emulator image that has Play services. Because the app signs in with Google or Apple only, the
+signed-in part uses the dev-only proof path below.
+
+## Dev-only proof path (social-only sign-in apps)
+
+**What it is.** A social-only app cannot be walked signed in without a real Google/Apple account,
+and no new external accounts are allowed. So `dev.grabcaramel.com` can mint a session for a
+throwaway `devproof+<slug>@devino.ca` user, and a dev-only Android build type accepts it. It is
+for proof walks only; it is never shipped and never exists in production. This is the pattern
+other apps in the fleet should copy.
+
+**The two server gates** (`src/lib/devProof.ts`, `src/app/api/dev-proof/session/route.ts`):
+
+1. `DEV_PROOF_SESSION_SECRET` (zod `min(32)`, optional) is set ONLY in the DEV deployment's env.
+   Unset, which is every production and default deploy, `POST /api/dev-proof/session` answers a
+   bare 404 (no body), as for a route that does not exist. (A route handler's 404 has no body;
+   an unknown path renders Next's not-found page, so the two differ in body, not status.)
+2. Even with the secret set, the route answers the same 404 when ANY of the Host header,
+   `X-Forwarded-Host`, the request URL, `BETTER_AUTH_URL` or the baked `NEXT_PUBLIC_BASE_URL`
+   names a production host. The check is a denylist: every `*.grabcaramel.com` name (apex, `www`,
+   `docs`, anything new) except `dev.grabcaramel.com` is production; an unparseable value counts
+   as production. Localhost, the compose service name and the emulator's `10.0.2.2` pass.
+
+And it cannot be pointed at a real person: the body may only name an address matching
+`^devproof\+[a-z0-9-]{1,40}@devino\.ca$`. Auth is `Authorization: Bearer <secret>`, compared with
+`timingSafeEqual` over SHA-256 digests. Each client IP gets 10 calls an hour, refused ones
+included. Every call that gets past the 404 gate leaves an audit record (log line `[dev-proof]
+{...}`, a Sentry breadcrumb and an info-level Sentry message): outcome, the test email (only if it
+matched the pattern) and a keyed hash (HMAC with the secret) of the requester IP; never the secret or the token. The route
+creates the user the way a Google sign-in does (`mintExtensionSession`, a synthetic `google`
+account `devproof:<email>`, `emailVerified`), so a second call for the same address reuses the
+user and mints a fresh 7-day session.
+
+**Mint a session** (secret from the DEV compose env; do not echo it into logs or tickets):
+
+```bash
+curl -sS -X POST https://dev.grabcaramel.com/api/dev-proof/session \
+  -H "Authorization: Bearer $DEV_PROOF_SESSION_SECRET" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"devproof+walk-1@devino.ca"}'
+# 200 {"token":"<43-char bearer>","expiresAt":"2026-11-03T12:00:00.000Z"}
+```
+
+`404` = not enabled here (or a production host), `401` = wrong bearer, `422` = email outside the
+pattern, `429` = over the hourly budget.
+
+**Install the devproof build and hand it the token.** `devproof` is a Gradle BUILD TYPE (a clone of
+`release`: same R8 and resource shrinking; `applicationId com.devino.caramel.devproof`, so it
+installs beside the store app; signed with the DEBUG key, never the upload key; origin
+`dev.grabcaramel.com`; label "Caramel DEVPROOF"). It is a build type, not a flavor, so the release
+task names and outputs that `release-android-app.yml` calls by name do not change.
+
+```bash
+cd apps/caramel-android && ./gradlew assembleDevproof
+adb install -r app/build/outputs/apk/devproof/app-devproof.apk
+adb shell am start -n com.devino.caramel.devproof/com.devino.caramel.MainActivity \
+  --es devproof_session "$TOKEN"
+```
+
+The app stores the bearer as if the sign-in had happened (`SessionStore.adoptDevProofBearer`),
+confirms it with `/api/extension/me`, and links the web tabs. Then walk it: Saved and Account
+tabs signed in, the Account and privacy dialog, delete account (`POST /api/account/delete` on dev),
+and confirm the app returns to signed out. A malformed extra shows a notice instead of being
+ignored.
+
+**It must never ship.** Enforced by:
+
+- `release-android-app.yml` may not mention devproof at all (`tests/unit/android-devproof-never-ships.test.ts`
+  fails the build if it does), so no `android-v*` tag, dispatch or Play upload can build, sign or
+  upload it. The variant is built only by `android-devproof-guard.yml`, which triggers on pull
+  requests alone, holds no secrets and uploads nothing.
+- `release-android-app.yml` runs `.github/workflows/scripts/android-release-dex-clean.sh` on the
+  built store artifacts: on the unsigned APK in the verify job (every PR and tag run), and on the
+  signed APK and AAB in the release job BEFORE the Play upload. It fails unless the applicationId
+  is exactly `com.devino.caramel` and no dex holds the dev-only strings. The script (and the
+  workflow) never spell the variant's name; its needles are assembled from halves.
+- `.github/workflows/scripts/android-devproof-guard.sh` checks the BUILT artifacts on every PR
+  that touches the app (running the same dex-clean script for the store build): the store APK keeps `com.devino.caramel` (no suffix) and its shrunk dex
+  holds neither the `devproof_session` extra name nor the dev origin; the devproof APK has the
+  suffix, holds both (so the check is proven able to see them) and is signed `CN=Android Debug`.
+- Every app code path is behind the constant `BuildConfig.DEV_PROOF` (false outside the devproof
+  build), so R8 strips it from release.
 
 ## Email delivery health (async provider failures)
 
@@ -408,16 +520,27 @@ recipient, subject or body. The list rows' PII fields are dropped at the parse
 boundary (`toEmailLogEntry`).
 
 **Schedule.** Caramel has no cron and no worker, so this is an `unref`'d
-interval started from `instrumentation.ts`'s `register()` — one process, one
-schedule. The first run happens one interval AFTER boot (a crash-looping
-container must not be able to machine-gun Sentry), and the Sentry throttle is
-one event per clock hour per process. If the web service ever scales past one
-replica, move this to a real scheduler rather than adding a lock.
+wall-clock timer (`src/lib/wallClockSchedule.ts`, shared with the two retention
+sweeps) started from `instrumentation.ts`'s `register()` — one process, one
+schedule. Runs sit at minute 23 UTC of every hour (for the default period), never
+at boot and never boot + interval: a boot-relative interval was starved whenever
+deploys landed closer together than the interval (T-9436, the same bug as
+CARAMEL-39), and a boot within 2 minutes before a slot waits for the next one so
+a crash-looping container cannot machine-gun Sentry. Every run checks in to the
+Sentry cron monitor `caramel-email-delivery-health` (crontab built from the same
+schedule): `ok` means the check RAN, even when it found delivery problems (that
+is the separate Sentry event above); `error` means it could not run (provider
+unreachable or refused, unusable sender, Sendly unconfigured, an overlapping
+cycle), and two consecutive misses or errors raise a monitor issue. The Sentry
+event throttle is one per clock hour per process. If the web service ever scales
+past one replica, move this to a real scheduler rather than adding a lock.
 
 **Config.** `EMAIL_DELIVERY_HEALTH_ENABLED` is unset by default, which means ON
 in production whenever `SENDLY_API_KEY` is set and OFF everywhere else; `false`
 opts a prod deploy out, `true` forces it on locally. The window length equals
-`EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES` (default 60). Boot logs the decision
+`EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES` (default 60; it must tile the UTC day, a
+divisor of 60 that is at least 5 below an hour, otherwise whole hours dividing 24,
+or the boot fails). Boot logs the decision
 either way:
 
 ```
@@ -473,9 +596,9 @@ The public privacy policy (`/privacy`) promises two operational things; keep the
     - **Sentry (self-hosted)** is the copy that lasts: transactions, breadcrumbs and error requests carry URLs. `src/lib/sentryPiiScrub.ts` redacts the `q`, `search`, `key_words` and `query` params (`tests/unit/sentry-search-text-scrub.test.ts`), so the typed text is not stored there. Session Replay frames (recorded fetch and navigation URLs) go through the same scrub via `beforeAddRecordingEvent` (`scrubReplayRecordingEvent`). Sentry event retention is **90 days** (`SENTRY_EVENT_RETENTION_DAYS=90` in the DevinoSolutions/sentry-selfhost `.env`); it is set there, not in this repo.
     - **Known exception to the 7-day policy (MASTER decision 2026-10-25, no purge):** Sentry events captured BEFORE this scrub reached production may still hold typed store-search text (URLs in transactions, breadcrumbs, request blocks, error messages). They are deliberately not purged (a purge is lossy and partial, and would delete error history); they age out under the 90-day retention. Cutoff = 2026-10-25, when the scrub (T-7505 PR #504) went live on production (deploy of main 697d229, 06:09:50Z). Pre-cutoff events age out by 2027-01-23 at the latest (cutoff + 90 days). Events captured after the cutoff are covered by the scrub above (Replay DOM snapshots are not passed through it; they rely on the mask options).
     - **PostHog session recordings** record each page request's URL (performance capture is on for project 6), so they can carry store-search text. `session_recording.maskCapturedNetworkRequestFn` (`src/lib/analytics/recordingNetworkScrub.ts`, wired in `src/lib/analytics/identity.ts`) runs the same `redactSensitiveText` as the Sentry scrub on every recorded request URL and string body/header (`tests/unit/posthog-recording-network-scrub.test.ts`). Page URLs (`$current_url`, `$pageview`) do not carry search text: no page puts it in its address, the search boxes call the API directly.
-    - **PostHog recordings: retention setting is 30d (not yet observed on a new recording); pre-scrub recordings deleted in the app; MinIO purge of their exclusive objects done 2026-10-25, shared objects pending (A78); backup copies pending.** Project 6 `session_recording_retention_period` is `30d` since 2026-10-25 07:56Z (it was `5y`). The posthog-selfhost maintainer set it server-side, because our self-hosted org has no SESSION_REPLAY_DATA_RETENTION feature and the API/UI PATCH returns 500 "Invalid retention entitlement" for any value. To change it again, ask posthog-selfhost; don't retry the PATCH. Retention is stamped on each recording at ingest (`retention_period_days`), so changing the setting does NOT shorten recordings that already exist. New recordings should leave the product (UI/API) after 30 days once stamped 30 (none observed yet; existing ones keep 1825). Whether expiry removes the stored snapshot blobs is unknown (follow-up T-8392). The recording network-URL scrub (PR #508) went live on production 2026-10-25 07:30:23Z (deploy of main 056e37d8). The 588 project-6 recordings that started before the scrub went live were deleted in PostHog on 2026-10-25 (MASTER decision 2026-10-25) through the API (`DELETE /api/environments/6/session_recordings/<id>/`); each was verified to return 404 afterwards, so they can no longer be played back. The API delete removes only the Postgres row and sends a Kafka deletion event: the snapshot data (stored unencrypted) still physically exists in object storage (MinIO bucket `posthog`, under the 5y prefix) and in the B2 offsite mirror (see below). 847 objects are exclusive to those sessions; 3,344 are shared batch files that also hold other teams' sessions. The 847 MinIO objects holding only those sessions (75.7 MB) were physically deleted by posthog-selfhost on 2026-10-25 08:16Z (MASTER go; MinIO is unversioned, all 847 verified gone); the B2 offsite copies are NOT yet guaranteed to expire: the 847 originals sit in the offsite deleted folder (dated 2026-10-25, pruned after 30 days), but B2 also kept about 830 hidden old versions at the original paths, which our prune does not touch and which expire only if the B2 bucket has a lifecycle rule for hidden versions (Amin asked to check/fix it or approve a one-off delete). The 3,344 objects shared with other projects' recordings are NOT purged; zero-filling our byte ranges awaits Amin (A78). We never purge the B2 offsite mirror directly; a MinIO deletion reaches B2 only through the mirror's deleted-folder prune (30 days) plus whatever B2 lifecycle rule applies to hidden versions, which is unconfirmed. Follow-ups: T-8391 (a real keystore, so deletes become true crypto-shreds) and T-8392 (what retention expiry does to stored blobs). Until the purge is complete this remains a known exception to the 7-day store-search-text policy; there is no age-out bound for the pre-scrub blobs: the shared objects in MinIO (5y prefix), and their B2 mirror copies including hidden old versions (no lifecycle rule confirmed). TODO(T-7505): shared-object purge (A78) + B2 hidden-version expiry + confirm expiry behaviour (T-8392); until all are done, do not claim recording data is gone.
+    - **PostHog recordings: retention setting is 30d (not yet observed on a new recording); pre-scrub recordings deleted in the app; MinIO purge of their exclusive objects done 2026-10-25, shared objects pending (A78); backup copies pending.** Project 6 `session_recording_retention_period` is `30d` since 2026-10-25 07:56Z (it was `5y`). The posthog-selfhost maintainer set it server-side, because our self-hosted org has no SESSION_REPLAY_DATA_RETENTION feature and the API/UI PATCH returns 500 "Invalid retention entitlement" for any value. To change it again, ask posthog-selfhost; don't retry the PATCH. Retention is stamped on each recording at ingest (`retention_period_days`), so changing the setting does NOT shorten recordings that already exist. New recordings should leave the product (UI/API) after 30 days once stamped 30 (none observed yet; existing ones keep 1825). Whether expiry removes the stored snapshot blobs is unknown (follow-up T-8392). The recording network-URL scrub (PR #508) went live on production 2026-10-25 07:30:23Z (deploy of main 056e37d8). The 588 project-6 recordings that started before the scrub went live were deleted in PostHog on 2026-10-25 (MASTER decision 2026-10-25) through the API (`DELETE /api/environments/6/session_recordings/<id>/`); each was verified to return 404 afterwards, so they can no longer be played back. The API delete removes only the Postgres row and sends a Kafka deletion event: the snapshot data (stored unencrypted) still physically exists in object storage (MinIO bucket `posthog`, under the 5y prefix) and in the B2 offsite mirror (see below). 847 objects are exclusive to those sessions; 3,344 are shared batch files that also hold other teams' sessions. The 847 MinIO objects holding only those sessions (75.7 MB) were physically deleted by posthog-selfhost on 2026-10-25 08:16Z (MASTER go; MinIO is unversioned, all 847 verified gone); the B2 offsite copies are NOT yet guaranteed to expire: the 847 originals sit in the offsite deleted folder (dated 2026-10-25, pruned after 30 days), but B2 also kept about 830 hidden old versions at the original paths, which our prune does not touch and which expire only if the B2 bucket has a lifecycle rule for hidden versions (Amin asked to check/fix it or approve a one-off delete). The 3,344 objects shared with other projects' recordings are NOT purged; zero-filling our byte ranges awaits Amin (A78). We never purge the B2 offsite mirror directly; a MinIO deletion reaches B2 only through the mirror's deleted-folder prune (30 days) plus whatever B2 lifecycle rule applies to hidden versions, which is unconfirmed. Follow-ups: T-8391 (a real keystore, so deletes become true crypto-shreds) and T-8392 (what retention expiry does to stored blobs). Until the purge is complete this remains a known exception to the 7-day store-search-text policy; there is no age-out bound for the pre-scrub blobs: the shared objects in MinIO (5y prefix), and their B2 mirror copies including hidden old versions (no lifecycle rule confirmed). TODO(T-8398, T-8392): shared-object purge and B2 hidden-version expiry (A78, T-8398) + confirm expiry behaviour (T-8392); until all are done, do not claim recording data is gone.
     - **Before anyone turns on Traefik access logs ("Requests" in Dokploy), a scrub job must exist first** that removes query strings older than 7 days (MASTER policy 2026-10-24: store-search text is kept at most 7 days). Do not enable them without it.
-- **Account deletion is manual, on request to hello@devino.ca within 30 days** (there is no account-deletion endpoint; the in-app "Delete my data" only removes data, not the login). Verify the requester writes from the account's address, delete the `users` row (the DB cascades sessions, accounts, savings_events, favorite_stores and coupon_reports; shared coupons are set to `submitted_by_user_id = NULL`), AND also scrub `site_suggestions.requester_email` (and `user_agent`) for that address by hand: it is NOT cascaded (`siteSuggestionIdentityWhere` in `src/lib/siteSuggestionIdentity.ts` is the matcher the in-app delete uses).
+- **Account deletion is self-serve** (T-7505): "Delete my account" on `/profile` (Data & privacy) and in the native apps both call `POST /api/account/delete`, which in one transaction deletes the `users` row (the DB cascades sessions, accounts, savings_events, favorite_stores and coupon_reports; shared coupons are set to `submitted_by_user_id = NULL`), scrubs `site_suggestions.requester_email` and `user_agent` (not cascaded; matched by `siteSuggestionIdentityWhere` in `src/lib/siteSuggestionIdentity.ts`) and erases the account's `verification_tokens`, then deletes the PostHog person (next section). "Delete my data" (`POST /api/account/data/delete`) only empties the synced data and keeps the login. **A request by email to hello@devino.ca** (someone who cannot sign in) is still handled within 30 days by hand: verify the requester writes from the account's address, then do exactly what the route does: delete the `users` row, scrub that address in `site_suggestions` and `verification_tokens`, and delete the PostHog person (manual recovery steps below).
 
 ## Account deletion: the PostHog person (T-7505)
 
@@ -484,7 +607,7 @@ The public privacy policy (`/privacy`) promises two operational things; keep the
 - **Env (deploy env only, both optional at boot):** `POSTHOG_PERSONAL_API_KEY` (a personal API key scoped to `person:write` only) and `POSTHOG_PROJECT_ID` (the numeric id of the project `POSTHOG_DATASET` captures into). The API host is `NEXT_PUBLIC_POSTHOG_HOST`. Create the key under PostHog > Settings > Personal API keys, scope `person:write`, restricted to the Caramel project.
 - **Unset is a defect, not a mode:** the account is still deleted, but every deletion then sends a Sentry error (`operation: posthog_person_delete`, `reason: not_configured`) and the response carries `analyticsDeletion: "failed"`. `POSTHOG_DATASET=disabled` is the one quiet case (`not_applicable`, logged).
 - **What it does:** `POST /api/projects/{id}/persons/bulk_delete/` with the user id as the only distinct id, `delete_events` and `delete_recordings` true. PostHog answers 202 and removes the person, events and recordings in the background; the response means "queued", not "gone". Only events captured before the request are deleted.
-- **Other ids:** only the user id is sent. `identify(user.id)` merges the browser's earlier anonymous id into that person, so the whole person goes. Anonymous ids of signed-out visits that never signed in, `extension_installed` events keyed by install id, and diagnostics events under the extension's random device id are not linked to the account and are not deleted.
+- **Other ids:** only the user id is sent. `identify(user.id)` merges the browser's earlier anonymous id into that person, so the whole person goes. Anonymous ids of signed-out visits that never signed in and `extension_installed` events keyed by install id are not linked to the account and are not deleted. Neither are the pseudonymous diagnostics events under the extension's random device id: they are not stored against the account, so this path has no key to find them.
 - **No durable retry:** the call runs once, inline, after the database commit. If the process dies between the commit and the PostHog call (deploy, OOM, crash), the PostHog delete is lost and nothing re-queues it; a PostHog error or outage leaves the same gap, with a Sentry event. The account row is gone by then, and the Sentry event holds only `userHash` (a short SHA-256 of the user id, no email), so nothing in the app can redo it. A 404 from PostHog is reported as `http_error` (a wrong project id, host or key scope), not treated as success: a missing person answers 202 with `persons_found: 0`.
 - **Manual recovery (production is PostHog project 6):** the person is findable because the browser's identify (and the server's extension sign-up path) sets `email`, `$email` and `rc_app_user_id` (the user id, which is also the distinct id) on it. (1) If you know the email (the user wrote in), search People for it. (2) Otherwise list persons that still have `rc_app_user_id` (for example a HogQL query on `persons`), hash each value with SHA-256, keep the first 12 hex characters, and match the Sentry `userHash`. (3) Delete that person with events and recordings (People > Delete person and events, or the same `bulk_delete` call with the id as `distinct_ids`). A person with no such properties was never identified, so it is not linked to any account and was never in scope.
 - **Failures:** read them in Sentry by `operation: posthog_person_delete`; the tags carry the `reason` (`not_configured`, `bad_project_id`, `http_error`, `deletion_errors`, `request_failed`).

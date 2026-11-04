@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
@@ -12,7 +11,7 @@ val releaseKeystorePath: String? = System.getenv("CARAMEL_KEYSTORE_PATH")
 
 android {
     namespace = "com.devino.caramel"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.devino.caramel"
@@ -26,6 +25,12 @@ android {
         // T-7852 (web-session handoff) is wired: the Saved and Account tabs get a web session through
         // POST /api/app/web-session/handoff. It has had no device sign-in run yet; do that before tagging android-v1.6.0.
         versionName = "1.6.0"
+
+        // The origin every call and the WebView go to (AppConfig.API_BASE_URL / WEBSITE_URL, AppLinkGuard.APP_ORIGIN).
+        // debug and release are production; ONLY the devproof build type below overrides it.
+        buildConfigField("String", "API_BASE_URL", "\"https://grabcaramel.com\"")
+        // True ONLY in the devproof build type. Every dev-proof code path is guarded by it so R8 strips it from release.
+        buildConfigField("boolean", "DEV_PROOF", "false")
     }
 
     signingConfigs {
@@ -47,6 +52,23 @@ android {
             if (releaseKeystorePath != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
+        }
+
+        // T-9413: DEV-ONLY proof build, never shipped. It is `release` (same R8 and resource shrinking, so a walk on it
+        // proves the SHRUNK build) except that it: installs beside the store app (applicationIdSuffix), is signed with the
+        // debug key and NEVER the upload key, talks to dev.grabcaramel.com, and accepts a session bearer through the
+        // `devproof_session` intent extra (core/DevProofSession.kt) because the app signs in with Google/Apple only and
+        // no throwaway external accounts are allowed. A build TYPE, not a flavor, on purpose: a flavor dimension would
+        // rename the release tasks and outputs (assembleXxxRelease, outputs/bundle/xxxRelease) that release-android-app.yml
+        // calls by name. Nothing in .github/workflows/release-android-app.yml may mention it (the vitest
+        // tests/unit/android-devproof-never-ships.test.ts and the android-devproof-guard workflow enforce that).
+        // Written after `release` so initWith copies the finished release config.
+        create("devproof") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".devproof"
+            signingConfig = signingConfigs.getByName("debug")
+            buildConfigField("String", "API_BASE_URL", "\"https://dev.grabcaramel.com\"")
+            buildConfigField("boolean", "DEV_PROOF", "true")
         }
     }
 
@@ -70,6 +92,9 @@ android {
     }
 }
 
+// The devproof build type is built and shrunk, not unit-tested: the unit tests pin the production origin literally.
+tasks.matching { it.name == "testDevproofUnitTest" }.configureEach { enabled = false }
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
@@ -83,6 +108,11 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.browser)
+    // Pins the transitive androidx.fragment (old, via Play services) past 1.3.0: AGP 9 lint InvalidFragmentVersionForActivityResult.
+    implementation(libs.androidx.fragment)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)

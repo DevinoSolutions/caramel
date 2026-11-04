@@ -50,7 +50,9 @@ object SignInCallback {
      *
      * The whole redirect target is checked, not just the scheme: any URL on our scheme would
      * otherwise pass as the sign-in answer. It must be [AppConfig.SIGN_IN_REDIRECT_URI], ignoring
-     * only the query we asked for.
+     * only the query we asked for and the fragment: a browser carries the previous URL's fragment
+     * over a redirect that has none (Fetch spec), and Google's sign-in leaves one ("#"). The fragment
+     * never reaches a server; the state and PKCE checks tie the callback to this request.
      */
     fun code(callback: String, expectedState: String): String {
         val actual = parse(callback)
@@ -59,8 +61,7 @@ object SignInCallback {
             actual.host != expected.host ||
             actual.path != expected.path ||
             actual.port != -1 ||
-            actual.userInfo != null ||
-            actual.rawFragment != null
+            actual.userInfo != null
         ) {
             throw SignInException(SignInFailure.UNEXPECTED_CALLBACK)
         }

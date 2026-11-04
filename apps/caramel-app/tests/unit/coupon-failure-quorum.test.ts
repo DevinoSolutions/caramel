@@ -15,6 +15,7 @@ import {
 import {
     CLEARING_WORKED_WEIGHT,
     MAX_LOW_TRUST_CLEARING_WEIGHT,
+    REPORTER_SWEEP_LOOP_BUDGET_MS,
     REPORTER_WEIGHT,
     recordFailed,
     recordWorked,
@@ -39,19 +40,42 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // EXERCISED rather than asserted against canned answers. A fake proves the
 // logic and never the SQL; tests/integration/coupon-report.itest.ts runs the
 // same scenarios against real Postgres.
-// The global retention sweep (sweepExpiredReporters) uses the singleton client:
-// tests point `sweepClient.deleteMany` at the fake table.
-const { sweepClient } = vi.hoisted(() => ({
-    sweepClient: {
-        deleteMany: vi.fn(
-            async (_args: unknown): Promise<{ count: number }> => ({
-                count: 0,
-            }),
-        ),
+// The global retention sweep (sweepExpiredReporters) uses the singleton client
+// and deletes in bounded chunks, each chunk its own interactive transaction
+// that first sets a Postgres statement_timeout (T-8983): tests point
+// `sweepChunkDelete` (the stand-in for one chunk's `DELETE ... LIMIT`) at the
+// fake table, `sweepExecuteRaw` routes the SET LOCAL and the chunk DELETE by
+// their composed SQL, and `sweepTransaction` records the options. ANNOUNCED
+// FAKE: it runs the callback inline and never opens a real transaction
+// (tests/integration covers real Postgres).
+const { sweepChunkDelete, sweepExecuteRaw, sweepTransaction } = vi.hoisted(
+    () => {
+        const sweepChunkDelete = vi.fn(
+            async (_cutoff: Date, _limit: number): Promise<number> => 0,
+        )
+        const sweepExecuteRaw = vi.fn(
+            async (query: {
+                sql: string
+                values: unknown[]
+            }): Promise<number> =>
+                query.sql.startsWith('SET LOCAL')
+                    ? 0
+                    : sweepChunkDelete(
+                          query.values[0] as Date,
+                          query.values[query.values.length - 1] as number,
+                      ),
+        )
+        const sweepTransaction = vi.fn(
+            async <T>(
+                fn: (tx: { $executeRaw: typeof sweepExecuteRaw }) => Promise<T>,
+                _options: { maxWait: number; timeout: number },
+            ): Promise<T> => fn({ $executeRaw: sweepExecuteRaw }),
+        )
+        return { sweepChunkDelete, sweepExecuteRaw, sweepTransaction }
     },
-}))
+)
 vi.mock('@/lib/prisma', () => ({
-    default: { couponSignalReporter: sweepClient },
+    default: { $transaction: sweepTransaction },
 }))
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }))
 
@@ -211,10 +235,18 @@ function makeFakeDb() {
             ),
         },
     }
-    // The singleton client's deleteMany reaches the same table.
-    sweepClient.deleteMany.mockImplementation(async args =>
-        tx.couponSignalReporter.deleteMany(args as never),
-    )
+    // One sweep chunk (DELETE ... LIMIT) reaches the same table: expired rows,
+    // at most `limit` of them, the count returned like $executeRaw does.
+    sweepChunkDelete.mockImplementation(async (cutoff, limit) => {
+        let count = 0
+        reporters.forEach((row, key) => {
+            if (count < limit && row.lastAt < cutoff) {
+                reporters.delete(key)
+                count++
+            }
+        })
+        return count
+    })
     return { signals, reporters, tx, unknownCoupons }
 }
 
@@ -234,6 +266,14 @@ const youngAccount = (id: string): ReportReporter => ({
     established: false,
 })
 const COUPON = '42'
+
+/**
+ * The sweep awaits its SET LOCAL before the DELETE, so the DELETE starts a few
+ * microtasks after sweepExpiredReporters() returns. setImmediate is not faked
+ * by any fake-timer setup in this file.
+ */
+const flushSweepStart = () =>
+    new Promise<void>(resolve => setImmediate(resolve))
 
 let db: ReturnType<typeof makeFakeDb>
 
@@ -524,13 +564,13 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
     it('a failing sweep is reported loudly (Sentry + console) and backs off 5 minutes: a call inside the window starts no DELETE, one after it retries', async () => {
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
         vi.mocked(Sentry.captureException).mockClear()
-        sweepClient.deleteMany.mockClear()
-        sweepClient.deleteMany.mockRejectedValueOnce(new Error('db down'))
+        sweepChunkDelete.mockClear()
+        sweepChunkDelete.mockRejectedValueOnce(new Error('db down'))
 
         await sweepExpiredReporters()
         expect(Sentry.captureException).toHaveBeenCalledTimes(1)
         expect(errorSpy).toHaveBeenCalled()
-        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+        expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
 
         db.reporters.set('stale', {
             couponId: '88',
@@ -541,67 +581,426 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         })
         vi.setSystemTime(Date.now() + 4 * 60 * 1000)
         await sweepExpiredReporters()
-        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+        expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
         expect(db.reporters.has('stale')).toBe(true)
 
         vi.setSystemTime(Date.now() + 61 * 1000)
         await sweepExpiredReporters()
-        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+        expect(sweepChunkDelete).toHaveBeenCalledTimes(2)
         expect(db.reporters.has('stale')).toBe(false)
         errorSpy.mockRestore()
     })
 
     it('force:true right after a failure still starts a DELETE (the timer skips the backoff)', async () => {
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-        sweepClient.deleteMany.mockClear()
-        sweepClient.deleteMany.mockRejectedValueOnce(new Error('db down'))
+        sweepChunkDelete.mockClear()
+        sweepChunkDelete.mockRejectedValueOnce(new Error('db down'))
 
         await sweepExpiredReporters()
         await sweepExpiredReporters()
-        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+        expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
         await sweepExpiredReporters({ force: true })
-        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+        expect(sweepChunkDelete).toHaveBeenCalledTimes(2)
         errorSpy.mockRestore()
     })
 
     it('a DELETE that throws synchronously is reported and backed off, never rejected', async () => {
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
         vi.mocked(Sentry.captureException).mockClear()
-        sweepClient.deleteMany.mockClear()
-        sweepClient.deleteMany.mockImplementationOnce(() => {
+        sweepChunkDelete.mockClear()
+        sweepChunkDelete.mockImplementationOnce(() => {
             throw new Error('client not ready')
         })
 
-        await expect(sweepExpiredReporters()).resolves.toBeUndefined()
+        await expect(sweepExpiredReporters()).resolves.toMatchObject({
+            outcome: 'failed',
+        })
         expect(Sentry.captureException).toHaveBeenCalledTimes(1)
         await sweepExpiredReporters()
-        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+        expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
         errorSpy.mockRestore()
+    })
+
+    describe('every sweep run logs ONE provable summary line (T-6398)', () => {
+        let infoSpy: ReturnType<typeof vi.spyOn>
+        let errorSpy: ReturnType<typeof vi.spyOn>
+        const summaryLines = () =>
+            infoSpy.mock.calls
+                .map((call: unknown[]) => String(call[0]))
+                .filter((line: string) =>
+                    line.includes('reporter retention sweep run '),
+                )
+        beforeEach(() => {
+            infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+            errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+            sweepChunkDelete.mockReset()
+            sweepChunkDelete.mockResolvedValue(0)
+        })
+        afterEach(() => {
+            infoSpy.mockRestore()
+            errorSpy.mockRestore()
+        })
+
+        it('a 0-row run still logs the summary with deleted=0 outcome=ok, and returns the run', async () => {
+            const run = await sweepExpiredReporters({ trigger: 'timer' })
+
+            expect(run).toMatchObject({ outcome: 'ok', deleted: 0, chunks: 1 })
+            expect(summaryLines()).toHaveLength(1)
+            expect(summaryLines()[0]).toMatch(
+                /^\[couponSignals\] reporter retention sweep run ran_at=\d{4}-\d{2}-\d{2}T[\d:.]+Z trigger=timer deleted=0 chunks=1 duration_ms=\d+ outcome=ok$/,
+            )
+        })
+
+        it('the trigger defaults to report', async () => {
+            await sweepExpiredReporters()
+            expect(summaryLines()[0]).toContain('trigger=report ')
+        })
+
+        it('a failing run logs outcome=failed', async () => {
+            sweepChunkDelete.mockRejectedValueOnce(new Error('db down'))
+
+            const run = await sweepExpiredReporters()
+
+            expect(run).toMatchObject({ outcome: 'failed', deleted: 0 })
+            expect(summaryLines()).toHaveLength(1)
+            expect(summaryLines()[0]).toContain('outcome=failed')
+        })
+
+        it('a caller that joins the in-flight sweep gets the same run and no second line', async () => {
+            let release!: (rows: number) => void
+            sweepChunkDelete.mockImplementationOnce(
+                () => new Promise<number>(resolve => (release = resolve)),
+            )
+
+            const first = sweepExpiredReporters({ trigger: 'timer' })
+            const joined = sweepExpiredReporters({ force: true })
+            await vi.waitFor(() => expect(sweepChunkDelete).toHaveBeenCalled())
+            release(0)
+
+            expect(await joined).toBe(await first)
+            expect(summaryLines()).toHaveLength(1)
+        })
+
+        it('a throttled call starts no run and logs nothing', async () => {
+            await sweepExpiredReporters()
+            infoSpy.mockClear()
+
+            await expect(sweepExpiredReporters()).resolves.toEqual({
+                outcome: 'skipped',
+                reason: 'throttled',
+            })
+            expect(summaryLines()).toHaveLength(0)
+        })
+    })
+
+    describe('the sweep DELETE runs under a Postgres statement timeout (T-6398)', () => {
+        let errorSpy: ReturnType<typeof vi.spyOn>
+        beforeEach(() => {
+            errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+            sweepChunkDelete.mockClear()
+            sweepExecuteRaw.mockClear()
+            sweepTransaction.mockClear()
+            vi.mocked(Sentry.captureException).mockClear()
+        })
+        afterEach(() => {
+            errorSpy.mockRestore()
+        })
+
+        it('a chunk is one transaction: SET LOCAL statement_timeout first, then the DELETE, with statement < transaction timeout and maxWait + timeout inside the 60 s sweep timeout', async () => {
+            await sweepExpiredReporters()
+
+            expect(sweepTransaction).toHaveBeenCalledTimes(1)
+            expect(sweepExecuteRaw).toHaveBeenCalledTimes(2)
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
+            const setLocal = sweepExecuteRaw.mock.calls[0]![0].sql
+            expect(setLocal).toBe('SET LOCAL statement_timeout = 10000')
+            expect(sweepExecuteRaw.mock.invocationCallOrder[0]!).toBeLessThan(
+                sweepChunkDelete.mock.invocationCallOrder[0]!,
+            )
+            const statementMs = Number(/= (\d+)$/.exec(setLocal)![1])
+            const { maxWait, timeout } = sweepTransaction.mock.calls[0]![1]
+            expect(statementMs).toBeLessThan(timeout)
+            expect(maxWait + timeout).toBeLessThan(60_000)
+        })
+
+        it("pins maxWait explicitly: the options handed to $transaction carry both maxWait and timeout, above Prisma's 2 s / 5 s defaults", async () => {
+            await sweepExpiredReporters()
+
+            const options = sweepTransaction.mock.calls[0]![1]
+            expect(options).toEqual({
+                maxWait: expect.any(Number),
+                timeout: expect.any(Number),
+            })
+            expect(options.maxWait).toBeGreaterThan(2_000)
+            expect(options.timeout).toBeGreaterThan(5_000)
+        })
+
+        it('Postgres cancelling the DELETE is a normal failure: reported once with the real error (no timeout/late tag), backed off, and the slot is free again', async () => {
+            const cancelled = new Error(
+                'canceling statement due to statement timeout',
+            )
+            sweepChunkDelete.mockRejectedValueOnce(cancelled)
+
+            await expect(sweepExpiredReporters()).resolves.toMatchObject({
+                outcome: 'failed',
+            })
+
+            expect(Sentry.captureException).toHaveBeenCalledTimes(1)
+            expect(Sentry.captureException).toHaveBeenCalledWith(cancelled, {
+                tags: { area: 'couponSignals.sweepExpiredReporters' },
+                extra: { deleted: 0, chunks: 0 },
+            })
+            expect(errorSpy).toHaveBeenCalled()
+            // Backoff: an unforced call inside 5 minutes starts nothing.
+            await sweepExpiredReporters()
+            expect(sweepTransaction).toHaveBeenCalledTimes(1)
+            // Not abandoned: even a forced call may start the next DELETE.
+            await sweepExpiredReporters({ force: true })
+            expect(sweepTransaction).toHaveBeenCalledTimes(2)
+        })
+
+        it('a SET LOCAL that fails is reported and the DELETE never runs (no unbounded DELETE)', async () => {
+            const failed = new Error('connection terminated')
+            sweepExecuteRaw.mockRejectedValueOnce(failed)
+
+            await expect(sweepExpiredReporters()).resolves.toMatchObject({
+                outcome: 'failed',
+            })
+
+            expect(sweepChunkDelete).not.toHaveBeenCalled()
+            expect(Sentry.captureException).toHaveBeenCalledWith(failed, {
+                tags: { area: 'couponSignals.sweepExpiredReporters' },
+                extra: { deleted: 0, chunks: 0 },
+            })
+        })
+    })
+
+    describe('the sweep deletes in bounded chunks (T-8983)', () => {
+        const CHUNK = 5000
+        let errorSpy: ReturnType<typeof vi.spyOn>
+        let infoSpy: ReturnType<typeof vi.spyOn>
+        let warnSpy: ReturnType<typeof vi.spyOn>
+
+        /** n reporter rows well past the 30-day window. */
+        function seedExpired(n: number) {
+            const lastAt = new Date(Date.now() - FAILING_WINDOW_MS - 1000)
+            for (let i = 0; i < n; i++) {
+                db.reporters.set(`expired-${i}`, {
+                    couponId: '7',
+                    outcome: 'failed',
+                    reporterHash: `h${i}`,
+                    weight: 1,
+                    lastAt,
+                })
+            }
+        }
+
+        beforeEach(() => {
+            errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+            infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+            warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+            sweepChunkDelete.mockClear()
+            sweepExecuteRaw.mockClear()
+            sweepTransaction.mockClear()
+            vi.mocked(Sentry.captureException).mockClear()
+        })
+        afterEach(() => {
+            errorSpy.mockRestore()
+            infoSpy.mockRestore()
+            warnSpy.mockRestore()
+        })
+
+        it('keeps deleting full chunks until one comes back short, each chunk its own transaction with its own SET LOCAL, and logs the total', async () => {
+            seedExpired(12_000)
+            db.reporters.set('fresh', {
+                couponId: '7',
+                outcome: 'failed',
+                reporterHash: 'fresh',
+                weight: 1,
+                lastAt: new Date(),
+            })
+
+            await sweepExpiredReporters()
+
+            expect(
+                sweepChunkDelete.mock.calls.map(([, limit]) => limit),
+            ).toEqual([CHUNK, CHUNK, CHUNK])
+            expect(sweepTransaction).toHaveBeenCalledTimes(3)
+            expect(
+                sweepExecuteRaw.mock.calls.map(([query]) =>
+                    query.sql.startsWith('SET LOCAL') ? 'set' : 'delete',
+                ),
+            ).toEqual(['set', 'delete', 'set', 'delete', 'set', 'delete'])
+            expect(Array.from(db.reporters.keys())).toEqual(['fresh'])
+            expect(infoSpy).toHaveBeenCalledTimes(1)
+            expect(infoSpy).toHaveBeenCalledWith(
+                expect.stringContaining('deleted=12000 chunks=3 duration_ms='),
+            )
+            expect(warnSpy).not.toHaveBeenCalled()
+            expect(Sentry.captureException).not.toHaveBeenCalled()
+        })
+
+        it('every chunk uses the same cutoff and a keyed LIMIT-ed sub-select (no unbounded DELETE)', async () => {
+            seedExpired(6000)
+            await sweepExpiredReporters()
+
+            const deletes = sweepExecuteRaw.mock.calls
+                .map(([query]) => query)
+                .filter(query => !query.sql.startsWith('SET LOCAL'))
+            expect(deletes).toHaveLength(2)
+            const cutoff = new Date(Date.now() - FAILING_WINDOW_MS)
+            for (const query of deletes) {
+                expect(query.sql).toContain(
+                    'DELETE FROM coupon_signal_reporters',
+                )
+                expect(query.sql).toContain('LIMIT')
+                expect(query.sql).toContain(
+                    '(coupon_id, outcome, reporter_hash) IN',
+                )
+                // Both the outer DELETE and the sub-select filter on last_at:
+                // the outer re-check keeps a reporter that re-reported between
+                // the sub-select and the DELETE.
+                expect(query.sql.match(/last_at </g)).toHaveLength(2)
+                expect(query.values).toEqual([cutoff, cutoff, CHUNK])
+            }
+        })
+
+        it('a chunk that fails is reported loudly and backed off, the chunks before it stay deleted, and the next try resumes the backlog', async () => {
+            seedExpired(12_000)
+            const cancelled = new Error(
+                'canceling statement due to statement timeout',
+            )
+            const realChunk = sweepChunkDelete.getMockImplementation()!
+            sweepChunkDelete
+                .mockImplementationOnce(realChunk)
+                .mockRejectedValueOnce(cancelled)
+
+            await expect(sweepExpiredReporters()).resolves.toMatchObject({
+                outcome: 'failed',
+            })
+
+            expect(Sentry.captureException).toHaveBeenCalledTimes(1)
+            // The failure carries the running total (Sentry extra + the log).
+            expect(Sentry.captureException).toHaveBeenCalledWith(cancelled, {
+                tags: { area: 'couponSignals.sweepExpiredReporters' },
+                extra: { deleted: CHUNK, chunks: 1 },
+            })
+            expect(errorSpy).toHaveBeenCalledWith(
+                expect.stringContaining(
+                    `after deleting ${CHUNK} expired rows in 1 chunks`,
+                ),
+                cancelled,
+            )
+            expect(db.reporters.size).toBe(12_000 - CHUNK)
+
+            // Backoff applies; once it is over the retry makes progress instead
+            // of re-doing (and re-failing) the whole delete.
+            await sweepExpiredReporters()
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(2)
+            vi.setSystemTime(Date.now() + 5 * 60 * 1000 + 1000)
+            await sweepExpiredReporters()
+            expect(db.reporters.size).toBe(0)
+        })
+
+        it('stops at the chunk cap, says so, and comes back in a minute instead of an hour', async () => {
+            sweepChunkDelete.mockImplementation(async () => CHUNK)
+
+            const run = await sweepExpiredReporters()
+
+            expect(run).toMatchObject({
+                outcome: 'backlog',
+                deleted: 500000,
+                chunks: 100,
+            })
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(100)
+            expect(warnSpy).toHaveBeenCalledWith(
+                expect.stringContaining('expired rows left'),
+            )
+            expect(infoSpy).toHaveBeenCalledWith(
+                expect.stringContaining(
+                    'deleted=500000 chunks=100 duration_ms=',
+                ),
+            )
+            expect(infoSpy).toHaveBeenCalledWith(
+                expect.stringContaining('outcome=backlog'),
+            )
+
+            vi.setSystemTime(Date.now() + 59 * 1000)
+            await sweepExpiredReporters()
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(100)
+            vi.setSystemTime(Date.now() + 2 * 1000)
+            await sweepExpiredReporters()
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(200)
+        })
+
+        it('starts no new chunk once the loop budget is spent, so budget + maxWait + timeout stays inside the 60 s sweep timeout', async () => {
+            sweepChunkDelete.mockImplementation(async () => {
+                vi.setSystemTime(Date.now() + REPORTER_SWEEP_LOOP_BUDGET_MS / 3)
+                return CHUNK
+            })
+
+            await sweepExpiredReporters()
+
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(3)
+            expect(warnSpy).toHaveBeenCalled()
+            const { maxWait, timeout } = sweepTransaction.mock.calls[0]![1]
+            expect(
+                REPORTER_SWEEP_LOOP_BUDGET_MS + maxWait + timeout,
+            ).toBeLessThan(60_000)
+        })
+
+        it('the hourly throttle is measured from the END of a run, not its start', async () => {
+            sweepChunkDelete.mockImplementationOnce(async () => {
+                vi.setSystemTime(Date.now() + 30 * 60 * 1000)
+                return 0
+            })
+            await sweepExpiredReporters()
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
+
+            // 61 min after the start, but only 31 min after the end.
+            vi.setSystemTime(Date.now() + 31 * 60 * 1000)
+            await sweepExpiredReporters()
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
+            vi.setSystemTime(Date.now() + 30 * 60 * 1000)
+            await sweepExpiredReporters()
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(2)
+        })
+
+        it('nothing expired is one short chunk: one transaction, only the run summary line, no warning', async () => {
+            await sweepExpiredReporters()
+
+            expect(sweepTransaction).toHaveBeenCalledTimes(1)
+            expect(infoSpy).toHaveBeenCalledTimes(1)
+            expect(infoSpy.mock.calls[0]![0]).toContain('deleted=0 chunks=1')
+            expect(warnSpy).not.toHaveBeenCalled()
+        })
     })
 
     describe('a DELETE that hangs', () => {
         let errorSpy: ReturnType<typeof vi.spyOn>
-        let settleHung: (value: { count: number }) => void
+        let settleHung: (value: number) => void
         let rejectHung: (reason: Error) => void
 
         /** Start a sweep whose DELETE never answers until settleHung/rejectHung. */
         async function startHungSweepAndTimeOut() {
-            sweepClient.deleteMany.mockClear()
+            sweepChunkDelete.mockClear()
             vi.mocked(Sentry.captureException).mockClear()
-            sweepClient.deleteMany.mockImplementationOnce(
+            sweepChunkDelete.mockImplementationOnce(
                 () =>
-                    new Promise<{ count: number }>((resolve, reject) => {
+                    new Promise<number>((resolve, reject) => {
                         settleHung = resolve
                         rejectHung = reject
                     }),
             )
             const hung = sweepExpiredReporters()
             const shared = sweepExpiredReporters()
-            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+            await flushSweepStart()
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
             await vi.advanceTimersByTimeAsync(59_000)
             expect(Sentry.captureException).not.toHaveBeenCalled()
             await vi.advanceTimersByTimeAsync(2_000)
-            await Promise.all([hung, shared])
+            const [run] = await Promise.all([hung, shared])
+            return run
         }
 
         beforeEach(() => {
@@ -614,6 +1013,52 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
 
         afterEach(() => {
             errorSpy.mockRestore()
+        })
+
+        it('the timed-out run reports outcome=timeout (result and the one summary line), and a call while the DELETE is abandoned is skipped', async () => {
+            const infoSpy = vi
+                .spyOn(console, 'info')
+                .mockImplementation(() => {})
+            const run = await startHungSweepAndTimeOut()
+
+            expect(run).toMatchObject({
+                outcome: 'timeout',
+                deleted: 0,
+                chunks: 0,
+            })
+            const lines = infoSpy.mock.calls
+                .map((call: unknown[]) => String(call[0]))
+                .filter((line: string) => line.includes('sweep run '))
+            expect(lines).toHaveLength(1)
+            expect(lines[0]).toContain('outcome=timeout')
+            await expect(
+                sweepExpiredReporters({ force: true }),
+            ).resolves.toEqual({ outcome: 'skipped', reason: 'abandoned' })
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
+            infoSpy.mockRestore()
+        })
+
+        it('an abandoned DELETE that settles late is logged, and one that rejects late is also console.error-ed', async () => {
+            const infoSpy = vi
+                .spyOn(console, 'info')
+                .mockImplementation(() => {})
+            await startHungSweepAndTimeOut()
+            settleHung(0)
+            await vi.advanceTimersByTimeAsync(0)
+            expect(infoSpy).toHaveBeenCalledWith(
+                '[couponSignals] abandoned reporter retention sweep settled late deleted=0 chunks=1',
+            )
+            infoSpy.mockRestore()
+
+            errorSpy.mockClear()
+            await vi.advanceTimersByTimeAsync(6 * 60 * 1000)
+            await startHungSweepAndTimeOut()
+            rejectHung(new Error('connection reset'))
+            await vi.advanceTimersByTimeAsync(0)
+            expect(errorSpy).toHaveBeenCalledWith(
+                expect.stringContaining('failed late'),
+                expect.any(Error),
+            )
         })
 
         it('is reported after 60 s (Sentry tagged timeout) and frees the in-flight slot', async () => {
@@ -640,24 +1085,24 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
             await vi.advanceTimersByTimeAsync(6 * 60 * 1000)
             await sweepExpiredReporters()
             await sweepExpiredReporters({ force: true })
-            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
 
-            settleHung({ count: 0 })
+            settleHung(0)
             await vi.advanceTimersByTimeAsync(0)
             await sweepExpiredReporters()
-            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(2)
         })
 
         it('the backoff still applies after the abandoned DELETE settles early', async () => {
             await startHungSweepAndTimeOut()
-            settleHung({ count: 0 })
+            settleHung(0)
             await vi.advanceTimersByTimeAsync(0)
 
             await sweepExpiredReporters()
-            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
             await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
             await sweepExpiredReporters()
-            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(2)
         })
 
         it('an abandoned DELETE that rejects later is reported as a second, late exception and frees the slot', async () => {
@@ -677,16 +1122,16 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
                 },
             })
             await sweepExpiredReporters({ force: true })
-            expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+            expect(sweepChunkDelete).toHaveBeenCalledTimes(2)
         })
     })
 
     it('concurrent triggers share ONE sweep: a slow or failing DELETE is never stampeded', async () => {
-        let release: (value: { count: number }) => void = () => {}
-        sweepClient.deleteMany.mockClear()
-        sweepClient.deleteMany.mockImplementationOnce(
+        let release: (value: number) => void = () => {}
+        sweepChunkDelete.mockClear()
+        sweepChunkDelete.mockImplementationOnce(
             () =>
-                new Promise<{ count: number }>(resolve => {
+                new Promise<number>(resolve => {
                     release = resolve
                 }),
         )
@@ -694,20 +1139,21 @@ describe('failure quorum: forged anonymous reports cannot sink a code', () => {
         const first = sweepExpiredReporters()
         const second = sweepExpiredReporters()
         const forced = sweepExpiredReporters({ force: true })
-        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+        await flushSweepStart()
+        expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
 
-        release({ count: 0 })
+        release(0)
         await Promise.all([first, second, forced])
-        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+        expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
     })
 
     it('force skips the hourly throttle (the retention timer uses it)', async () => {
-        sweepClient.deleteMany.mockClear()
+        sweepChunkDelete.mockClear()
         await sweepExpiredReporters()
         await sweepExpiredReporters()
-        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(1)
+        expect(sweepChunkDelete).toHaveBeenCalledTimes(1)
         await sweepExpiredReporters({ force: true })
-        expect(sweepClient.deleteMany).toHaveBeenCalledTimes(2)
+        expect(sweepChunkDelete).toHaveBeenCalledTimes(2)
     })
 
     it('an id that is not a catalog row records nothing and resolves false: no signal row, no reporter row, no recompute', async () => {

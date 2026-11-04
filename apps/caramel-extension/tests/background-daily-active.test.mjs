@@ -236,9 +236,8 @@ describe('reportDailyActive — usage-diagnostics consent', () => {
     )
 
     it('the real lifecycle: no id before the accept, sent under the minted id, nothing and no id after withdrawal', async () => {
-        const { writeUsageDiagnosticsConsent } = await import(
-            '../usage-diagnostics-consent.js'
-        )
+        const { writeUsageDiagnosticsConsent } =
+            await import('../usage-diagnostics-consent.js')
         localData = {}
 
         expect(await open()).toEqual({ skipped: 'no-diagnostics-consent' })
@@ -283,7 +282,7 @@ describe('reportDailyActive — usage-diagnostics consent', () => {
 })
 
 describe('reportDailyActive — what is sent', () => {
-    it('consent accepted + flag true: one anonymous POST to the telemetry route with exactly the reviewed fields', async () => {
+    it('consent accepted + flag true: one pseudonymous POST to the telemetry route with exactly the reviewed fields', async () => {
         telemetryResponses.push(captured())
 
         expect(await open()).toEqual({ sent: true })

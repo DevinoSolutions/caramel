@@ -67,6 +67,15 @@ describe('the currencies real storefronts actually price in', () => {
         ['Totalt 1 299,00 kr', 1299, 'kr'],
         ['Razem 199,99 zł', 199.99, 'zł'],
         ['Total CHF 89.90', 89.9, 'CHF'],
+        // Swiss grouping: an apostrophe, straight or typographic. Read as
+        // "CHF 1" before, so a CHF 1'249.90 cart had no usable total.
+        ["Total CHF 1'249.90", 1249.9, 'CHF'],
+        ['Total CHF 1’249.90', 1249.9, 'CHF'],
+        ["Gesamt 12'500 CHF", 12500, 'CHF'],
+        // A label and a code-marked amount in adjacent inline elements, as
+        // innerText reads them: no space between the label and the code.
+        ["TotalCHF 1'249.90", 1249.9, 'CHF'],
+        ['Order totalAED 949.00', 949, 'AED'],
         ['AED 949.00', 949, 'AED'],
         ['DT 445.00', 445, 'DT'],
         ['Zwischensumme: 565.89 ت', 565.89, 'ت'],

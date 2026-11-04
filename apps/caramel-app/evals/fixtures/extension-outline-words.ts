@@ -74,24 +74,6 @@ export const OUTLINE_WORDS: ReadonlySet<string> = new Set(
         .filter(Boolean),
 )
 
-// TODO(2026-10-17): the 2026-10-17 words reach the extension's own list with
-// the extension change that ships them. Until then its file lacks exactly
-// these; drop this set, and the drift test's allowance for it, once
-// apps/caramel-extension/coupon-box-outline.js carries them.
-export const EXTENSION_WORDS_PENDING: ReadonlySet<string> = new Set([
-    'member',
-    'members',
-    'military',
-    'point',
-    'points',
-    'student',
-    'students',
-    'teacher',
-    'teachers',
-    'verification',
-    'verify',
-])
-
 // Built with the constructor: this project's compile target rejects the
 // literal `u` flag.
 const NOT_A_LETTER = new RegExp('[^\\p{L}]+', 'gu')

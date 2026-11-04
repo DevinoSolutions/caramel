@@ -590,7 +590,7 @@ export async function submitShopperCode(message) {
  * is decided HERE: the shopper's usageDiagnosticsConsent must be accepted and,
  * on Firefox, the browser's data-collection grant must be held
  * (usage-diagnostics-consent.js). Otherwise the answer is `{ skipped }` and no
- * request is made. The request is ANONYMOUS on purpose: no bearer, no cookies,
+ * request is made. The request is PSEUDONYMOUS on purpose: no bearer, no cookies,
  * the per-device telemetry id as the only identity (READ here, never minted: the
  * accept path owns minting, so a missing id means skip), the consent record as the
  * proof the server checks (403 consent-required), and a payload that only
@@ -867,7 +867,7 @@ export function initBackground() {
 
     // Withdrawing diagnostics consent (the popup toggle or "No thanks") deletes
     // the telemetry id: sends stop at once because the gate reads the record, and
-    // a later opt-in starts a new id that cannot be joined to this one. The
+    // a later opt-in starts a new id that we do not join to this one. The
     // record is device-local, so only this device's own changes arrive here.
     currentBrowser.storage.onChanged.addListener((changes, area) => {
         if (area !== 'local' || !changes[USAGE_DIAGNOSTICS_CONSENT_KEY]) return

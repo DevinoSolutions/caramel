@@ -16,6 +16,13 @@
 // which is not PII) and the function returns what actually happened, so the
 // caller can see and test it. A signup that loses its analytics is a Sentry
 // event; a signup that fails because analytics failed would be a worse bug.
+//
+// A PostHog step that outlives SIGNUP_ANALYTICS_TIMEOUT_MS is reported as
+// `false` (the signup does not wait), but it keeps running and often lands
+// (CARAMEL-1W). So a timed-out step is still observed, up to
+// SIGNUP_ANALYTICS_OBSERVE_CAP_MS, and reports its real final fate to Sentry
+// as ONE warning: "finished late", "finished late without success", the
+// rejection, or "still pending after <cap> ms". Never a claim of loss alone.
 import { Prisma } from '@/generated/prisma/client'
 import {
     deriveFirstTouchSource,
@@ -49,6 +56,12 @@ import 'server-only'
  * on a flaky network; a signup must not sit behind that.
  */
 export const SIGNUP_ANALYTICS_TIMEOUT_MS = 3000
+
+/**
+ * How long, counted from the step's start, a timed-out step is still observed
+ * for its real outcome before it is reported as still pending.
+ */
+export const SIGNUP_ANALYTICS_OBSERVE_CAP_MS = 30_000
 
 /** What the hook could determine about HOW the account was created. */
 export type RecordedSignupMethod = SignupMethod | 'unknown'
@@ -123,18 +136,74 @@ async function withTimeout<T>(
     }
 }
 
-/** Run one analytics step under the shared timeout; a timeout is a Sentry warning + `false`. */
+/**
+ * Report the real final outcome of a step that already timed out: exactly one
+ * Sentry warning, sent once its fate is known or the observe cap is reached.
+ * Rejects only if Sentry itself throws.
+ */
+async function reportLateOutcome(
+    step: string,
+    userId: string,
+    pending: Promise<boolean>,
+    startedAt: number,
+): Promise<void> {
+    const tags = { operation: 'signup_capture', step }
+    const extra = () => ({
+        userId,
+        timeoutMs: SIGNUP_ANALYTICS_TIMEOUT_MS,
+        elapsedMs: Date.now() - startedAt,
+    })
+    try {
+        const late = await withTimeout(
+            pending,
+            SIGNUP_ANALYTICS_OBSERVE_CAP_MS - SIGNUP_ANALYTICS_TIMEOUT_MS,
+        )
+        if (late.timedOut) {
+            Sentry.captureMessage(
+                `signup analytics step "${step}" still pending after ${SIGNUP_ANALYTICS_OBSERVE_CAP_MS} ms`,
+                { level: 'warning', tags, extra: extra() },
+            )
+        } else if (late.value) {
+            Sentry.captureMessage(
+                `signup analytics step "${step}" finished late`,
+                { level: 'warning', tags, extra: extra() },
+            )
+        } else {
+            Sentry.captureMessage(
+                `signup analytics step "${step}" finished late without success`,
+                { level: 'warning', tags, extra: extra() },
+            )
+        }
+    } catch (error) {
+        Sentry.captureException(error, {
+            level: 'warning',
+            tags,
+            extra: extra(),
+        })
+    }
+}
+
+/**
+ * Run one analytics step under the shared timeout. On a timeout the caller gets
+ * `false` at once, while the step keeps being observed for its real outcome
+ * (see reportLateOutcome).
+ */
 async function boundedStep(
     step: string,
     userId: string,
     run: () => Promise<boolean>,
 ): Promise<boolean> {
-    const result = await withTimeout(run(), SIGNUP_ANALYTICS_TIMEOUT_MS)
+    const startedAt = Date.now()
+    const pending = run()
+    const result = await withTimeout(pending, SIGNUP_ANALYTICS_TIMEOUT_MS)
     if (result.timedOut) {
-        Sentry.captureMessage(`signup analytics step "${step}" timed out`, {
-            level: 'warning',
-            tags: { operation: 'signup_capture', step },
-            extra: { userId, timeoutMs: SIGNUP_ANALYTICS_TIMEOUT_MS },
+        // Deliberately not awaited (signup must not wait). The observer ends in
+        // a Sentry event; the catch is only for Sentry itself throwing.
+        reportLateOutcome(step, userId, pending, startedAt).catch(error => {
+            console.error(
+                `[signup] reporting the late outcome of "${step}" failed`,
+                error,
+            )
         })
         return false
     }

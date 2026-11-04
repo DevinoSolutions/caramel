@@ -207,6 +207,16 @@ class CaramelApi(
         return decode(send("POST", "/api/extension/oauth", body = body), "POST", "/api/extension/oauth")
     }
 
+    /**
+     * POST /api/extension/oauth/google-id-token. Trades the Google ID token Credential Manager
+     * returned (native Google sign-in) for a session bearer.
+     */
+    suspend fun googleIdTokenSignIn(idToken: String): OAuthSessionResult {
+        val path = "/api/extension/oauth/google-id-token"
+        val body = buildJsonObject { put("idToken", idToken) }.toString()
+        return decode(send("POST", path, body = body), "POST", path)
+    }
+
     // endregion
 
     private companion object {

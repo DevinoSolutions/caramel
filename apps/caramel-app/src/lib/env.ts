@@ -17,6 +17,7 @@ import {
     isValidFallbackKey,
     isValidFallbackModel,
 } from '@/lib/proxy-fallback-headers'
+import { isValidWallClockPeriodMinutes } from '@/lib/wallClockSchedule'
 import 'server-only'
 import { z } from 'zod'
 
@@ -83,6 +84,14 @@ const serverObjectSchema = z.object({
     // so a deploy that isn't an ingest target still boots; the route fail-closes
     // (401) when it's unset. Never shipped to any client.
     INGEST_API_KEY: z.string().optional(),
+    // DEV-ONLY proof path (T-9413, RUNBOOK "Dev-only proof path"). When set, POST
+    // /api/dev-proof/session mints a bearer for a throwaway devproof+<slug>@devino.ca
+    // user so a social-only-sign-in app can be walked on an emulator without a real
+    // Google/Apple account. Set it ONLY in the DEV deployment's env, NEVER in
+    // production: unset, the route answers 404 like a route that does not exist
+    // (src/lib/devProof.ts). Trimmed, then min(32): a short or whitespace-only
+    // value fails the boot instead of becoming a guessable secret.
+    DEV_PROOF_SESSION_SECRET: z.string().trim().min(32).optional(),
     UPKUMA_HEALTH_SECRET: z.string().optional(),
     // Sendly is the ONLY email transport (src/lib/email.ts); useSend and Resend
     // are retired. The key is optional so a dev/CI boot without email still
@@ -109,12 +118,22 @@ const serverObjectSchema = z.object({
     // "it was never running" is exactly the failure this monitor exists to end.
     EMAIL_DELIVERY_HEALTH_ENABLED: z.enum(['true', 'false']).optional(),
     // How often the monitor runs AND how far back each run looks (one window
-    // per interval, no gaps, no overlap). Minutes, because an ops knob should
-    // be set in the unit a human reaches for.
+    // per slot; a missed slot, such as a restart across it, leaves that window
+    // unread). Minutes, because an ops knob should be set in the unit a human
+    // reaches for. Runs sit on the UTC wall clock
+    // (wallClockSchedule.ts), so the period must tile the day: a divisor of 60
+    // below an hour (5 minutes at the least), otherwise a whole number of hours
+    // dividing 24 (60, 120, 180, 240, 360, 480, 720, 1440). A bad value fails
+    // the boot.
     EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: z.coerce
         .number()
         .int()
         .positive()
+        .refine(isValidWallClockPeriodMinutes, {
+            // parseServerEnv prefixes the variable name, so it is not repeated here.
+            error: issue =>
+                `got ${String(issue.input)}; allowed: a divisor of 60 that is at least 5 (5, 6, 10, 12, 15, 20, 30), or whole hours dividing 24 (60, 120, 180, 240, 360, 480, 720, 1440)`,
+        })
         .default(60),
     // Destination inbox(es) for the user support/feedback flow (POST
     // /api/support). Accepts a COMMA-SEPARATED list ("a@x.com,b@y.com" — split

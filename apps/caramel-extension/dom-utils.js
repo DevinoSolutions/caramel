@@ -344,16 +344,39 @@ export async function waitUntilReady(rec, timeout = 2000) {
 const CARAMEL_CURRENCY_SYMBOLS = '$£€¥₹₩₪₺₽฿₫₴₦₱﷼¢ت'
 // Lowercase or non-Latin markers common enough to be worth naming explicitly.
 // Uppercase codes are matched by shape instead (see the pattern below).
-const CARAMEL_CURRENCY_WORDS = ['kr', 'zł', 'Kč', 'Ft', 'lei', 'zt', 'руб']
+const CARAMEL_CURRENCY_WORDS = [
+    'kr',
+    'zł',
+    'Kč',
+    'Ft',
+    'lei',
+    'zt',
+    'руб',
+    'грн',
+    'Rp',
+    '원',
+    '元',
+    '円',
+]
 const _caramelMarkerAlt = [
     `[${CARAMEL_CURRENCY_SYMBOLS}]`,
-    String.raw`\b[A-Z]{2,4}\$?`, // USD, AED, CHF, DT, RM, CA$, R$
+    // Marks with a letter shape the patterns below would miss or misread:
+    // R$ S$ A$ C$ (Brazil, Singapore, Australia, Canada: one letter before
+    // the $, where the code pattern needs two), Rs. (India, Pakistan), Fr.
+    // (Swiss francs), R (South Africa, only as a word of its own), and the
+    // dirham and riyal written in Arabic script.
+    String.raw`\b[RACS]\$|\bRs\.?(?![a-z])|\bFr\.(?![a-z])|د\.إ|ر\.س`,
+    String.raw`\b[A-Z]{2,4}\$?`, // USD, AED, CHF, DT, RM, CA$
+    String.raw`\bR\b`,
     CARAMEL_CURRENCY_WORDS.map(w =>
         w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
     ).join('|'),
 ].join('|')
-// Digits with either grouping convention: 1,234.56 / 1.234,56 / 1 234,56.
-const _caramelNumberPart = String.raw`\d{1,3}(?:[.,   ]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`
+// Digits with either grouping convention: 1,234.56 / 1.234,56 / 1 234,56,
+// the Swiss apostrophe grouping: CHF 1'249.90 / 1’249.90, and the Indian lakh
+// grouping: ₹1,23,456.00 (tried first: the others stop at "1,23" and read it
+// as 1.23, a hundred-thousandth of the price).
+const _caramelNumberPart = String.raw`\d{1,2}(?:,\d{2})+,\d{3}(?:\.\d{1,2})?|\d{1,3}(?:['’.,   ]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`
 const _caramelMoneyRe = new RegExp(
     `(?:(${_caramelMarkerAlt})\\s?(${_caramelNumberPart}))|(?:(${_caramelNumberPart})\\s?(${_caramelMarkerAlt}))`,
     'g',
@@ -392,6 +415,13 @@ export function caramelParseMoneyNumber(raw) {
 // Consumed by getPrice; pinned directly by tests.
 export function caramelFindMoney(text) {
     if (typeof text !== 'string' || !text) return []
+    // A label and a code-marked amount in adjacent inline elements read as one
+    // word ("TotalCHF 89.90"): no \b before the code, so no money at all.
+    // Same for the one-letter marks ("TotalRs. 1,23,456", "TotalS$ 129.00").
+    text = text.replace(
+        /([a-z])(?=(?:[A-Z]{2,4}\$?|[RACS]\$|Rs\.?|Fr\.|R)\s?\d)/g,
+        '$1 ',
+    )
     const out = []
     _caramelMoneyRe.lastIndex = 0
     let m
@@ -477,7 +507,7 @@ export function caramelBaselineFor(newTotal, prices = _caramelLastPrices) {
     const candidates = (prices || []).filter(p => !isNaN(p) && p >= newTotal)
     return candidates.length ? Math.min(...candidates) : NaN
 }
-// Consumed by UI-helpers.js when rendering a measured saving.
+// Consumed by final-modal.js when rendering a measured saving.
 export function caramelCurrencySymbol() {
     return _caramelLastCurrency || '$'
 }
@@ -494,14 +524,71 @@ export function caramelCurrencySymbol() {
 // Consumed by coupon-runner.js (cross-file content-script call).
 export function caramelCurrencyCode() {
     const marker = _caramelLastCurrency
-    const mapped = { '£': 'GBP', '€': 'EUR', '¥': 'JPY', '₹': 'INR' }[marker]
+    if (!marker || marker === '$' || marker === 'US$') return 'USD'
+    const mapped = CARAMEL_MARKER_CODES[marker]
     if (mapped) return mapped
-    // A marker the page wrote as letters IS the code the store uses (AED, CHF,
-    // DT). Pass it through rather than banking it as dollars: the popup totals
-    // per currency and falls back to "89.00 DT" for anything Intl can't format,
-    // which is honest, where calling it USD would not be.
-    if (typeof marker === 'string' && /^[A-Z]{2,4}$/.test(marker)) return marker
-    return 'USD'
+    // Kronor are Swedish, Norwegian, Danish or Icelandic: the store's own
+    // domain says which.
+    if (marker === 'kr' || marker === 'kr.') {
+        const tld = /\.([a-z]+)$/.exec(globalThis.location?.hostname || '')?.[1]
+        return { no: 'NOK', dk: 'DKK', is: 'ISK' }[tld] || 'SEK'
+    }
+    // A marker the page wrote as a three-letter code IS the code the store
+    // uses (AED, CHF). Anything else is passed as XXX, the ISO code for "no
+    // currency named": the account takes only ISO codes, and banking an
+    // unknown mark as dollars would add it to the shopper's dollar total.
+    if (/^[A-Z]{3}$/.test(marker)) return marker
+    return 'XXX'
+}
+
+// Every currency mark caramelFindMoney reads, as the ISO 4217 code the
+// savings history and the account are kept in. '¥' stays JPY (yuan pages
+// mostly write 元 or CNY); a bare '$' is USD (see caramelCurrencyCode).
+const CARAMEL_MARKER_CODES = {
+    '£': 'GBP',
+    '€': 'EUR',
+    '¥': 'JPY',
+    円: 'JPY',
+    '₹': 'INR',
+    Rs: 'INR',
+    'Rs.': 'INR',
+    '₩': 'KRW',
+    원: 'KRW',
+    元: 'CNY',
+    '₽': 'RUB',
+    руб: 'RUB',
+    '₺': 'TRY',
+    TL: 'TRY',
+    zł: 'PLN',
+    zt: 'PLN',
+    Kč: 'CZK',
+    Ft: 'HUF',
+    lei: 'RON',
+    '₪': 'ILS',
+    '₫': 'VND',
+    '฿': 'THB',
+    '₱': 'PHP',
+    '₦': 'NGN',
+    '₴': 'UAH',
+    грн: 'UAH',
+    Rp: 'IDR',
+    R$: 'BRL',
+    R: 'ZAR',
+    'Fr.': 'CHF',
+    DT: 'TND',
+    RM: 'MYR',
+    CA$: 'CAD',
+    C$: 'CAD',
+    AU$: 'AUD',
+    A$: 'AUD',
+    NZ$: 'NZD',
+    HK$: 'HKD',
+    S$: 'SGD',
+    NT$: 'TWD',
+    MX$: 'MXN',
+    'د.إ': 'AED',
+    'ر.س': 'SAR',
+    '﷼': 'SAR',
 }
 
 /* Set the symbol explicitly when the currency is known from data rather than
@@ -544,7 +631,9 @@ export function caramelSetCurrencySymbol(sym) {
  * visible, must not already be expanded, and must pass the order-button guard.
  * When nothing matches it returns null and behaviour is exactly as before.
  */
-const CARAMEL_MAX_DISCLOSURE_DEPTH = 6
+// Eight, as pickBestMatch: lindtusa.com's collapsed panel is the seventh
+// ancestor of its input.
+const CARAMEL_MAX_DISCLOSURE_DEPTH = 8
 // Consumed by store-detect.js and coupon-runner.js (cross-file calls).
 export function caramelDisclosureFor(el) {
     // Only ever for a box the shopper CAN'T see. A visible box needs no reveal.
@@ -582,8 +671,56 @@ export function caramelDisclosureFor(el) {
             const toggle = controllers.find(usable)
             if (toggle) return toggle
         }
+        // Magento's collapsible widget (mage/collapsible: the Luma cart's
+        // "Apply Discount Code", and themes that wrap the whole discount
+        // block in one): the closed panel is a [data-role="content"] whose
+        // header, the element just before it, is the [data-role="title"]
+        // the widget gives role="tab" and aria-expanded, but no
+        // aria-controls. lindtusa.com (2026-10-27): the box sits in such a
+        // panel, seven levels above the input, and the config's toggle
+        // selectors no longer match it.
+        if (
+            node.getAttribute('data-role') === 'content' ||
+            node.getAttribute('role') === 'tabpanel'
+        ) {
+            const header = node.previousElementSibling
+            if (
+                header &&
+                (header.getAttribute('data-role') === 'title' ||
+                    header.getAttribute('role') === 'tab') &&
+                usable(header)
+            )
+                return header
+        }
     }
     return null
+}
+
+/* The apply button of the box a config names, when the config's own apply
+ * selector matches nothing on the page. lindtusa.com (2026-10-27): its Amasty
+ * multi-coupon form ships Luma's box with the button renamed from
+ * `button.action.apply` to `button.amcoupons-apply`, so the config found the
+ * input and no button, and every code failed before it was typed.
+ *
+ * Found from the input itself and deliberately narrow: the input's own form,
+ * only when that form is the coupon box (the input is its one field a shopper
+ * types into) and has exactly one visible submit control. A form with a choice
+ * is not ours to guess in. The caller still runs every order-button guard. */
+const CARAMEL_TYPED_FIELD_SEL =
+    'input:not([type]), input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="search"], textarea'
+export function caramelSubmitBesideInput(input) {
+    const form = input?.form
+    if (!form) return null
+    const fields = Array.from(
+        form.querySelectorAll(CARAMEL_TYPED_FIELD_SEL),
+    ).filter(_isVisible)
+    if (fields.length !== 1 || fields[0] !== input) return null
+    const submits = Array.from(
+        form.querySelectorAll(
+            'button:not([type]), button[type="submit"], input[type="submit"]',
+        ),
+    ).filter(_isVisible)
+    return submits.length === 1 ? submits[0] : null
 }
 
 /* --------------------------------------------------  navigation handoff
@@ -839,7 +976,11 @@ export async function caramelClaimRunHop() {
         await caramelEndRun()
         return null
     }
-    const run = (await caramelTabHandoff('get', CARAMEL_RUN_KEY))?.value
+    // An unanswered read (null) is not "no run": ask once more, as a take does.
+    let answer = await caramelTabHandoff('get', CARAMEL_RUN_KEY)
+    if (answer === null)
+        answer = await caramelTabHandoff('get', CARAMEL_RUN_KEY)
+    const run = answer?.value
     if (!run) return null
     if (typeof run !== 'object' || run.cancelled) {
         await caramelEndRun()
@@ -865,6 +1006,48 @@ export async function caramelClaimRunHop() {
     if (saved?.saved !== 'saved') return null
     return { hops: hops + 1, remaining: CARAMEL_RUN_MAX_HOPS - (hops + 1) }
 }
+/* Whether the document a run is applying on has started to navigate away.
+ *
+ * A form-POST cart answers a code on the page its submit loads, and the store
+ * can be slower to send that POST than an attempt waits. 4inkjets.com
+ * (Magento, 2026-10-27, T-9245): the POST left 9 s after the click, one second
+ * before the 10 s wait ran out. The runner judged the code on the old page,
+ * cleared the pending submit the next page reads, ended the run, and drew its
+ * end card; the reload then wiped the card and loaded a page with nothing to
+ * resume. The shopper saw the run vanish.
+ *
+ * beforeunload fires when a cross-document navigation starts, before the
+ * request goes out, in every browser we ship to. The Navigation API's navigate
+ * event says the same thing a beat earlier where it exists; a same-document
+ * navigation (a SPA cart moving its address bar) is not leaving. Either can be
+ * cancelled after the fact, which is why the caller only ever WAITS on this
+ * and then carries on if the page is still here. */
+// Consumed by coupon-runner.js (cross-file content-script call).
+export function caramelWatchPageLeaving() {
+    let leaving = false
+    const onBeforeUnload = () => {
+        leaving = true
+    }
+    const onNavigate = e => {
+        if (e?.destination?.sameDocument === false) leaving = true
+    }
+    const nav = globalThis.navigation
+    window.addEventListener('beforeunload', onBeforeUnload)
+    nav?.addEventListener?.('navigate', onNavigate)
+    return {
+        isLeaving: () => leaving,
+        // A navigation that was cancelled (the page vetoed it, or a
+        // beforeunload prompt was answered "stay") leaves this document live.
+        reset: () => {
+            leaving = false
+        },
+        stop: () => {
+            window.removeEventListener('beforeunload', onBeforeUnload)
+            nav?.removeEventListener?.('navigate', onNavigate)
+        },
+    }
+}
+
 /* The × and Esc set _caramelCancelled, which dies with the document. A chain
  * spans documents, so "stop" has to be written down, and before the store's
  * form POST can take this document away: the stop mark is written at once,

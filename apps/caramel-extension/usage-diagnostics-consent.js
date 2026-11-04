@@ -1,4 +1,4 @@
-// owns: the anonymous-usage-diagnostics CONSENT record (usageDiagnosticsConsent
+// owns: the pseudonymous usage-diagnostics CONSENT record (usageDiagnosticsConsent
 // in chrome.storage.LOCAL), the per-device telemetry id that exists only while
 // that consent stands, and the Firefox data-collection grant that must back it.
 //
@@ -28,7 +28,8 @@
 // "skip", never "mint"), so a report racing a withdrawal cannot resurrect it. It
 // is NOT the install id (`iid`, install-attribution.js, which is tied to the
 // sign-up) and never a user id; withdrawing consent deletes it, so a later opt-in
-// starts a new, unlinked id.
+// starts a new id that we do not join to the old one.
+// Pseudonymous, not anonymous: the id still singles out one device while it exists.
 //
 // FIREFOX. The manifest lists `technicalAndInteraction` as an OPTIONAL data
 // collection permission (wxt.config.ts); Firefox shows its own prompt when we

@@ -2,13 +2,13 @@
     "ci": {
         "collect": {
             "url": [
-                "http://localhost:58000/",
-                "http://localhost:58000/coupons",
-                "http://localhost:58000/coupons/codecademy.com",
-                "http://localhost:58000/supported-stores",
-                "http://localhost:58000/pricing"
+                "http://localhost:28000/",
+                "http://localhost:28000/coupons",
+                "http://localhost:28000/coupons/codecademy.com",
+                "http://localhost:28000/supported-stores",
+                "http://localhost:28000/pricing"
             ],
-            "startServerCommand": "pnpm exec next start -p 58000",
+            "startServerCommand": "pnpm exec next start -p 28000",
             "startServerReadyPattern": "Ready",
             "startServerReadyTimeout": 60000,
             "numberOfRuns": 3,

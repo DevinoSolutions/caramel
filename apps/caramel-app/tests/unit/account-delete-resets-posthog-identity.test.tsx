@@ -95,6 +95,22 @@ describe('account deletion on /profile and the PostHog identity', () => {
         expect(String(fetchMock.mock.calls[0]![0])).toBe('/api/account/delete')
     })
 
+    it('resets the identity BEFORE redirecting to /login', async () => {
+        const order: string[] = []
+        resetMock.mockImplementation(() => order.push('reset'))
+        vi.stubGlobal('location', {
+            set href(value: string) {
+                order.push(`href:${value}`)
+            },
+        })
+        fetchMock.mockResolvedValue(Response.json({ deleted: true }))
+
+        await confirmAccountDelete()
+
+        await waitFor(() => expect(order).toContain('href:/login'))
+        expect(order).toEqual(['reset', 'href:/login'])
+    })
+
     it('does not reset when the deletion failed', async () => {
         fetchMock.mockResolvedValue(new Response('no', { status: 500 }))
 

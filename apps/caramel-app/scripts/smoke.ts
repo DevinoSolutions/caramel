@@ -186,7 +186,7 @@ export async function runSmoke(
 }
 
 async function main() {
-    const baseUrl = process.env.BASE_URL || 'http://localhost:58000'
+    const baseUrl = process.env.BASE_URL || 'http://localhost:28000'
     const healthSecret = process.env.UPKUMA_HEALTH_SECRET
     if (!healthSecret) {
         console.error(

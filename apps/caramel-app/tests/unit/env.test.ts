@@ -1,3 +1,4 @@
+import { authSecret } from '@/lib/authSecret'
 import { SERVER_ENV_KEYS, parseServerEnv } from '@/lib/env'
 import { BASE_URL, CLIENT_ENV_KEYS, parseClientEnv } from '@/lib/env.client'
 import fs from 'node:fs'
@@ -49,6 +50,73 @@ describe('parseServerEnv', () => {
         const { BETTER_AUTH_SECRET: _omit, ...rest } = validServerFixture
         expect(() => parseServerEnv(rest)).toThrow(/BETTER_AUTH_SECRET/)
         expect(() => parseServerEnv(rest)).toThrow(/JWT_SECRET/)
+    })
+
+    it('(q) EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES (T-9436): unset is 60, a period that tiles the UTC day parses, any other fails boot naming the variable, the value and the allowed set', () => {
+        expect(
+            parseServerEnv(validServerFixture)
+                .EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES,
+        ).toBe(60)
+        for (const good of ['5', '15', '60', '360', '1440']) {
+            expect(
+                parseServerEnv({
+                    ...validServerFixture,
+                    EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: good,
+                }).EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES,
+                good,
+            ).toBe(Number(good))
+        }
+        for (const bad of ['45', '90', '4', '1', '7']) {
+            const attempt = () =>
+                parseServerEnv({
+                    ...validServerFixture,
+                    EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: bad,
+                })
+            expect(attempt, bad).toThrow(
+                /EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: got \d+; allowed: a divisor of 60/,
+            )
+            expect(attempt, bad).toThrow(`got ${bad};`)
+            // The name appears once: parseServerEnv adds it, the message does not.
+            let message = ''
+            try {
+                attempt()
+            } catch (error) {
+                message = (error as Error).message
+            }
+            expect(
+                message.split('EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES').length,
+                bad,
+            ).toBe(2)
+        }
+    })
+
+    it('(p) DEV_PROOF_SESSION_SECRET (T-9413): unset is fine, a short or whitespace-only value fails boot, a 32+ character value parses trimmed', () => {
+        expect(
+            parseServerEnv(validServerFixture).DEV_PROOF_SESSION_SECRET,
+        ).toBeUndefined()
+        for (const bad of [
+            '',
+            'x'.repeat(31),
+            ' '.repeat(40),
+            `  ${'x'.repeat(31)}  `,
+        ]) {
+            expect(
+                () =>
+                    parseServerEnv({
+                        ...validServerFixture,
+                        DEV_PROOF_SESSION_SECRET: bad,
+                    }),
+                JSON.stringify(bad),
+            ).toThrow(/DEV_PROOF_SESSION_SECRET/)
+        }
+        const valid = 'k'.repeat(32)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                DEV_PROOF_SESSION_SECRET: `  ${valid}
+`,
+            }).DEV_PROOF_SESSION_SECRET,
+        ).toBe(valid)
     })
 
     it('(o) OPENROUTER_API_URL unset or blank defaults to https://openrouter.ai/api/v1; a set value loses its trailing slash; a non-URL fails boot', () => {
@@ -489,5 +557,27 @@ describe('.env.example drift', () => {
                 ),
             ),
         ).not.toThrow()
+    })
+})
+
+describe('authSecret (T-9424)', () => {
+    it('is BETTER_AUTH_SECRET when it is set', () => {
+        expect(
+            authSecret({ BETTER_AUTH_SECRET: 'better', JWT_SECRET: 'jwt' }),
+        ).toBe('better')
+    })
+
+    it('falls back to JWT_SECRET', () => {
+        expect(authSecret({ JWT_SECRET: 'jwt' })).toBe('jwt')
+    })
+
+    it('throws instead of signing with an empty key', () => {
+        expect(() => authSecret({})).toThrow(/no auth secret/i)
+    })
+
+    it('matches the env the server booted with', () => {
+        expect(authSecret()).toBe(
+            parseServerEnv().BETTER_AUTH_SECRET ?? parseServerEnv().JWT_SECRET,
+        )
     })
 })

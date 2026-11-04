@@ -42,6 +42,11 @@ function installRequest(
     })
 }
 
+/** The posthog-js persistence cookie a browser with `id` sends. */
+function phCookie(id: string): string {
+    return `ph_${TOKEN}_posthog=${encodeURIComponent(JSON.stringify({ distinct_id: id }))}`
+}
+
 const validBody = {
     store: 'chrome',
     extension_version: '1.4.6',
@@ -100,22 +105,50 @@ describe('POST /api/ext/installed', () => {
         })
     })
 
-    it('distinct id: body.distinct_id, else the PostHog cookie, else the install id', async () => {
-        await POST(installRequest({ ...validBody, distinct_id: 'browser-id' }))
-        expect(
-            posthogServerMock.captureServerEvent.mock.calls[0]![0].distinctId,
-        ).toBe('browser-id')
+    it('distinct id: the PostHog cookie on the request, else the install id', async () => {
+        // The real /welcome page: its body id IS its cookie id.
+        await POST(
+            installRequest(
+                { ...validBody, distinct_id: 'cookie-id' },
+                { cookie: phCookie('cookie-id') },
+            ),
+        )
+        const real = posthogServerMock.captureServerEvent.mock.calls[0]![0]
+        expect(real.distinctId).toBe('cookie-id')
+        expect(real.properties.browser_verified).toBe(true)
+        expect(real.properties).not.toHaveProperty('body_distinct_id_ignored')
 
-        const phCookie = `ph_${TOKEN}_posthog=${encodeURIComponent(JSON.stringify({ distinct_id: 'cookie-id' }))}`
-        await POST(installRequest(validBody, { cookie: phCookie }))
+        await POST(installRequest(validBody, { cookie: phCookie('cookie-id') }))
         expect(
             posthogServerMock.captureServerEvent.mock.calls[1]![0].distinctId,
         ).toBe('cookie-id')
 
         await POST(installRequest(validBody))
-        expect(
-            posthogServerMock.captureServerEvent.mock.calls[2]![0].distinctId,
-        ).toBe(IID)
+        const bare = posthogServerMock.captureServerEvent.mock.calls[2]![0]
+        expect(bare.distinctId).toBe(IID)
+        expect(bare.properties.browser_verified).toBe(false)
+    })
+
+    // T-6231: the body id used to win over everything, so the install was filed
+    // under whatever id the request body named.
+    it('a body distinct_id the request cookie does not carry is ignored, and the event says so', async () => {
+        await POST(installRequest({ ...validBody, distinct_id: 'other-id' }))
+        const forged = posthogServerMock.captureServerEvent.mock.calls[0]![0]
+        expect(forged.distinctId).toBe(IID)
+        expect(forged.properties).toMatchObject({
+            browser_verified: false,
+            body_distinct_id_ignored: true,
+        })
+
+        await POST(
+            installRequest(
+                { ...validBody, distinct_id: 'other-id' },
+                { cookie: phCookie('sender-id') },
+            ),
+        )
+        const swapped = posthogServerMock.captureServerEvent.mock.calls[1]![0]
+        expect(swapped.distinctId).toBe('sender-id')
+        expect(swapped.properties.body_distinct_id_ignored).toBe(true)
     })
 
     it('replies { captured: false } (never a bare 200 ok) when PostHog did not take the event', async () => {

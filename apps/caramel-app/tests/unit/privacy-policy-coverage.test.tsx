@@ -1,4 +1,8 @@
 import PrivacyPolicy from '@/components/PrivacyPolicy'
+import { faqItems } from '@/lib/faqItems'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
@@ -92,9 +96,43 @@ describe('privacy policy coverage', () => {
         // Not "the only analytics", and no unlinkability promise: IP and user
         // agent reach our server logs.
         expect(normalized).not.toMatch(/only analytics/i)
-        expect(normalized).not.toMatch(/can(no|')t be linked/i)
+        expect(normalized).not.toMatch(
+            /(cannot|can't|can never|never) be (linked|joined)/i,
+        )
         expect(normalized).not.toContain('anything that identifies you')
         expect(normalized).toContain('Effective Date: October 22, 2026')
+    })
+
+    it('the FAQ calls usage diagnostics pseudonymous, with no unlinkability promise', () => {
+        const answer = faqItems.find(
+            item =>
+                item.question ===
+                'What data does the Caramel extension collect?',
+        )?.answer
+        expect(answer).toContain('Diagnostics are pseudonymous, not anonymous')
+        expect(answer).not.toMatch(/only analytics/i)
+        expect(answer).not.toMatch(
+            /(cannot|can't|can never|never) be (linked|joined)/i,
+        )
+    })
+
+    // The reviewer's finding (overstated anonymity) started in code comments
+    // the next session copies into copy, so the server side of the pipeline is
+    // held to the same word. "not anonymous" is the one allowed spelling.
+    it.each([
+        'src/app/api/extension/telemetry/route.ts',
+        'src/lib/extensionActivity.ts',
+        'src/lib/analytics/codeShareFunnel.ts',
+    ])('%s does not call usage diagnostics anonymous', file => {
+        const appRoot = path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            '../..',
+        )
+        const source = fs.readFileSync(path.join(appRoot, file), 'utf8')
+        expect(source).not.toMatch(/(?<!not )anonym/i)
+        expect(source).not.toMatch(
+            /(cannot|can't|can never|never) be (linked|joined)|nothing here can/i,
+        )
     })
 
     it('discloses what the coupon-box finder and server pick send (wording delegated 2026-10-13)', () => {

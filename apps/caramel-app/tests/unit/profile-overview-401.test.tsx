@@ -28,7 +28,7 @@ vi.mock('@sentry/nextjs', () => ({
 }))
 
 const fetchMock = vi.fn()
-const assignMock = vi.fn()
+const replaceMock = vi.fn()
 const realLocation = window.location
 
 beforeEach(() => {
@@ -36,12 +36,12 @@ beforeEach(() => {
     promptSupportMock.mockReset()
     addBreadcrumbMock.mockReset()
     fetchMock.mockReset()
-    assignMock.mockReset()
+    replaceMock.mockReset()
     vi.stubGlobal('fetch', fetchMock)
-    // jsdom's Location.assign is not configurable; replace the whole object.
+    // jsdom's Location.replace is not configurable; replace the whole object.
     Object.defineProperty(window, 'location', {
         configurable: true,
-        value: { ...realLocation, assign: assignMock },
+        value: { ...realLocation, replace: replaceMock },
     })
 })
 
@@ -61,7 +61,7 @@ describe('useProfileOverview — 401 is a signed-out user (CARAMEL-N)', () => {
         const { result } = renderHook(() => useProfileOverview(true))
 
         await waitFor(() =>
-            expect(assignMock).toHaveBeenCalledWith('/login?next=%2Fprofile'),
+            expect(replaceMock).toHaveBeenCalledWith('/login?next=%2Fprofile'),
         )
         expect(endClientSessionMock).toHaveBeenCalledTimes(1)
         expect(promptSupportMock).not.toHaveBeenCalled()
@@ -81,12 +81,12 @@ describe('useProfileOverview — 401 is a signed-out user (CARAMEL-N)', () => {
             order.push('signOut')
             return true
         })
-        assignMock.mockImplementation(() => order.push('navigate'))
+        replaceMock.mockImplementation(() => order.push('navigate'))
         fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }))
 
         renderHook(() => useProfileOverview(true))
 
-        await waitFor(() => expect(assignMock).toHaveBeenCalled())
+        await waitFor(() => expect(replaceMock).toHaveBeenCalled())
         expect(order).toEqual(['signOut', 'navigate'])
     })
 
@@ -97,7 +97,7 @@ describe('useProfileOverview — 401 is a signed-out user (CARAMEL-N)', () => {
         renderHook(() => useProfileOverview(true))
 
         await waitFor(() =>
-            expect(assignMock).toHaveBeenCalledWith('/login?next=%2Fprofile'),
+            expect(replaceMock).toHaveBeenCalledWith('/login?next=%2Fprofile'),
         )
         expect(promptSupportMock).not.toHaveBeenCalled()
     })
@@ -118,7 +118,7 @@ describe('useProfileOverview — other failures keep the error path', () => {
         expect(arg.operation).toBe('profile_overview_load')
         expect(arg.error.message).toBe('Overview request failed with 500')
         expect(endClientSessionMock).not.toHaveBeenCalled()
-        expect(assignMock).not.toHaveBeenCalled()
+        expect(replaceMock).not.toHaveBeenCalled()
         expect(addBreadcrumbMock).not.toHaveBeenCalled()
     })
 
@@ -129,7 +129,7 @@ describe('useProfileOverview — other failures keep the error path', () => {
 
         await waitFor(() => expect(result.current.status).toBe('error'))
         expect(endClientSessionMock).not.toHaveBeenCalled()
-        expect(assignMock).not.toHaveBeenCalled()
+        expect(replaceMock).not.toHaveBeenCalled()
     })
 
     it('does not fetch at all while disabled', () => {

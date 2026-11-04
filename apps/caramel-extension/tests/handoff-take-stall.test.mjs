@@ -17,6 +17,7 @@ const {
     caramelHandoffMayExist,
     caramelTakePendingSubmit,
     caramelTakeAppliedWin,
+    caramelClaimRunHop,
 } = await import('../dom-utils.js')
 
 const HINT = 'caramel_handoff_hint'
@@ -25,7 +26,10 @@ const record = code => ({ value: { code, id: 7, prices: [50], t: Date.now() } })
 beforeEach(() => {
     calls.length = 0
     answers = []
-    sessionStorage.setItem(HINT, JSON.stringify(['pending_submit', 'applied']))
+    sessionStorage.setItem(
+        HINT,
+        JSON.stringify(['pending_submit', 'applied', 'run']),
+    )
 })
 
 describe('a take the background did not answer', () => {
@@ -64,5 +68,30 @@ describe('a take the background did not answer', () => {
         const win = await caramelTakeAppliedWin()
         expect(win).toMatchObject({ code: 'SAVE10', saved: 12.5 })
         expect(caramelHandoffMayExist('applied')).toBe(false)
+    })
+})
+
+// The next page of a run reads the run record before it claims a hop. An
+// unanswered read used to look like no run at all, and the run stopped after
+// one code (4inkjets.com, T-9245).
+describe('a run read the background did not answer', () => {
+    const run = { hops: 1, t: Date.now() }
+
+    it('is asked once more, and the hop is claimed from the retry', async () => {
+        answers = [null, { value: run }, { saved: 'saved' }]
+        expect(await caramelClaimRunHop()).toEqual({ hops: 2, remaining: 4 })
+        expect(calls).toEqual(['get run', 'get run', 'replace run'])
+    })
+
+    it('claims nothing when both asks go unanswered', async () => {
+        answers = [null, null]
+        expect(await caramelClaimRunHop()).toBeNull()
+        expect(calls).toEqual(['get run', 'get run'])
+    })
+
+    it('does not ask twice when the background answered there is no run', async () => {
+        answers = [{ value: null }]
+        expect(await caramelClaimRunHop()).toBeNull()
+        expect(calls).toEqual(['get run'])
     })
 })

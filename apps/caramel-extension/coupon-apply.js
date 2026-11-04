@@ -12,8 +12,10 @@ import { caramelLoadedFinder } from './coupon-box-finder-loader.js'
 import {
     _caramelLastPrices,
     _isVisible,
+    caramelDisclosureFor,
     caramelFormSubmitIsUnsafe,
     caramelIsForbiddenControl,
+    caramelSubmitBesideInput,
     getPrice,
     pickBestMatch,
     qAll,
@@ -93,9 +95,14 @@ export function findAppliedSelector(rec) {
  *
  * So read the row before believing it. This only ever REMOVES a success
  * signal, never invents one: a row that says nothing is still counted, exactly
- * as before. */
+ * as before.
+ *
+ * The Gap Inc. checkout (gap, gapfactory, oldnavy, bananarepublic, athleta)
+ * lists ANY code it was given under "Applied Promos", including one that saves
+ * nothing: "CARAMELTEST1 $0.00 No items in your bag qualify." (gap.com, live
+ * 2026-10-26). "Some items don't qualify" is left alone: that code did apply. */
 const CARAMEL_REJECTED_ROW_RE = new RegExp(
-    String.raw`\bnot\s+applied\b|\bnicht\s+angewendet\b|\bnon\s+appliqué`,
+    String.raw`\bnot\s+applied\b|\bnicht\s+angewendet\b|\bnon\s+appliqué|\bno\s+(?:items?|products?)\b[^.]{0,40}?\bqualif(?:y|ies)\b`,
     'i',
 )
 export function caramelRowReadsRejected(el) {
@@ -176,6 +183,83 @@ function _caramelInCartLine(btn, candidates, couponInput) {
     return false
 }
 
+/* The "are you sure?" step some carts put between the remove button and the
+ * removal. Salesforce Commerce Cloud (SFRA) carts open #removeCouponModal
+ * ("Remove Coupon? ... Yes / No") and remove the code only on its Yes
+ * (aquasana.com 2026-10-27): our click stopped at the dialog, the refused code
+ * stayed on the cart, and the next code was refused as "cannot be combined
+ * with other coupons already in your cart" (T-9569).
+ *
+ * Only the dialog the remove button itself names (data-target,
+ * data-bs-target, aria-controls), only while it is visible, only when it talks
+ * about a coupon, and only its confirm button. Returns whether it clicked. */
+const CARAMEL_REMOVE_DIALOG_TOPIC_RE = /coupon|promo|code|discount|voucher/i
+const CARAMEL_REMOVE_CONFIRM_TEXT_RE = /^(?:yes|remove|confirm|delete|ok)\b/i
+async function _caramelConfirmRemoveDialog(removeBtn) {
+    const named =
+        removeBtn.getAttribute('data-target') ||
+        removeBtn.getAttribute('data-bs-target') ||
+        (removeBtn.getAttribute('aria-controls')
+            ? '#' + removeBtn.getAttribute('aria-controls')
+            : '')
+    if (!named || !named.startsWith('#')) return false
+    const dialog = document.getElementById(named.slice(1))
+    if (!dialog) return false
+    // Bootstrap fades its backdrop in first and only then shows the dialog.
+    const openedBy = performance.now() + 2000
+    while (!_isVisible(dialog) && performance.now() < openedBy) await sleep(100)
+    if (!_isVisible(dialog)) {
+        log('REMOVE_DIALOG_NEVER_OPENED', { dialog: named })
+        return false
+    }
+    // Bootstrap ignores a hide asked for while the dialog is still fading in:
+    // a Yes clicked mid-fade removed the code but left the dialog open over
+    // the cart, and the next code's × then toggled it shut instead of opening
+    // it, so every other refused code stayed on the cart (aquasana.com,
+    // 2026-10-27). Let the fade finish first.
+    const settledBy = performance.now() + 1500
+    while (_caramelIsAnimating(dialog) && performance.now() < settledBy)
+        await sleep(50)
+    if (
+        !CARAMEL_REMOVE_DIALOG_TOPIC_RE.test(
+            dialog.innerText || dialog.textContent || '',
+        )
+    )
+        return false
+    const buttons = Array.from(dialog.querySelectorAll('button')).filter(
+        b => _isVisible(b) && !b.disabled && !caramelIsForbiddenControl(b),
+    )
+    const confirm =
+        buttons.find(b =>
+            b.classList.contains('delete-coupon-confirmation-btn'),
+        ) ||
+        buttons.find(b =>
+            CARAMEL_REMOVE_CONFIRM_TEXT_RE.test(
+                (b.innerText || b.textContent || '').trim(),
+            ),
+        )
+    if (!confirm) return false
+    confirm.click()
+    const closedBy = performance.now() + 3000
+    do await sleep(100)
+    while (_isVisible(dialog) && performance.now() < closedBy)
+    log(
+        _isVisible(dialog)
+            ? 'REMOVE_DIALOG_LEFT_OPEN'
+            : 'REMOVE_CONFIRMED_IN_DIALOG',
+        { dialog: named },
+    )
+    return true
+}
+
+// A running CSS transition or animation on the element or inside it.
+function _caramelIsAnimating(el) {
+    return (
+        typeof el.getAnimations === 'function' &&
+        el.getAnimations({ subtree: true }).some(a => a.playState === 'running')
+    )
+}
+
 /* Try to remove the coupon WE just applied. Returns true if a remove button was
  * clicked. Caller should wait for the cart to update.
  *
@@ -239,6 +323,7 @@ export async function removeAppliedCoupon(rec, options) {
         if (!btn) btn = candidates[candidates.length - 1]
         btn.click()
         await sleep(600)
+        await _caramelConfirmRemoveDialog(btn)
         log('Removed applied coupon via', sel)
         return true
     }
@@ -621,17 +706,40 @@ function detectCouponError(rec, baseline, code, priorText, alertsBefore) {
                 scope = scope.parentElement
                 continue
             }
-            const idx = Math.max(0, text.search(GENERIC_ERROR_TEXT_RE))
-            return text
-                .slice(Math.max(0, idx - 40), idx + 120)
-                .replace(/\s+/g, ' ')
-                .trim()
+            return caramelQuoteAround(
+                text,
+                Math.max(0, text.search(GENERIC_ERROR_TEXT_RE)),
+            )
         }
         scope = scope.parentElement
     }
     return readsLikeFound
         ? (_caramelPageAlertSaying(alertsBefore) ?? standing)
         : null
+}
+
+// The quote around the refusal words at `idx`: up to 40 characters before and
+// 120 after, cut at whole words and kept to the refusal's own line, so the
+// field's label and button on the lines above ("Promo code / Apply") stay out
+// of it. A fixed slice started mid-word: shoppers were shown, and reports
+// saved, "ly The promotional code you entered is not valid." (the tail of
+// "Apply"). Exported for tests.
+export function caramelQuoteAround(text, idx) {
+    let start = Math.max(0, idx - 40)
+    let end = Math.min(text.length, idx + 120)
+    const lineStart = text.lastIndexOf('\n', idx - 1) + 1
+    const lineEnd = text.indexOf('\n', idx)
+    if (lineStart > start) start = lineStart
+    else if (start > 0 && /\S/.test(text[start - 1])) {
+        const gap = text.slice(start, idx).search(/\s/)
+        start = gap === -1 ? idx : start + gap + 1
+    }
+    if (lineEnd !== -1 && lineEnd < end) end = lineEnd
+    else if (end < text.length && /\S/.test(text[end])) {
+        const lastGap = text.slice(idx, end).search(/\s\S*$/)
+        if (lastGap > 0) end = idx + lastGap
+    }
+    return text.slice(start, end).replace(/\s+/g, ' ').trim()
 }
 
 // A page's alert regions: where a cart that answers far from the box puts its
@@ -743,6 +851,12 @@ export function caramelSnapshotCart(rec, code = '') {
     // Snapshot DOM signals BEFORE we apply, so we can compare after.
     const appliedSel = findAppliedSelector(rec)
     const beforeAppliedNodes = caramelAcceptedRowCount(appliedSel)
+    // Which rows were already there, and what they said: the verdict's
+    // appliedRows lists only the ones the store drew for this submission (by
+    // node, and by text, since a re-render replaces every node).
+    const beforeEls = qAll(appliedSel)
+    const beforeAppliedRows = new Set(beforeEls)
+    const beforeAppliedTexts = new Set(beforeEls.map(_caramelRowOwnText))
     const errorBaseline = snapshotErrorState(rec)
     const priorAreaText = _caramelCouponAreaText(rec)
     const alertsBefore = _caramelReadsLikeFound(rec)
@@ -754,15 +868,63 @@ export function caramelSnapshotCart(rec, code = '') {
         originalPrices,
         appliedSel,
         beforeAppliedNodes,
+        beforeAppliedRows,
+        beforeAppliedTexts,
         errorBaseline,
         priorAreaText,
         alertsBefore,
     }
 }
 
+function _caramelRowOwnText(row) {
+    return ((row.innerText ?? row.textContent) || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
+/* The store's answer when it gives it as a row: a row the store drew for this
+ * submission, among its applied coupons, that says the code was not applied.
+ * Salesforce Commerce Cloud carts answer a code that exists but does not fit
+ * the cart this way, with no error text anywhere (aquasana.com 2026-10-27:
+ * "JULY50 NOT APPLIED ×" under .coupon-price-adjustment). The row was already
+ * refused as a success (caramelAcceptedRowCount), but nothing took it as an
+ * answer, so every such code read as silence and two of them ended the run as
+ * a checkout "not accepting injection", eight codes untried (T-9569). New by
+ * text, as the verdict's appliedRows: a re-render replaces every node. */
+function _caramelRejectedRowAnswer(appliedSel, beforeAppliedTexts) {
+    const row = qAll(appliedSel).find(
+        el =>
+            !beforeAppliedTexts.has(_caramelRowOwnText(el)) &&
+            caramelRowReadsRejected(el),
+    )
+    return row ? _caramelRowOwnText(row) || null : null
+}
+
+// An applied row's own text, and that text with up to two enclosing levels
+// (stopping below the one that holds the promo box, whose label would speak
+// for every row): a config can point at an element holding only the code,
+// while the line around it says "Gift Certificate". `levels`: how many were
+// read (0 = the promo box's own container held the row). Shopify measured
+// live 2026-10-26: #reduction-tags li reads "ADRIANR15 AdrianR15", and the
+// box's container is five levels up.
+function _caramelRowWithContext(row, input) {
+    const own = _caramelRowOwnText(row)
+    const parts = [own]
+    let el = row.parentElement
+    for (let d = 0; d < 2 && el && el !== document.body; d++) {
+        if (input && el.contains(input)) break
+        parts.push((el.innerText ?? el.textContent) || '')
+        el = el.parentElement
+    }
+    return { text: own, context: parts.join(' '), levels: parts.length - 1 }
+}
+
 /* Waits for the store's answer to `opts.code`, then applies the success rules.
  * Resolves { success, priceDropped, newTotal, committed, errorMsg, errorIsNew,
- * appliedRowsText }.
+ * answeredByRow (the store's answer was a "not applied" row: take it off),
+ * appliedRows (each row node drawn for THIS submission: { text, context,
+ * levels, textSeenBefore }),
+ * appliedRowsText (every applied row's text, joined) }.
  * `opts.timeoutMs` bounds the wait for the FIRST observable signal (default
  * 10s). `opts.redact` keeps the code and page text out of this helper's log
  * lines (used for shopper-typed codes). Callers must invoke this synchronously after the submission (or, for
@@ -781,6 +943,8 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         originalPrices,
         appliedSel,
         beforeAppliedNodes,
+        beforeAppliedRows,
+        beforeAppliedTexts,
         errorBaseline,
         priorAreaText,
         alertsBefore,
@@ -798,15 +962,26 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         // permanently latched to the empty placeholder's "" baseline.
         const baseErrEl = _firstVisibleErrorEl(rec)
         const baseErr = baseErrEl ? (baseErrEl.innerText || '').trim() : ''
+        // A store that answers every bad code with the same sentence (Shopify:
+        // "Enter a valid discount code or gift card") takes the previous code's
+        // sentence down and draws it again, so its text never differs from
+        // baseErr and each code after the first waited out the whole window
+        // (comfrt.com 2026-10-26: 10s a code, 4 of 8 codes in the budget,
+        // T-9176). Once that sentence has gone (blank or hidden at a read, or
+        // its node removed from the page), the error that comes back is the
+        // store's answer to this code. Only ends the wait; the verdict below
+        // still reads the error the way it always has.
+        let baseErrGone = false
         const startedAt = performance.now()
         while (performance.now() - startedAt < maxMs) {
             const nowSuccess = qAll(appliedSel).length
             if (nowSuccess > baseSuccess) return 'committed'
             const errEl = _firstVisibleErrorEl(rec)
-            if (errEl && _isVisible(errEl)) {
-                const t = (errEl.innerText || '').trim()
-                if (t.length && t !== baseErr) return 'errored'
-            }
+            const t =
+                errEl && _isVisible(errEl) ? (errEl.innerText || '').trim() : ''
+            if (baseErr && (!t || (baseErrEl && !baseErrEl.isConnected)))
+                baseErrGone = true
+            if (t.length && (t !== baseErr || baseErrGone)) return 'errored'
             await sleep(200)
         }
         return 'timeout-' + maxMs + 'ms'
@@ -1005,13 +1180,21 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     }
     // The store's answer is read around the box: the one it drew, if it did.
     if (rec.caramelFound) caramelRemarkFoundBox(false, rec)
-    const errorMsg = detectCouponError(
+    const errorText = detectCouponError(
         rec,
         errorBaseline,
         code,
         priorAreaText,
         alertsBefore,
     )
+    const rowAnswer = errorText
+        ? null
+        : _caramelRejectedRowAnswer(appliedSel, beforeAppliedTexts)
+    const errorMsg = errorText || rowAnswer
+    // The refused code stays on the cart as that row, and the next code is
+    // then refused for it ("Coupon cannot be combined with other coupons
+    // already in your cart", aquasana.com 2026-10-27): the runner takes it off.
+    const answeredByRow = !!rowAnswer
     // Quotable only if the store said it BECAUSE of us (see
     // _caramelCouponAreaText). Detection above is deliberately untouched.
     const errorIsNew = caramelQuoteIsAttributable(errorMsg, priorAreaText)
@@ -1113,12 +1296,21 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         : priceDropped || (committed && stuck) || (committed && !errorMsg)
     // What the applied rows SAY (only read when something committed): lets a
     // caller tell a row that names the code from a generic "redeemed" row.
-    const appliedRowsText = committed
-        ? qAll(appliedSel)
-              .filter(el => !caramelRowReadsRejected(el))
-              .map(el => (el.innerText ?? el.textContent) || '')
-              .join(' ')
-        : ''
+    const appliedEls = committed
+        ? qAll(appliedSel).filter(el => !caramelRowReadsRejected(el))
+        : []
+    const appliedRowsText = appliedEls
+        .map(el => (el.innerText ?? el.textContent) || '')
+        .join(' ')
+    const input = committed ? pickBestMatch(rec.couponInput) : null
+    // `textSeenBefore`: a new node saying what a row already said before the
+    // submission (a re-render, or the store re-drawing a code applied again).
+    const appliedRows = appliedEls
+        .filter(el => !beforeAppliedRows?.has(el))
+        .map(el => ({
+            ..._caramelRowWithContext(el, input),
+            textSeenBefore: !!beforeAppliedTexts?.has(_caramelRowOwnText(el)),
+        }))
     return {
         success,
         priceDropped,
@@ -1126,6 +1318,8 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         committed,
         errorMsg,
         errorIsNew,
+        answeredByRow,
+        appliedRows,
         appliedRowsText,
     }
 }
@@ -1164,8 +1358,12 @@ export async function applyCoupon(code, rec) {
              the input to become VISIBLE, not merely attached. */
         if (rec.caramelFound) caramelRemarkFoundBox(!!rec.caramelAnswer, rec)
         let input = pickBestMatch(rec.couponInput)
-        if ((!input || !_isVisible(input)) && rec.showInput) {
-            const showBtn = pickBestMatch(rec.showInput, input)
+        if (!input || !_isVisible(input)) {
+            // The config's toggle, else the disclosure the box itself declares
+            // (a config with no toggle, or one whose toggle no longer matches).
+            const showBtn =
+                (rec.showInput && pickBestMatch(rec.showInput, input)) ||
+                caramelDisclosureFor(input)
             if (caramelIsForbiddenControl(showBtn)) {
                 log('AUTO_INSERT_REFUSED_CONTROL', {
                     reason: 'showInput selector resolved to an order-completing control',
@@ -1188,7 +1386,16 @@ export async function applyCoupon(code, rec) {
                 input = pickBestMatch(rec.couponInput)
             }
         }
-        const applyBtn = pickBestMatch(rec.couponSubmit, input)
+        let applyBtn = pickBestMatch(rec.couponSubmit, input)
+        if (!applyBtn && input) {
+            // The config's apply selector matches nothing: the box's own
+            // form may still hold its one button (caramelSubmitBesideInput).
+            applyBtn = caramelSubmitBesideInput(input)
+            if (applyBtn)
+                log('APPLY_BUTTON_FROM_INPUT_FORM', {
+                    reason: "the config's apply selector matches nothing",
+                })
+        }
         // Refuse to drive a control that completes the order. A config whose
         // apply selector resolved here is wrong, and clicking it would spend
         // the user's money instead of saving it — treat it as no button at all.
@@ -1313,8 +1520,14 @@ export async function applyCoupon(code, rec) {
 
         /* 4] wait for result and read the verdict — see
              caramelAwaitCouponVerdict for the race and the success rules. */
-        const { success, newTotal, committed, errorMsg, errorIsNew } =
-            await caramelAwaitCouponVerdict(rec, snapshot, { code })
+        const {
+            success,
+            newTotal,
+            committed,
+            errorMsg,
+            errorIsNew,
+            answeredByRow,
+        } = await caramelAwaitCouponVerdict(rec, snapshot, { code })
         const elapsed = performance.now() - attemptStart
         log('AUTO_INSERT_ATTEMPT_END', code, {
             success,
@@ -1331,7 +1544,14 @@ export async function applyCoupon(code, rec) {
             errorMsg,
             elapsed,
         })
-        return { success, newTotal, committed, errorMsg, errorIsNew }
+        return {
+            success,
+            newTotal,
+            committed,
+            errorMsg,
+            errorIsNew,
+            answeredByRow,
+        }
     } catch (err) {
         logError('applyCoupon error', err)
         log('AUTO_INSERT_ATTEMPT_END', code, {

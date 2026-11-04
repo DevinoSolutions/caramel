@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runBridge } from '../../scripts/bridge-sync'
 
 // W4-D4 integration — the FULL bridge proven end-to-end against live local
-// Postgres (:58005), WITHOUT the real external caramel_coupons DB. We stand the
+// Postgres (:28005), WITHOUT the real external caramel_coupons DB. We stand the
 // external-shaped tables up in a dedicated `bridge_ext_test` schema and point a
 // porsager client (scoped to that schema via `-c search_path=`) at them, exactly
 // as runBridge() would see the real external DB. runBridge then reads (its
@@ -168,7 +168,7 @@ afterAll(async () => {
     await prisma.$disconnect()
 })
 
-describe('bridge sync — external SELECT -> map -> applyCatalogRows -> app tables (real pg :58005)', () => {
+describe('bridge sync — external SELECT -> map -> applyCatalogRows -> app tables (real pg :28005)', () => {
     it('Test 1 — initial replay inserts the mapped catalog into the app tables', async () => {
         const result = await runBridge(externalTestSql)
         expect(result.gated).toBe(false)

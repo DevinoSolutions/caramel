@@ -440,6 +440,65 @@ describe('isCheckout — cart intent the path does not spell out', () => {
         }
     })
 
+    // WooCommerce and PrestaShop translate their page slugs. A German Woo
+    // store's cart is /warenkorb/, its checkout /kasse/; English-only cart
+    // words left every such store's cart silent, promo box and total in view.
+    it('opens on a cart or checkout the store names in its own language', async () => {
+        for (const url of [
+            '/warenkorb/',
+            '/de/warenkorb',
+            '/kasse/',
+            '/winkelwagen',
+            '/winkelmand/',
+            '/afrekenen/',
+            '/carrito/',
+            '/es/carrito?step=1',
+            '/finalizar-compra/',
+            '/carrello/',
+            '/carrinho/',
+            '/koszyk/',
+            '/varukorg/',
+            '/kassa/',
+            '/ostoskori/',
+            '/handlekurv/',
+            // The words that are also products open only as a page of their own.
+            '/panier',
+            '/fr/panier?action=show',
+            '/commande',
+            '/fr/commande',
+            '/cesta',
+            '/kurv/',
+            '/caisse',
+            '/pagamento/',
+            '/kassan/',
+            '/zamowienie/',
+        ]) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(true)
+        }
+    })
+
+    it('does not read a product or category named with those words as a cart', async () => {
+        for (const url of [
+            '/products/panier-osier',
+            '/collections/panier',
+            '/products/panier',
+            '/c/cestas/cesta-mimbre',
+            '/products/cesta',
+            '/products/kurv-i-flet',
+            '/products/caisse-en-bois',
+            '/mon-compte/commandes',
+            '/mon-compte/commande/123',
+            '/products/carrito-de-golf',
+            '/products/carrello-portaspesa',
+            '/sparkasse',
+            '/blog/warenkorbabbruch-vermeiden',
+        ]) {
+            setPath(url)
+            expect(await isCheckout(), url).toBe(false)
+        }
+    })
+
     it('opens on a cart whose page slug carries a number (WordPress /cart-2/)', async () => {
         for (const url of ['/cart-2/', '/basket-3', '/cart-2/?coupon=1']) {
             setPath(url)

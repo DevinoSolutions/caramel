@@ -47,9 +47,21 @@ describe('caramelTabHandoff', () => {
         vi.useFakeTimers()
         answer = () => {}
         const pending = caramelTabHandoff('set', 'run', { hops: 0 })
-        await vi.advanceTimersByTimeAsync(3000)
+        await vi.advanceTimersByTimeAsync(10000)
 
         expect(await pending).toBeNull()
+    })
+
+    it('waits out a background held up by slow storage', async () => {
+        // A heavy store page loading: storage answered in 2-4.6 s, and the
+        // read queued behind the writes before it (4inkjets.com, T-9245).
+        vi.useFakeTimers()
+        answer = (_message, cb) =>
+            setTimeout(() => cb({ value: { hops: 1 } }), 6000)
+        const pending = caramelTabHandoff('get', 'run')
+        await vi.advanceTimersByTimeAsync(6000)
+
+        expect(await pending).toEqual({ value: { hops: 1 } })
     })
 
     it('answers null when the message cannot be sent', async () => {

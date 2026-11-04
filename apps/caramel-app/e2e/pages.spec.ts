@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 
 test.describe('Coupons Page', () => {
     test('coupons page loads with content', async ({ page }) => {

@@ -996,7 +996,29 @@ describe('the pick', () => {
         expect(captureExceptionMock).toHaveBeenCalledWith(
             expect.any(Error),
             expect.objectContaining({
+                level: 'error',
                 tags: expect.objectContaining({ surface: 'coupon-box-pick' }),
+                fingerprint: ['coupon-box-pick', 'model_call', 'error'],
+            }),
+        )
+    })
+
+    // T-7526: the upstream timeout (openrouter.ts aborts the fetch) used to be
+    // grouped by minified frames, so every release reopened it as a new issue.
+    it('a model timeout is a warning under one stable fingerprint', async () => {
+        chatMock.mockImplementation(async () => {
+            throw new DOMException('This operation was aborted', 'AbortError')
+        })
+        const res = await post({ domain: freshDomain(), outline: OUTLINE })
+        expect(await res.json()).toEqual({
+            outcome: 'no_pick',
+            reason: 'model_error',
+        })
+        expect(captureExceptionMock).toHaveBeenCalledWith(
+            expect.objectContaining({ name: 'AbortError' }),
+            expect.objectContaining({
+                level: 'warning',
+                fingerprint: ['coupon-box-pick', 'model_call', 'timeout'],
             }),
         )
     })

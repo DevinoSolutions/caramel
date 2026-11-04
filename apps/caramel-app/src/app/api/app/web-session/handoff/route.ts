@@ -11,48 +11,17 @@
 // a web page returns 401), no CORS headers are sent, and the code is single-use
 // with a 60 s TTL.
 import { handleRouteError } from '@/lib/api/handleRouteError'
+import { readBodyCapped } from '@/lib/api/readBodyCapped'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
 import prisma from '@/lib/prisma'
 import { checkRateLimit } from '@/lib/rateLimit'
+import { HandoffBody } from '@/lib/webSessionHandoff'
 import { createHash, randomBytes } from 'crypto'
 import { NextResponse, type NextRequest } from 'next/server'
-import { z } from 'zod'
 
-// Must start with one of these prefixes (or be exactly "/").
-const ALLOWED_NEXT_PREFIXES = ['/coupons', '/profile', '/welcome']
-
-const HandoffBody = z.object({
-    next: z
-        .string()
-        .max(512)
-        .refine(
-            s => {
-                // Must be a safe same-origin path
-                if (s === '/') return true
-                // Reject control characters, whitespace, backslash, // prefix.
-                // Check char codes instead of a regex to avoid the
-                // no-control-regex lint rule (oxlint does not support inline
-                // suppressions for it).
-                for (let i = 0; i < s.length; i++) {
-                    const c = s.charCodeAt(i)
-                    if (c <= 0x1f || c === 0x7f) return false
-                }
-                if (/\s/.test(s) || s.includes('\\')) return false
-                if (s.startsWith('//')) return false
-                // Reject anything with a scheme
-                if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) return false
-                // Reject percent-encoded CR/LF (header injection)
-                if (/%0[dDaA]/i.test(s)) return false
-                // Must start with one of the allowed prefixes
-                if (!ALLOWED_NEXT_PREFIXES.some(p => s.startsWith(p)))
-                    return false
-                // Must match the overall path shape
-                return /^\/(?!\/)[^\s\\]*$/.test(s)
-            },
-            { message: 'invalid next' },
-        ),
-})
+// The body is one short `next` path (max 512 chars): 4 KiB is generous.
+const MAX_BODY_BYTES = 4 * 1024
 
 export async function POST(req: NextRequest) {
     // No CORS — native caller, no Origin.
@@ -100,9 +69,24 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Parse and validate body ---
+    // Capped like every withRoute body (T-6223): this route skips withRoute
+    // for its bearer-only check, not for an unbounded read.
+    const body = await readBodyCapped(req, MAX_BODY_BYTES)
+    if (!body.ok) {
+        return NextResponse.json(
+            { error: 'payload too large' },
+            {
+                status: 413,
+                headers: {
+                    'Cache-Control': 'no-store',
+                    'Referrer-Policy': 'no-referrer',
+                },
+            },
+        )
+    }
     let raw: unknown
     try {
-        raw = await req.json()
+        raw = body.text ? JSON.parse(body.text) : undefined
     } catch {
         raw = undefined
     }

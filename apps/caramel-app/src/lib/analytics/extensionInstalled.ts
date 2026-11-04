@@ -53,6 +53,27 @@ function reportFailure(step: string, error: unknown, iid: string): void {
     })
 }
 
+/**
+ * The server POST is `keepalive`, so leaving /welcome (the Sign in link) does
+ * not cancel it: a rejection that still reaches us is a real network failure.
+ * It stays an error, but carries the page state so a failure while the page
+ * was already hidden / unloading (Safari may still reject then) is told apart
+ * from one on a visible page, and is a warning rather than an error.
+ */
+function reportServerFailure(error: unknown, iid: string): void {
+    const pageHidden = document.visibilityState === 'hidden'
+    console.error('[extension-installed] server_report failed', error)
+    Sentry.captureException(error, {
+        tags: { operation: 'extension_installed', step: 'server_report' },
+        level: pageHidden ? 'warning' : 'error',
+        extra: {
+            iid,
+            pageVisibility: document.visibilityState,
+            online: navigator.onLine,
+        },
+    })
+}
+
 function readGuard(key: string, iid: string): boolean {
     try {
         return window.localStorage.getItem(key) !== null
@@ -133,6 +154,9 @@ export async function recordExtensionInstalled(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
+            // Survives the user leaving /welcome mid-request (Sign in link).
+            // The body is a few hundred bytes, far under keepalive's 64 KiB cap.
+            keepalive: true,
         })
         if (!response.ok) {
             throw new Error(
@@ -151,7 +175,7 @@ export async function recordExtensionInstalled(
             )
         }
     } catch (error) {
-        reportFailure('server_report', error, iid)
+        reportServerFailure(error, iid)
         return 'failed'
     }
     writeGuard(`${SERVER_GUARD_PREFIX}${iid}`, iid)

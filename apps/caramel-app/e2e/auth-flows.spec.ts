@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test'
 import { seedVerifiedUser } from './support/seed-user'
+import { expect, test } from './support/test'
 
 // E-05 — the login SUCCESS path against a REAL better-auth session (every other
 // auth spec here mocks /api/auth/** via page.route; this one does not). A
@@ -15,7 +15,7 @@ const seedBaseURL =
     process.env.PLAYWRIGHT_BASE_URL ||
     process.env.BASE_URL ||
     process.env.NEXT_PUBLIC_BASE_URL ||
-    'http://localhost:58000'
+    'http://localhost:28000'
 
 test.describe('Auth Flows — Login (real session)', () => {
     test.skip(!SEEDABLE, 'needs a seedable local/CI Postgres (DATABASE_URL)')
@@ -417,6 +417,31 @@ test.describe('Auth Flows — Protected Routes', () => {
         await expect(page).toHaveURL(/\/login/, { timeout: 10000 })
     })
 
+    // CARAMEL-2Y / CARAMEL-30: the redirect used to push /login on top of
+    // /profile, so Back landed on /profile and bounced straight to /login
+    // again (in the app shells, a loop until WebKit refused pushState).
+    test('Back from the sign-in redirect does not bounce into /profile again', async ({
+        page,
+    }) => {
+        await page.route('**/api/auth/get-session', route =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify(null),
+            }),
+        )
+
+        await page.goto('/privacy')
+        await page.goto('/profile#favorites')
+        // The page it came from rides along, fragment included.
+        await expect(page).toHaveURL(/\/login\?next=%2Fprofile%23favorites$/, {
+            timeout: 10000,
+        })
+
+        await page.goBack()
+        await expect(page).toHaveURL(/\/privacy$/)
+    })
+
     test('profile page shows user data when authenticated', async ({
         page,
     }) => {
@@ -474,7 +499,11 @@ test.describe('Auth Flows — Protected Routes', () => {
         // rather than collapsing to an error or redirecting.
         // 15s headroom: in deployed mode the first client render right after a
         // deploy pays for cold chunks plus the stubbed get-session hydration
-        // (T-7525); the same 15000 used by the other deployed-mode specs.
+        // (T-7525); the same 15000 used by the other deployed-mode specs. More
+        // headroom would not help the one failure that still happened (T-9427):
+        // a prod deploy swapped containers mid-run, so the page's HTML and JS
+        // chunks came from different builds and it never hydrated. e2e-push
+        // handles that at the job level (run-e2e-push.sh), not here.
         await expect(
             page.getByRole('heading', { name: 'carameluser', level: 1 }),
         ).toBeVisible({ timeout: 15000 })

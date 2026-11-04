@@ -1,10 +1,10 @@
 // scripts/email-delivery-health.ts
 //
 // One-shot, on-demand run of the async email-delivery check that
-// src/lib/emailDeliveryHealthMonitor.ts otherwise runs on an interval inside the
+// src/lib/emailDeliveryHealthMonitor.ts otherwise runs on a wall-clock timer inside the
 // server process. Same core (src/lib/emailDeliveryHealth.ts), same PII-free
 // output — this is the ops handle for "did our mail actually get delivered?"
-// without waiting for the next interval or reading a Sentry issue.
+// without waiting for the next slot or reading a Sentry issue.
 //
 // Run it from INSIDE the prod container, where SENDLY_* already exist:
 //

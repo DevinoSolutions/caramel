@@ -152,7 +152,7 @@ export default defineConfig({
                 //     per-win {store, code, amountCents} records, and is
                 //     double-gated: sign-in AND an off-by-default toggle.
                 //   optional.technicalAndInteraction — 1.4.14: the opt-in
-                //     anonymous code-sharing funnel diagnostics
+                //     pseudonymous code-sharing funnel diagnostics
                 //     (code-share-funnel.js → POST /api/extension/telemetry):
                 //     which step of the offer was reached or why it stopped,
                 //     the store's domain, the extension version and browser.

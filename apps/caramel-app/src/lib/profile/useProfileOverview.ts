@@ -74,13 +74,15 @@ export function useProfileOverview(enabled: boolean): UseProfileOverviewResult {
                     await endClientSession()
                     // Clearing the session flips the page's own signed-out
                     // state, which disables this hook (cancelled) while
-                    // ProfilePageClient pushes /login itself; and a user who
-                    // already navigated away must not be pulled back. Either
-                    // way the navigation here is moot.
+                    // ProfilePageClient replaces itself with /login; and a user
+                    // who already navigated away must not be pulled back.
+                    // Either way the navigation here is moot.
                     if (cancelled) return
                     // Stays in 'loading' (the page's skeleton) until the
                     // navigation lands: no error notice flashes first.
-                    window.location.assign(LOGIN_PATH)
+                    // replace, not assign: Back from /login must not land on a
+                    // profile that sends the shopper straight back (CARAMEL-2Y).
+                    window.location.replace(LOGIN_PATH)
                     return
                 }
                 if (!res.ok) {

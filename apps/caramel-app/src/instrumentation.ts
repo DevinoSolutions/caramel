@@ -79,7 +79,7 @@ export async function register() {
     // 57 such rows on grabcaramel.com reached nobody) is Sendly accepting a
     // send with a 202 and the message later going BOUNCED/FAILED or never
     // leaving PENDING/SENDING. This starts the only schedule the app has: an
-    // unref'd interval on the one long-running process it owns. Dynamically imported for the same reason
+    // unref'd wall-clock timer (wallClockSchedule.ts) on the one long-running process it owns. Dynamically imported for the same reason
     // as the PostHog helper above (never load it into the edge runtime), and
     // the decision is LOGGED either way so "is the check running?" is never a
     // guess.

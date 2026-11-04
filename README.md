@@ -74,10 +74,10 @@ Prerequisites: [Docker](https://www.docker.com/) with Compose v2 (the one comman
     pnpm dev
     ```
 
-    `pnpm dev` is `docker compose up --build`: it builds the `web` image, boots **Postgres 18.4** + **web**, runs `prisma migrate deploy` automatically inside the container (creating **and seeding** the app-owned coupon catalog), and serves the app + API at **http://localhost:58000**. Local and CI run this same `docker-compose.yml` in prod-mode builds — and it is the deployment unit production migrates onto (cutover gated, human-run) — so what you run locally is what ships, which means **hot reload is deliberately traded away** (ratified 2026-07-09). When you want framework hot reload or to run one package on the host, bring up Postgres alone (`docker compose up postgres -d`) and use an escape hatch:
+    `pnpm dev` is `docker compose up --build`: it builds the `web` image, boots **Postgres 18.4** + **web**, runs `prisma migrate deploy` automatically inside the container (creating **and seeding** the app-owned coupon catalog), and serves the app + API at **http://localhost:28000**. Local and CI run this same `docker-compose.yml` in prod-mode builds — and it is the deployment unit production migrates onto (cutover gated, human-run) — so what you run locally is what ships, which means **hot reload is deliberately traded away** (ratified 2026-07-09). When you want framework hot reload or to run one package on the host, bring up Postgres alone (`docker compose up postgres -d`) and use an escape hatch:
 
     ```bash
-    pnpm dev:next        # web app on the host (Next.js dev server, :58000, hot reload)
+    pnpm dev:next        # web app on the host (Next.js dev server, :28000, hot reload)
     pnpm dev:extension   # the browser extension in a web-ext Chromium instance
     ```
 
@@ -98,7 +98,7 @@ Prerequisites: [Docker](https://www.docker.com/) with Compose v2 (the one comman
 **`DATABASE_URL` — provided by local compose, but verify the value:**
 
 ```
-postgresql://caramel:caramel_password@localhost:58005/caramel?schema=public
+postgresql://caramel:caramel_password@localhost:28005/caramel?schema=public
 ```
 
 This matches what `.env.example` ships — the compose Postgres creates exactly this `caramel` role (see `docker-compose.yml`).
@@ -119,8 +119,8 @@ The app serves its own coupon catalog from `DATABASE_URL`, so this is **unset in
 
 | Variable                                 | Shipped value                          |
 | ---------------------------------------- | -------------------------------------- |
-| `BETTER_AUTH_URL`                        | `http://localhost:58000`               |
-| `NEXT_PUBLIC_BASE_URL`                   | `http://localhost:58000`               |
+| `BETTER_AUTH_URL`                        | `http://localhost:28000`               |
+| `NEXT_PUBLIC_BASE_URL`                   | `http://localhost:28000`               |
 | `BCRYPT_SALT_ROUNDS`                     | `10`                                   |
 | `ALLOWED_ORIGINS`                        | blank (same-origin + extensions only)  |
 | `SENDLY_FROM_EMAIL` / `SENDLY_FROM_NAME` | `no_reply@grabcaramel.com` / `Caramel` |

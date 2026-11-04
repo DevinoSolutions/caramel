@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test'
+import { type Page } from '@playwright/test'
+import { expect, test } from './support/test'
 
 // /honey-extension answers the generic Honey queries ("honey extension",
 // "honey coupons", "honey chrome extension") that Search Console showed

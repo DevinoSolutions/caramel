@@ -168,7 +168,7 @@ describe('StoreCouponsPage — CouponListRow + TotalCountRow', () => {
         )
         expect(structuredData.numberOfItems).toBe(1)
         // url is built from BASE_URL (env.client), which Vitest resolves from
-        // the loaded .env locally (http://localhost:58000) but defaults to
+        // the loaded .env locally (http://localhost:28000) but defaults to
         // https://grabcaramel.com in CI where no .env exists — assert against
         // the same resolved BASE_URL the page uses so the pin is env-agnostic.
         expect(structuredData.itemListElement).toEqual([

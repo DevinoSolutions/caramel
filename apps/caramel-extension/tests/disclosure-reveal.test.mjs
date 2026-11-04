@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { caramelDisclosureFor } from '../dom-utils.js'
+import { caramelDisclosureFor, caramelSubmitBesideInput } from '../dom-utils.js'
 import { getDomainRecord, isCheckout } from '../store-detect.js'
 
 // "Is the promo box visible?" conflates two different pages: one where the
@@ -157,6 +157,126 @@ describe('caramelDisclosureFor', () => {
 
     it('handles a missing or unmatched box without throwing', () => {
         expect(caramelDisclosureFor(null)).toBeNull()
+    })
+})
+
+/** lindtusa.com's cart (2026-10-27), trimmed to its structure: Magento's
+ * collapsible widget wraps the whole discount block, so the closed panel is
+ * the input's seventh ancestor and its header carries no aria-controls. The
+ * config names `#block-discount-heading, .block.discount .title` as the
+ * toggle, and neither exists. */
+function magentoCollapsible({ expanded = 'false', header = 'title' } = {}) {
+    const headerAttrs =
+        header === 'title'
+            ? `data-role="title" role="tab" aria-expanded="${expanded}"`
+            : 'class="summary"'
+    document.body.innerHTML = `
+        <div class="block" data-collapsible="true" role="tablist">
+            <div id="opener" class="title" ${headerAttrs} tabindex="0"><strong>Enter Promotion Code</strong></div>
+            <div class="content" data-role="content" role="tabpanel" style="display:none">
+                <div id="block-discount" class="block discount">
+                    <div class="content" data-role="content">
+                        <form id="discount-coupon-form">
+                            <div class="fieldset amcoupons-main-container">
+                                <div class="field amcoupons-input"><div class="control">
+                                    <input id="promo" class="input-text" type="text" name="discount_code" />
+                                </div></div>
+                                <div class="actions-toolbar">
+                                    <button class="amcoupons-apply action primary" type="submit">Apply</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>`
+    return document.getElementById('opener')
+}
+
+describe("caramelDisclosureFor — Magento's collapsible widget", () => {
+    it('finds the header of the closed panel the box sits in', () => {
+        const opener = magentoCollapsible()
+
+        expect(caramelDisclosureFor(document.getElementById('promo'))).toBe(
+            opener,
+        )
+    })
+
+    it('does not click a header that says its panel is open', () => {
+        magentoCollapsible({ expanded: 'true' })
+
+        expect(
+            caramelDisclosureFor(document.getElementById('promo')),
+        ).toBeNull()
+    })
+
+    it('takes only the header the widget marks, not whatever comes before', () => {
+        magentoCollapsible({ header: 'none' })
+
+        expect(
+            caramelDisclosureFor(document.getElementById('promo')),
+        ).toBeNull()
+    })
+})
+
+describe('isCheckout — a config whose toggle no longer matches', () => {
+    it("offers help when the box's own panel header can open it", async () => {
+        getDomainRecord.cache = [
+            {
+                ...REC,
+                couponInput: '#promo',
+                showInput: '#block-discount-heading, .block.discount .title',
+            },
+        ]
+        magentoCollapsible()
+
+        expect(await isCheckout()).toBe(true)
+    })
+})
+
+describe('caramelSubmitBesideInput', () => {
+    const promo = () => document.getElementById('promo')
+
+    it("finds the one button of the box's own form", () => {
+        document.body.innerHTML = `
+            <form><input id="promo" /><button id="go" type="submit">Apply</button></form>`
+
+        expect(caramelSubmitBesideInput(promo()).id).toBe('go')
+    })
+
+    it('does not guess in a form with a choice of buttons', () => {
+        document.body.innerHTML = `
+            <form><input id="promo" />
+                <button type="submit">Apply</button>
+                <button type="submit">Remove</button></form>`
+
+        expect(caramelSubmitBesideInput(promo())).toBeNull()
+    })
+
+    it('leaves a form that asks for more than the code', () => {
+        // The coupon field inside a larger form (an address, an email): its
+        // one submit button sends that whole form, not the code.
+        document.body.innerHTML = `
+            <form><input id="email" type="email" /><input id="promo" />
+                <button type="submit">Continue</button></form>`
+
+        expect(caramelSubmitBesideInput(promo())).toBeNull()
+    })
+
+    it('needs a form to look in', () => {
+        document.body.innerHTML = '<input id="promo" /><button>Apply</button>'
+
+        expect(caramelSubmitBesideInput(promo())).toBeNull()
+        expect(caramelSubmitBesideInput(null)).toBeNull()
+    })
+
+    it('ignores a hidden button', () => {
+        document.body.innerHTML = `
+            <form><input id="promo" />
+                <button type="submit">Apply</button>
+                <button type="submit" style="display:none">Remove</button></form>`
+
+        expect(caramelSubmitBesideInput(promo()).textContent).toBe('Apply')
     })
 })
 

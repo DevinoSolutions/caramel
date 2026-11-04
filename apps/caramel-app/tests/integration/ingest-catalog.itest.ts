@@ -6,7 +6,7 @@ import prisma from '@/lib/prisma'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 // W3b integration — applyCatalogRows exercised against the REAL prisma client +
-// live local Postgres (:58005), catalog tables migrated (the harness/CI runs
+// live local Postgres (:28005), catalog tables migrated (the harness/CI runs
 // `prisma migrate deploy` first, which also applies the synthetic seed). Covers
 // the three behaviours the route unit test can't reach: only-if-newer, the >20%
 // tombstone force-gate, and transaction rollback on a mid-array failure. Test
@@ -62,7 +62,7 @@ afterAll(async () => {
     await prisma.$disconnect()
 })
 
-describe('applyCatalogRows — only-if-newer (real pg :58005)', () => {
+describe('applyCatalogRows — only-if-newer (real pg :28005)', () => {
     it('ignores an older-updated_at re-push and applies a newer one', async () => {
         const id = '800000001'
 

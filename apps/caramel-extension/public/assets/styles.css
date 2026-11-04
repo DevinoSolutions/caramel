@@ -1072,7 +1072,7 @@ body {
     background: var(--cm-brand-strong);
 }
 
-/* --- Anonymous-diagnostics ask (UsageDiagnosticsCard) -----------
+/* --- Pseudonymous-diagnostics ask (UsageDiagnosticsCard) -----------
    Shown once, until answered. "Allow" and "No thanks" share ONE rule: same
    size, weight and look, neither focused or pre-selected, so declining is
    exactly as easy as accepting. */

@@ -4,16 +4,27 @@
 //
 // Caramel has no cron, no worker and no queue — the Next.js server is the only
 // long-running process the app owns, so the lightest honest scheduler is an
-// unref'd interval started once from instrumentation.ts's register(). That is
-// deliberate and has two consequences worth knowing before you extend it:
+// unref'd wall-clock timer (wallClockSchedule.ts) started once from
+// instrumentation.ts's register(). That is deliberate and has two consequences
+// worth knowing before you extend it:
 //
 //   * one process = one schedule. The prod compose runs a single web container
 //     (compose-input-bluetooth-application-qvdfbq-web-1); if that ever becomes
 //     N replicas, N checks run and N Sentry events fire per bad hour. At that
 //     point this moves to a real scheduler — do not paper over it with a lock.
-//   * the first run happens one full interval AFTER boot, never at boot. A
-//     crash-looping container must not be able to machine-gun Sentry, and
-//     "email delivery in the last hour" is not a boot-time question anyway.
+//   * runs are pinned to the WALL CLOCK (minute 23 UTC for the default hourly
+//     period), never to boot, and never AT boot. A boot-relative interval
+//     starts counting at every restart, so deploys closer together than the
+//     interval starved it silently (T-9436, same bug as CARAMEL-39). A
+//     crash-looping container still cannot machine-gun Sentry: a boot just
+//     before a slot waits for the next one, and "email delivery in the last
+//     hour" is not a boot-time question anyway.
+//
+// Each run checks in to a Sentry cron monitor (in_progress, then ok or error),
+// so a run that never happens pages. 'ok' means the CHECK ran, even when it
+// found delivery problems (those are their own Sentry event below); 'error'
+// means it could not run: provider unreachable or refused, unusable sender,
+// Sendly unconfigured, a thrown cycle, or an overlapping cycle.
 //
 // On top of that, `lastSentryHourBucket` caps the alert rate at ONE Sentry event
 // per clock hour per process even if the interval is configured shorter.
@@ -27,17 +38,60 @@ import {
     type EmailDeliveryHealthReport,
 } from '@/lib/emailDeliveryHealth'
 import { env } from '@/lib/env'
+import { runCronJobWithCheckIn } from '@/lib/sentryCronCheckIn'
+import {
+    startWallClockTimer,
+    wallClockMonitorConfig,
+    type TimerStartDecision,
+    type WallClockMonitorConfig,
+    type WallClockSchedule,
+} from '@/lib/wallClockSchedule'
 import * as Sentry from '@sentry/nextjs'
 import 'server-only'
 
 const MINUTE_MS = 60_000
 const HOUR_MS = 60 * MINUTE_MS
 
-let timer: NodeJS.Timeout | null = null
+/**
+ * Minute 23 past UTC midnight, taken modulo the period: :23 every hour by
+ * default. Off the :00/:30 marks and away from the :07 reporter sweep and the
+ * :37 proposal sweep.
+ */
+const EMAIL_HEALTH_SLOT_OFFSET_MINUTES = 23
+export const EMAIL_HEALTH_MONITOR_SLUG = 'caramel-email-delivery-health'
+
+/**
+ * The run schedule: every EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES, which is also
+ * the window each run reads. Consecutive slots read consecutive windows, but a
+ * missed slot (a restart across it, or the boot guard) leaves its window unread,
+ * and timer lag shifts a window by milliseconds.
+ */
+export function emailDeliveryHealthSchedule(
+    periodMinutes: number,
+): WallClockSchedule {
+    return { periodMinutes, offsetMinutes: EMAIL_HEALTH_SLOT_OFFSET_MINUTES }
+}
+
+/**
+ * The cron monitor config, built from the same schedule as the timer. The
+ * margin is half the period (at most 30 minutes) so a short period's miss is
+ * noticed before the next slot; maxRuntime covers the page-budgeted Sendly
+ * reads plus the 2 s Sentry flush.
+ */
+export function emailDeliveryHealthMonitorConfig(
+    periodMinutes: number,
+): WallClockMonitorConfig {
+    return wallClockMonitorConfig(emailDeliveryHealthSchedule(periodMinutes), {
+        checkinMargin: Math.min(30, Math.floor(periodMinutes / 2)),
+        maxRuntime: 5,
+    })
+}
+
+let started = false
 let running = false
 let lastSentryHourBucket: number | null = null
 
-// The three above are module state on purpose: there is exactly one server
+// The state above is module state on purpose: there is exactly one server
 // process and exactly one schedule. Tests get a clean slate with
 // vi.resetModules() + a fresh dynamic import rather than a test-only reset
 // export (which knip would rightly call dead code in src/).
@@ -49,19 +103,13 @@ export interface EmailDeliveryHealthSettings {
     EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES?: number
 }
 
-export interface MonitorDecision {
-    enabled: boolean
-    /** Why it is (not) running — logged at boot so the posture is never a guess. */
-    reason: string
-}
-
 /**
  * Decide whether the monitor should run. Pure, so the whole default/override
  * matrix is a table test rather than a deploy-time surprise.
  */
 export function decideEmailDeliveryHealthMonitor(
     settings: EmailDeliveryHealthSettings,
-): MonitorDecision {
+): TimerStartDecision {
     const configured = Boolean(settings.SENDLY_API_KEY)
     if (settings.EMAIL_DELIVERY_HEALTH_ENABLED === 'false') {
         return {
@@ -167,42 +215,59 @@ export async function runEmailDeliveryHealthCycle(): Promise<EmailDeliveryHealth
 }
 
 /**
- * Start the interval. Idempotent (a second call is a no-op) and unref'd, so it
+ * One scheduled tick: the cycle, mapped onto a cron check-in. A cycle that
+ * completes (ok, degraded, incomplete) earns 'ok'; a check that could not run,
+ * a thrown cycle or a still-running previous cycle earns 'error'.
+ */
+function runMonitoredEmailHealthCycle(): Promise<void> {
+    return runCronJobWithCheckIn({
+        label: 'email-health',
+        monitorSlug: EMAIL_HEALTH_MONITOR_SLUG,
+        monitorConfig: emailDeliveryHealthMonitorConfig(
+            env.EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES,
+        ),
+        // Kept from before the cron monitor so alert rules keyed on it still match.
+        errorTags: { surface: 'email-delivery-health' },
+        run: async () => {
+            // Overlap guard: a slow provider must not stack cycles.
+            if (running) {
+                console.warn(
+                    '[email-health] previous cycle still running, skipped',
+                )
+                return 'error'
+            }
+            running = true
+            try {
+                const report = await runEmailDeliveryHealthCycle()
+                return report.status === 'error' || report.status === 'skipped'
+                    ? 'error'
+                    : 'ok'
+            } finally {
+                running = false
+            }
+        },
+    })
+}
+
+/**
+ * Start the schedule. Idempotent (a second call is a no-op) and unref'd, so it
  * never holds the process open. Returns the decision it acted on.
  */
-export function startEmailDeliveryHealthMonitor(): MonitorDecision {
+export function startEmailDeliveryHealthMonitor(): TimerStartDecision {
     const decision = decideEmailDeliveryHealthMonitor({
         NODE_ENV: process.env.NODE_ENV,
         SENDLY_API_KEY: env.SENDLY_API_KEY,
         EMAIL_DELIVERY_HEALTH_ENABLED: env.EMAIL_DELIVERY_HEALTH_ENABLED,
     })
-    if (!decision.enabled || timer) return decision
+    if (!decision.enabled || started) return decision
+    started = true
 
-    const intervalMs = env.EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES * MINUTE_MS
-    timer = setInterval(() => {
-        // Overlap guard: a slow provider must not stack cycles.
-        if (running) {
-            console.warn('[email-health] previous cycle still running, skipped')
-            return
-        }
-        running = true
-        // The interval callback cannot be awaited by anyone, so the failure
-        // path is handled HERE rather than left to an unhandled rejection —
-        // runEmailDeliveryHealthCycle itself never throws, and this catch is
-        // the belt to that braces.
-        void runEmailDeliveryHealthCycle()
-            .catch((error: unknown) => {
-                console.error('[email-health] cycle threw:', error)
-                Sentry.captureException(error, {
-                    tags: { surface: 'email-delivery-health' },
-                })
-            })
-            .finally(() => {
-                running = false
-            })
-    }, intervalMs)
-    // Never hold the process open for a health check. Guarded because a faked
-    // timer (vitest) is not always a real Node Timeout.
-    if (typeof timer.unref === 'function') timer.unref()
-    return decision
+    const { nextSlotAt } = startWallClockTimer({
+        name: 'email-health',
+        schedule: emailDeliveryHealthSchedule(
+            env.EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES,
+        ),
+        onSlot: runMonitoredEmailHealthCycle,
+    })
+    return { ...decision, reason: `${decision.reason}, next run ${nextSlotAt}` }
 }

@@ -45,6 +45,7 @@ import android.webkit.WebView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.devino.caramel.AppContainer
+import com.devino.caramel.BuildConfig
 import com.devino.caramel.core.OAuthProvider
 import com.devino.caramel.web.AccountAction
 import com.devino.caramel.web.AccountPanel
@@ -72,12 +73,14 @@ private fun ShellTab.icon(): ImageVector = when (this) {
 
 /**
  * The app shell: grabcaramel.com in a WebView under four tabs, plus the native sign-in sheet (the
- * only native screen left; Google refuses OAuth inside a WebView). The session store and the
+ * only native screen left; Google refuses OAuth inside a WebView). Google signs in through
+ * Credential Manager ([onStartGoogleSignIn]); Apple through the browser tab ([onStartSignIn]). The session store and the
  * Keystore-backed token live in [AppContainer].
  *
  * [requestedUrl] is an AppLinkGuard-approved URL from an intent (or null); the shell loads it and
  * calls [onRequestedUrlConsumed]. [notice] is a message for the shopper owned by the activity,
- * which also owns opening links outside ([onOpenOutside]).
+ * which also owns opening links outside ([onOpenOutside]). [devProofBearer] is the dev-only `devproof` build's session
+ * bearer from the launch intent (core/DevProofSession.kt); it is always null, and never read, in release.
  */
 @Composable
 fun CaramelApp(
@@ -87,7 +90,9 @@ fun CaramelApp(
     notice: String?,
     onNotice: (String?) -> Unit,
     onStartSignIn: (String) -> Unit,
+    onStartGoogleSignIn: (keepError: Boolean) -> Unit,
     onOpenOutside: (String) -> Unit,
+    devProofBearer: String?,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -164,14 +169,25 @@ fun CaramelApp(
                 container.session.signOut()
             }
             // A failed revoke from that sign-out stays on screen (keepError) instead of being cleared by the new sign-in.
-            container.session.beginSignIn(provider, keepError = hadToken)?.let(onStartSignIn)
+            when (provider) {
+                OAuthProvider.GOOGLE -> onStartGoogleSignIn(hadToken)
+                OAuthProvider.APPLE -> container.session.beginSignIn(provider, keepError = hadToken)?.let(onStartSignIn)
+            }
         }
     }
 
-    // Launch: read the stored bearer, then confirm it is still alive (a 401 clears it).
-    LaunchedEffect(Unit) {
+    // Launch: read the stored bearer, then confirm it is still alive (a 401 clears it). In the dev-only devproof build a
+    // bearer from the launch intent replaces the stored one in between and is linked to the web tabs like a fresh sign-in.
+    // The adoption lives in this one effect, after load(), so the store's own read can never land after it.
+    LaunchedEffect(devProofBearer) {
         container.session.load()
+        if (BuildConfig.DEV_PROOF && devProofBearer != null) {
+            container.session.adoptDevProofBearer(devProofBearer)
+        }
         container.session.validate()
+        if (BuildConfig.DEV_PROOF && devProofBearer != null && container.session.token != null) {
+            startHandoff(ShellTab.DEALS.startPath)
+        }
     }
 
     val host = remember(webViewGeneration) {
@@ -326,7 +342,7 @@ fun CaramelApp(
             title = { Text("Sign in to Caramel") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Sign-in opens in your browser, because Google does not allow it inside an app's web view.")
+                    Text("Google uses the accounts on this device. Apple sign-in opens in your browser.")
                     Button(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !session.isSigningIn,
