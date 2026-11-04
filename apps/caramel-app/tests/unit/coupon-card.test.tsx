@@ -150,8 +150,11 @@ describe('CouponCard — "Just worked" is Verified, never beside "Unverified"', 
 
 describe('CouponCard: keeps-failing codes lose the green Verified badge', () => {
     const verified = { ...baseCoupon, status: 'valid' as const }
-    const hoursAgo = (h: number) =>
-        new Date(Date.now() - h * 60 * 60 * 1000).toISOString()
+    // One clock per test: the card's `now` and the fixture time come from the
+    // same instant. Two Date.now() calls a millisecond apart made the fixture
+    // 2h minus 1 ms old, which the card floors to "1h ago" on a slow runner.
+    const hoursBefore = (now: number, h: number) =>
+        new Date(now - h * 60 * 60 * 1000).toISOString()
 
     it('a verified code shows the Verified badge', () => {
         render(<CouponCard now={Date.now()} coupon={verified} index={0} />)
@@ -159,15 +162,16 @@ describe('CouponCard: keeps-failing codes lose the green Verified badge', () => 
     })
 
     it('the same code flagged keepsFailing shows the "Reported not working" hint and NO Verified badge', () => {
+        const now = Date.now()
         render(
             <CouponCard
-                now={Date.now()}
+                now={now}
                 coupon={{
                     ...verified,
                     keepsFailing: true,
                     failCount: 4,
                     failWeight: 6,
-                    lastFailedAt: hoursAgo(2),
+                    lastFailedAt: hoursBefore(now, 2),
                 }}
                 index={0}
             />,
@@ -177,15 +181,16 @@ describe('CouponCard: keeps-failing codes lose the green Verified badge', () => 
     })
 
     it('a merely-failing code (not keepsFailing) keeps its badge: only the collapse tier drops it', () => {
+        const now = Date.now()
         render(
             <CouponCard
-                now={Date.now()}
+                now={now}
                 coupon={{
                     ...verified,
                     keepsFailing: false,
                     failCount: 2,
                     failWeight: 4,
-                    lastFailedAt: hoursAgo(2),
+                    lastFailedAt: hoursBefore(now, 2),
                 }}
                 index={0}
             />,

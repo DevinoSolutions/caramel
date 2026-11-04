@@ -23,7 +23,11 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn() } }))
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
-const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString()
+// One clock for the whole file: the card's `now` and every fixture time come
+// from the same instant. A fixture read a millisecond after `now` is 5h minus
+// 1 ms old, which the card floors to "4h ago" on a slow runner.
+const NOW = Date.now()
+const iso = (msAgo: number) => new Date(NOW - msAgo).toISOString()
 
 const baseCoupon: Coupon = {
     id: '4242',
@@ -68,14 +72,14 @@ afterEach(() => {
 
 describe('CouponCard — "Did it work?" control', () => {
     it('is absent until the shopper copies the code (so never in the server HTML)', () => {
-        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={NOW} coupon={baseCoupon} index={0} />)
 
         expect(screen.queryByText('Did it work?')).toBeNull()
         expect(screen.queryByRole('button', { name: /it worked/i })).toBeNull()
     })
 
     it('after the copy, shows labelled Yes / No buttons', async () => {
-        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={NOW} coupon={baseCoupon} index={0} />)
         await copyCode()
 
         expect(
@@ -89,7 +93,7 @@ describe('CouponCard — "Did it work?" control', () => {
 
     it('Yes POSTs outcome worked to the report endpoint, thanks the shopper, and remembers the vote', async () => {
         const fetchMock = stubFetch(okResponse)
-        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={NOW} coupon={baseCoupon} index={0} />)
         await copyCode()
         fireEvent.click(screen.getByRole('button', { name: 'Yes, it worked' }))
 
@@ -114,7 +118,7 @@ describe('CouponCard — "Did it work?" control', () => {
 
     it('No POSTs outcome failed', async () => {
         const fetchMock = stubFetch(okResponse)
-        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={NOW} coupon={baseCoupon} index={0} />)
         await copyCode()
         fireEvent.click(screen.getByRole('button', { name: "No, it didn't" }))
 
@@ -128,7 +132,7 @@ describe('CouponCard — "Did it work?" control', () => {
 
     it('the thanks is announced through a polite live region', async () => {
         stubFetch(okResponse)
-        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={NOW} coupon={baseCoupon} index={0} />)
         await copyCode()
         fireEvent.click(screen.getByRole('button', { name: 'Yes, it worked' }))
 
@@ -141,7 +145,7 @@ describe('CouponCard — "Did it work?" control', () => {
     it('a browser that already voted sees the thanks, not the question, and sends nothing', async () => {
         window.localStorage.setItem('caramel:coupon-vote:4242', 'failed')
         const fetchMock = stubFetch(okResponse)
-        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={NOW} coupon={baseCoupon} index={0} />)
         vi.stubGlobal('navigator', {
             ...navigator,
             clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -161,7 +165,7 @@ describe('CouponCard — "Did it work?" control', () => {
 
     it('a 429 is reported (not swallowed), shown, and leaves the card usable for a retry', async () => {
         stubFetch({ ok: false, status: 429, json: async () => ({}) })
-        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={NOW} coupon={baseCoupon} index={0} />)
         await copyCode()
         fireEvent.click(screen.getByRole('button', { name: 'Yes, it worked' }))
 
@@ -198,7 +202,7 @@ describe('CouponCard — "Did it work?" control', () => {
             status: 404,
             json: async () => ({ error: 'Unknown coupon' }),
         })
-        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={NOW} coupon={baseCoupon} index={0} />)
         await copyCode()
         fireEvent.click(screen.getByRole('button', { name: 'Yes, it worked' }))
 
@@ -217,7 +221,7 @@ describe('CouponCard — "Did it work?" control', () => {
 
     it('a 500 shows the generic message and is reported', async () => {
         stubFetch({ ok: false, status: 500, json: async () => ({}) })
-        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={NOW} coupon={baseCoupon} index={0} />)
         await copyCode()
         fireEvent.click(screen.getByRole('button', { name: "No, it didn't" }))
 
@@ -229,7 +233,7 @@ describe('CouponCard — "Did it work?" control', () => {
 
     it('a network failure is reported and shown, never swallowed', async () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('net')))
-        render(<CouponCard now={Date.now()} coupon={baseCoupon} index={0} />)
+        render(<CouponCard now={NOW} coupon={baseCoupon} index={0} />)
         await copyCode()
         fireEvent.click(screen.getByRole('button', { name: 'Yes, it worked' }))
 
@@ -247,7 +251,7 @@ describe('CouponCard — "Reported not working" hint', () => {
     it('shows with relative time for a recently failing code', () => {
         render(
             <CouponCard
-                now={Date.now()}
+                now={NOW}
                 coupon={{
                     ...baseCoupon,
                     failWeight: 4,
@@ -268,7 +272,7 @@ describe('CouponCard — "Reported not working" hint', () => {
         ]) {
             const { unmount } = render(
                 <CouponCard
-                    now={Date.now()}
+                    now={NOW}
                     coupon={{ ...baseCoupon, ...signal }}
                     index={0}
                 />,
@@ -281,7 +285,7 @@ describe('CouponCard — "Reported not working" hint', () => {
     it('replaces the "Worked Xh ago" line when the failure is newer than the success', () => {
         render(
             <CouponCard
-                now={Date.now()}
+                now={NOW}
                 coupon={{
                     ...baseCoupon,
                     failWeight: 4,
@@ -299,7 +303,7 @@ describe('CouponCard — "Reported not working" hint', () => {
     it('does not show (and the success line stays) once a worked quorum cleared the failures (failWeight 0)', () => {
         render(
             <CouponCard
-                now={Date.now()}
+                now={NOW}
                 coupon={{
                     ...baseCoupon,
                     failWeight: 0,
@@ -317,7 +321,7 @@ describe('CouponCard — "Reported not working" hint', () => {
     it('does not upgrade an Unverified code to Verified off a success the later failures superseded', () => {
         render(
             <CouponCard
-                now={Date.now()}
+                now={NOW}
                 coupon={{
                     ...baseCoupon,
                     status: 'pending',
@@ -336,7 +340,7 @@ describe('CouponCard — "Reported not working" hint', () => {
     it('words it as a report, with the provenance in the tooltip', () => {
         render(
             <CouponCard
-                now={Date.now()}
+                now={NOW}
                 coupon={{
                     ...baseCoupon,
                     failWeight: 4,
