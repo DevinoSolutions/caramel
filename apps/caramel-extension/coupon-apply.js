@@ -353,6 +353,15 @@ export async function removeAppliedCoupon(rec, options) {
 // two `.alert.alert--error` elements: a hidden empty placeholder and a
 // real one that fills with text. `qOne` would return the placeholder and
 // miss the real error. Iterate so we always observe the live one.
+// Did a config's own errorIndicator say `msg`? Its answers are read by its own
+// selector every time, so only a refusal read BESIDE the box (the generic
+// reader, detectCouponError) is kept as one the store may draw again
+// (_caramelStoreAnswers, T-13100).
+function _caramelSaidByIndicator(rec, msg) {
+    const el = _firstVisibleErrorEl(rec)
+    return !!el && _isVisible(el) && (el.innerText || '').trim() === msg
+}
+
 function _firstVisibleErrorEl(rec) {
     if (!rec.errorIndicator) return null
     const all = qAll(rec.errorIndicator)
@@ -519,11 +528,10 @@ function _caramelAnswerNodes() {
     }
     return found
 }
-function _caramelWatchRedraws(on, rec) {
+function _caramelWatchRedraws(rec) {
     _caramelRedraws?.stop()
     _caramelRedraws = null
     if (
-        !on ||
         !_caramelStoreAnswers.size ||
         typeof MutationObserver === 'undefined' ||
         !document.documentElement
@@ -1269,7 +1277,7 @@ export function caramelSnapshotCart(rec, code = '') {
         : null
     // Watched from here: the shopper's click (code-capture.js) is already the
     // submit. applyCoupon re-arms it at its own click.
-    const redraws = _caramelWatchRedraws(_caramelReadsLikeFound(rec), rec)
+    const redraws = _caramelWatchRedraws(rec)
     return {
         hasPriceCfg,
         original,
@@ -1404,6 +1412,9 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         )
     const priceEl = hasPriceCfg ? findPriceEl() : null
     const waiters = [waitForCartSignal(APPLY_WAIT_MS)]
+    // Set once the first waiter answers: the others stop reading the page
+    // instead of polling it until APPLY_WAIT_MS, into the next code's try.
+    let verdictDecided = false
     // A box the finder picked has no error or success selector of its own.
     // Two waiters stand in for them:
     //   · its small container (rec.caramelAnswer) saying a NEW rejection
@@ -1446,7 +1457,10 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         waiters.push(
             (async () => {
                 const startedAt = performance.now()
-                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                while (
+                    !verdictDecided &&
+                    performance.now() - startedAt < APPLY_WAIT_MS
+                ) {
                     const now = rejections()
                     // "Promo code applied. Cannot be combined with other
                     // offers." is an acceptance with a caveat: leave the
@@ -1467,17 +1481,23 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
             })(),
         )
     }
-    // A saved box (_caramelReadsLikeFound) has no rec.caramelAnswer: the
+    // A saved box (_caramelReadsLikeFound) has no rec.caramelAnswer, and a
+    // configured box's errorIndicator can miss the store's alert (BigCommerce's
+    // "Coupon does not apply", store.franklinplanner.com, T-13100): the
     // refusal is looked for around its input on each read, by the very reader
     // the verdict uses below, so the wait and the verdict agree on what the
     // store said. Only a sentence that was not there before we submitted ends
     // the wait.
-    if (_caramelReadsLikeFound(rec) && !rec.caramelFound) {
+    if (!rec.caramelFound) {
         waiters.push(
             (async () => {
                 const startedAt = performance.now()
-                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                while (
+                    !verdictDecided &&
+                    performance.now() - startedAt < APPLY_WAIT_MS
+                ) {
                     await sleep(200)
+                    if (verdictDecided) break
                     const said = detectCouponError(
                         rec,
                         errorBaseline,
@@ -1498,8 +1518,12 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         waiters.push(
             (async () => {
                 const startedAt = performance.now()
-                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                while (
+                    !verdictDecided &&
+                    performance.now() - startedAt < APPLY_WAIT_MS
+                ) {
                     await sleep(200)
+                    if (verdictDecided) break
                     if (_caramelPageAlertSaying(alertsBefore)) return 'answered'
                 }
                 return 'alert-timeout'
@@ -1510,8 +1534,12 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         waiters.push(
             (async () => {
                 const startedAt = performance.now()
-                while (performance.now() - startedAt < APPLY_WAIT_MS) {
+                while (
+                    !verdictDecided &&
+                    performance.now() - startedAt < APPLY_WAIT_MS
+                ) {
                     await sleep(250)
+                    if (verdictDecided) break
                     const now = _caramelFinderTotalAfter(rec, code)
                     if (Number.isFinite(now) && now !== original)
                         return 'total-moved'
@@ -1585,13 +1613,14 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         )
 
     const via = await Promise.race(waiters)
+    verdictDecided = true
     log('Wait finished via', via)
     // A refusal-shaped sentence can come a moment before the total it
     // belongs with ("Limit one offer per order" printed as the code applies).
     // Give the total a short grace to move before the verdict is read, and
     // the longer re-draw wait when the answer was only a refusal brought back
     // by a re-drawn promo box (_caramelWatchRedraws).
-    if (via === 'answered' && _caramelReadsLikeFound(rec) && hasPriceCfg) {
+    if (via === 'answered' && hasPriceCfg) {
         const startedAt = performance.now()
         const grace =
             snapshot.redraws?.wholeBox && !snapshot.redraws.own
@@ -1672,7 +1701,11 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // last read of the watch, which ends here.
     const errorIsNew = _caramelSaidSinceSubmit(errorMsg, priorAreaText)
     snapshot.redraws?.stop()
-    if (errorIsNew && !answeredByRow && _caramelReadsLikeFound(rec))
+    if (
+        errorIsNew &&
+        !answeredByRow &&
+        (_caramelReadsLikeFound(rec) || !_caramelSaidByIndicator(rec, errorMsg))
+    )
         _caramelStoreAnswers.add(_caramelNormalizeQuote(errorMsg))
     if (errorMsg && !errorIsNew) {
         // opts.redact: a SHOPPER-typed code (code-capture.js) never reaches a
