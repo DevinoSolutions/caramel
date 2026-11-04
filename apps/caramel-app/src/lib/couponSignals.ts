@@ -35,6 +35,8 @@ import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
     FAILING_WINDOW_MS,
     MAX_LOW_TRUST_FAIL_WEIGHT,
+    isRecentlyFailing,
+    isRecentlyRefused,
     keepsFailing,
 } from '@/lib/coupons'
 import {
@@ -688,6 +690,10 @@ export type CouponSignalOverlay = {
     failWeight: number
     /** coupons.ts keepsFailing(), decided server-side so the popup and the web agree. */
     keepsFailing: boolean
+    /** coupons.ts isRecentlyFailing(): the app sank this code below the rest of the list. */
+    recentlyFailing: boolean
+    /** coupons.ts isRecentlyRefused(): the app ordered this code after the unrefused codes of its proof tier (T-13810). The extension keeps that boundary when it ranks by value. */
+    recentlyRefused: boolean
 }
 
 const NO_SIGNAL: CouponSignalOverlay = {
@@ -696,6 +702,8 @@ const NO_SIGNAL: CouponSignalOverlay = {
     failCount: 0,
     failWeight: 0,
     keepsFailing: false,
+    recentlyFailing: false,
+    recentlyRefused: false,
 }
 
 /**
@@ -748,6 +756,8 @@ export async function attachSignals<T extends { id: string }>(
                 failCount: signal?.failCount ?? 0,
                 failWeight: signal?.failWeight ?? 0,
                 keepsFailing: signal ? keepsFailing(signal) : false,
+                recentlyFailing: signal ? isRecentlyFailing(signal) : false,
+                recentlyRefused: signal ? isRecentlyRefused(signal) : false,
             }
         })
     } catch (error) {

@@ -124,6 +124,8 @@ describe('GET /api/coupons — list+count (CouponListRow + TotalCountRow)', () =
             failCount: 0,
             failWeight: 0,
             keepsFailing: false,
+            recentlyFailing: false,
+            recentlyRefused: false,
         })
         expect(body.total).toBe(1)
         expect(body.hasMore).toBe(false)

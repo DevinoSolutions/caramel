@@ -46,6 +46,7 @@ import {
     FAILING_WINDOW_DAYS,
     KEEPS_FAILING_MIN_FAIL_WEIGHT,
     PROVEN_COUPON_STATUSES,
+    REFUSED_MIN_FAIL_WEIGHT,
     RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
@@ -158,6 +159,14 @@ const failingSinkSql = () => failingSignalIdsSql(FAILING_MIN_FAIL_WEIGHT)
  */
 const keepsFailingSql = () => failingSignalIdsSql(KEEPS_FAILING_MIN_FAIL_WEIGHT)
 
+/**
+ * SQL twin of coupons.ts's isRecentlyRefused(): the same predicate at
+ * REFUSED_MIN_FAIL_WEIGHT. proofTierSql orders it INSIDE a proof tier, so a
+ * code a store refused goes after the unrefused codes of its own tier and
+ * never crosses into another (T-13810).
+ */
+const refusedInTierSql = () => failingSignalIdsSql(REFUSED_MIN_FAIL_WEIGHT)
+
 const failingSignalIdsSql = (minFailWeight: number) => Prisma.sql`(id IN (
     SELECT s.coupon_id FROM coupon_signals s
     WHERE s.fail_weight >= ${minFailWeight}
@@ -182,10 +191,15 @@ const failingSignalIdsSql = (minFailWeight: number) => Prisma.sql`(id IN (
  * tier alone was not enough on shopmicas: its 20 highest-rated codes were also
  * `valid`, but one-time referral codes last proven 2026-10-27, and they still
  * filled page 1 ahead of the codes proven that day.
+ *
+ * Inside each tier, a code a store refused (refusedInTierSql) goes after the
+ * ones no store refused, before freshness of proof (T-13810). The proven and
+ * restricted keys come first because they are disjoint: together they name
+ * the tier, so the refused key can never move a code out of its own.
  */
 const proofTierSql = () => {
     const proven = Prisma.join([...PROVEN_COUPON_STATUSES])
-    return Prisma.sql`(status IN (${proven})) DESC, CASE WHEN status IN (${proven}) THEN updated_at END DESC NULLS LAST, (status IN (${Prisma.join([...RESTRICTED_COUPON_STATUSES])})) DESC`
+    return Prisma.sql`(status IN (${proven})) DESC, (status IN (${Prisma.join([...RESTRICTED_COUPON_STATUSES])})) DESC, ${refusedInTierSql()} ASC, CASE WHEN status IN (${proven}) THEN updated_at END DESC NULLS LAST`
 }
 
 /**
