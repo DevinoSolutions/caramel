@@ -106,7 +106,7 @@ describe('a saved box: the store refusing a code', () => {
             // It used to wait the whole 10 s window (T-13100,
             // store.franklinplanner.com): a refusal read beside a configured
             // box now ends the wait the way a saved box's does.
-            expect(ms).toBeLessThan(4000)
+            expect(ms).toBeLessThan(6000)
             // The plain reader still quotes a window around the words: the
             // field's label and the Apply button come with it.
             expect(res.errorMsg).not.toBe(REFUSAL)
@@ -296,7 +296,7 @@ describe('which configs read like a found box', () => {
 
             // Read the plain way: the window quote, not a found box's sentence.
             // The refusal the plain reader sees still ends the wait (T-13100).
-            expect(ms).toBeLessThan(4000)
+            expect(ms).toBeLessThan(6000)
             expect(res.errorMsg).not.toBe(REFUSAL)
         },
         SLOW,

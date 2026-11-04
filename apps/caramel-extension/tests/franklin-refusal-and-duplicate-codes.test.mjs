@@ -203,6 +203,35 @@ describe('franklinplanner: a refusal read beside a configured box ends the wait'
         expect(performance.now() - t0).toBeLessThan(6000)
     }, 30000)
 
+    it('a working code still wins when the gift-card refusal comes first and the total drops seconds later', async () => {
+        // Live 2026-11-04: BigCommerce tries every code as a gift certificate
+        // first ("Gift Certificate code `FPBDAY` is invalid") and only then
+        // applies it as a coupon; the total can take a few seconds to move.
+        document
+            .querySelector('[data-test="redeemableEntry-submit"]')
+            .addEventListener('click', () => {
+                setTimeout(() => {
+                    const box = document.createElement('div')
+                    box.className = 'alertBox alertBox--error'
+                    box.innerHTML =
+                        '<div class="alertBox-column alertBox-message" role="alert"></div>'
+                    box.firstChild.textContent =
+                        'Gift Certificate code `FPBDAY` is invalid'
+                    document.getElementById('field').prepend(box, '\n')
+                }, 150)
+                setTimeout(() => {
+                    document.querySelector(
+                        '[data-test="cart-total"]',
+                    ).textContent = 'GRAND TOTAL (USD) $15.60'
+                }, 3000)
+            })
+
+        const res = await applyCoupon('FPBDAY', FRANKLIN_REC)
+
+        expect(res.success).toBe(true)
+        expect(res.newTotal).toBe(15.6)
+    }, 20000)
+
     it('a sentence that was already up before the submit and is not drawn again still waits and is not quoted as new', async () => {
         // Furniture: the alert is on the page from the start, and the click
         // changes nothing.

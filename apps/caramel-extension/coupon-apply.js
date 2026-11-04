@@ -1506,7 +1506,9 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                         null,
                     )
                     if (said && _caramelSaidSinceSubmit(said, priorAreaText))
-                        return 'answered'
+                        return _caramelReadsLikeFound(rec)
+                            ? 'answered'
+                            : 'answered-beside'
                 }
                 return 'answer-timeout'
             })(),
@@ -1619,11 +1621,15 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // belongs with ("Limit one offer per order" printed as the code applies).
     // Give the total a short grace to move before the verdict is read, and
     // the longer re-draw wait when the answer was only a refusal brought back
-    // by a re-drawn promo box (_caramelWatchRedraws).
-    if (via === 'answered' && hasPriceCfg) {
+    // by a re-drawn promo box (_caramelWatchRedraws). A refusal read beside a
+    // configured box gets the longer wait too: BigCommerce first says "Gift
+    // Certificate code `X` is invalid" for EVERY code, a working one included,
+    // and only then applies it as a coupon (store.franklinplanner.com, T-13100).
+    if ((via === 'answered' || via === 'answered-beside') && hasPriceCfg) {
         const startedAt = performance.now()
         const grace =
-            snapshot.redraws?.wholeBox && !snapshot.redraws.own
+            via === 'answered-beside' ||
+            (snapshot.redraws?.wholeBox && !snapshot.redraws.own)
                 ? CARAMEL_REDRAW_WAIT_MS
                 : CARAMEL_ANSWER_GRACE_MS
         while (performance.now() - startedAt < grace) {
