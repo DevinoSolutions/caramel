@@ -218,7 +218,8 @@ describe('funnelReasonForSkipped: the worker gates mapped onto reasons', () => {
                 skipped === 'no-diagnostics-consent' ||
                 skipped === 'no-diagnostics-id' ||
                 skipped === 'not-chrome' ||
-                skipped === 'not-due'
+                skipped === 'not-due' ||
+                skipped === 'not-toolbar-popup'
             )
                 continue
             const reason = funnelReasonForSkipped(skipped)

@@ -153,13 +153,14 @@ export function afterLoginSuccess() {
 /* ------------------------------------------------------------ */
 /*  Daily-active event                                          */
 /* ------------------------------------------------------------ */
-// Opening the popup is the ONE qualifying use (guests and signed-in alike,
-// whatever view resolves). This only tells the worker; every decision (Google
-// Chrome, the server flag, the shopper's usage-diagnostics consent, once per
-// UTC day) is the worker's (background.js reportDailyActive), which also
-// outlives this page. main.tsx calls it after the first render and never
-// awaits it, so the popup paints the same with or without it. Resolves to the
-// worker's answer, or null when the message failed.
+// Opening the toolbar popup is the ONE qualifying use (guests and signed-in
+// alike, whatever view resolves). This only tells the worker; every decision
+// (the toolbar popup and not this page in a tab or window, Google Chrome, the
+// server flag, the shopper's usage-diagnostics consent, once per UTC day) is
+// the worker's (background.js), which also outlives this page. main.tsx calls
+// it after the first render and never awaits it, so the popup paints the same
+// with or without it. Resolves to the worker's answer, or null when the message
+// failed.
 export async function recordPopupActivity() {
     try {
         const resp = await caramelSendMessage({

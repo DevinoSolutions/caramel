@@ -1430,12 +1430,21 @@ export function initBackground() {
             } else if (message.action === 'recordExtensionActivity') {
                 // The daily-active event (extension-activity.js). Sent ONLY by
                 // the popup page on open (popup-core.js recordPopupActivity);
-                // refused from anywhere else — a content script or the apply
-                // flow must never count as a use. Done here, not in the popup,
-                // so closing the popup does not cancel the request mid-flight.
+                // refused from anywhere else — a content script must never
+                // count as a use. Done here, not in the popup, so closing the
+                // popup does not cancel the request mid-flight.
                 const popupUrl = currentBrowser.runtime.getURL('popup.html')
                 if (!sender?.url?.startsWith(popupUrl)) {
                     sendResponse({ error: 'not_popup' })
+                    return
+                }
+                // Only the toolbar popup counts. The same page in a tab or
+                // window (the apply flow's sign-in, a typed URL, a website's
+                // link: popup.html is web-accessible) has sender.tab, which
+                // the browser sets and the page cannot. An expected answer,
+                // not an error: nothing is read, written, sent or logged.
+                if (sender.tab) {
+                    sendResponse({ skipped: 'not-toolbar-popup' })
                     return
                 }
                 reportDailyActive()

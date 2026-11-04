@@ -169,8 +169,13 @@ async function waitForServiceWorker(context, timeout = 15000) {
  * features flag + usage-diagnostics consent gate in front of
  * POST /api/extension/telemetry (kind 'daily_active').
  *
- *   (a) every mode: the popup opened in step 7 had no diagnostics consent, so
- *       the worker must have written no activity state (and sent nothing).
+ * Only the toolbar popup counts, so the positive paths open the REAL one with
+ * chrome.action.openPopup (a page.goto is a tab, which the worker skips).
+ *
+ *   (a) every mode: a toolbar popup with no diagnostics consent: the worker
+ *       must write no activity state (and send nothing).
+ *   (a2) every mode: with consent seeded, popup.html in a TAB is skipped by the
+ *       worker as not-toolbar-popup, and sends nothing.
  *   CARAMEL_E2E_POSTHOG_MOCK_PORT set — the app runs with
  *     EXTENSION_DAU_TELEMETRY_ENABLED=true, POSTHOG_DATASET=e2e and its e2e
  *     PostHog host pointed at http://localhost:<port>, where THIS script
@@ -178,10 +183,11 @@ async function waitForServiceWorker(context, timeout = 15000) {
  *     posthog-node SDK in the real route sends to it, nothing reaches any real
  *     PostHog project, and what is verified is the capture REQUEST, not
  *     ingestion.
- *     (b) consent v2 + a diagnostics id are seeded, the popup opens and is
- *         closed mid-delivery: exactly one `extension_active` under the seeded
- *         id, no token/email on the wire, the day recorded by the worker;
- *     (c) a repeat open the same UTC day sends nothing.
+ *     (b) consent v2 + a diagnostics id are seeded, the toolbar popup opens
+ *         and loses focus (which closes it) mid-delivery: exactly one
+ *         `extension_active` under the seeded id, no token/email on the wire,
+ *         the day recorded by the worker;
+ *     (c) a repeat toolbar open the same UTC day sends nothing.
  *   unset — the app's own .env decides; with the default (flag off) the
  *     seeded consent must still produce no activity state: the extension
  *     reads the flag from /api/extension/features and fails closed. */
@@ -229,6 +235,30 @@ function findEvents(node, name, out = []) {
     return out
 }
 
+/** Opens the extension's real toolbar popup in the focused window. Throws (the
+ * suite fails loudly) if the browser refuses. */
+const openToolbarPopup = sw =>
+    sw.evaluate(async () => {
+        const win = await chrome.windows.getLastFocused()
+        await chrome.action.openPopup({ windowId: win.id })
+    })
+
+/** Focusing a page closes the toolbar popup; waits until the browser says so. */
+async function closeToolbarPopup(sw, page) {
+    await page.bringToFront()
+    const start = Date.now()
+    while (Date.now() - start < 5000) {
+        const open = await sw.evaluate(async () =>
+            chrome.runtime
+                .getContexts({ contextTypes: ['POPUP'] })
+                .then(contexts => contexts.length),
+        )
+        if (open === 0) return
+        await new Promise(r => setTimeout(r, 100))
+    }
+    throw new Error('the toolbar popup did not close')
+}
+
 const readActivityStorage = sw =>
     sw.evaluate(
         () =>
@@ -272,7 +302,11 @@ const seedDiagnosticsConsent = sw =>
 
 async function checkDailyActiveEvent(context, sw, extensionId) {
     const popupUrl = `chrome-extension://${extensionId}/popup.html`
+    const focusPage = await context.newPage()
     // (a) No diagnostics consent yet: nothing recorded, nothing sent.
+    await openToolbarPopup(sw)
+    await focusPage.waitForTimeout(1500)
+    await closeToolbarPopup(sw, focusPage)
     const before = await readActivityStorage(sw)
     log(
         'DAU: popup open without diagnostics consent sends nothing',
@@ -283,11 +317,31 @@ async function checkDailyActiveEvent(context, sw, extensionId) {
     await seedDiagnosticsConsent(sw)
     const mock = MOCK_PORT ? await startPosthogMock(MOCK_PORT, 1000) : null
     try {
-        const popup = await context.newPage()
-        await popup.goto(popupUrl)
+        // (a2) popup.html in a tab, with consent: the worker skips it, by its
+        // answer and not just by the state it did not write.
+        const tabPage = await context.newPage()
+        await tabPage.goto(popupUrl)
+        const tabAnswer = await tabPage.evaluate(() =>
+            chrome.runtime.sendMessage({ action: 'recordExtensionActivity' }),
+        )
+        await tabPage.waitForTimeout(1500)
+        await tabPage.close()
+        const afterTab = await readActivityStorage(sw)
+        log(
+            'DAU: popup.html in a tab is not a toolbar open — skipped, nothing sent',
+            tabAnswer?.skipped === 'not-toolbar-popup' &&
+                !afterTab.caramel_activity_state &&
+                !findEvents(
+                    (mock?.received ?? []).map(r => r.body),
+                    'extension_active',
+                ).length,
+            `answer=${JSON.stringify(tabAnswer)} state=${JSON.stringify(afterTab.caramel_activity_state ?? null)}`,
+        )
+
+        await openToolbarPopup(sw)
         if (!mock) {
-            await popup.waitForTimeout(2500)
-            await popup.close()
+            await focusPage.waitForTimeout(2500)
+            await closeToolbarPopup(sw, focusPage)
             const after = await readActivityStorage(sw)
             log(
                 'DAU: server flag off (app default) — consent alone sends nothing',
@@ -303,7 +357,7 @@ async function checkDailyActiveEvent(context, sw, extensionId) {
         const start = Date.now()
         while (!mock.received.length && Date.now() - start < 15000)
             await new Promise(r => setTimeout(r, 100))
-        await popup.close()
+        await closeToolbarPopup(sw, focusPage)
 
         const after = await waitForActivityState(sw, s => s?.sentDay)
         const today = new Date().toISOString().slice(0, 10)
@@ -340,10 +394,9 @@ async function checkDailyActiveEvent(context, sw, extensionId) {
         )
 
         // (c) Same-day repeat open: no second event.
-        const again = await context.newPage()
-        await again.goto(popupUrl)
-        await again.waitForTimeout(2500)
-        await again.close()
+        await openToolbarPopup(sw)
+        await focusPage.waitForTimeout(2500)
+        await closeToolbarPopup(sw, focusPage)
         const repeat = findEvents(
             mock.received.map(r => r.body),
             'extension_active',
@@ -354,6 +407,7 @@ async function checkDailyActiveEvent(context, sw, extensionId) {
             `events=${repeat.length}`,
         )
     } finally {
+        await focusPage.close()
         mock?.server.close()
         // Later steps must run without diagnostics consent, as before.
         await sw.evaluate(

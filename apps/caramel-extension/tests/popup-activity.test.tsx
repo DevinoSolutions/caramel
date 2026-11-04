@@ -17,6 +17,8 @@ type Reply = (resp: unknown) => void
 let sent: Msg[]
 let session: Record<string, unknown>
 let answerActivity: boolean
+let activityAnswer: unknown
+let storageWrites: unknown[]
 
 /* One permissive chrome stub for the whole file: caramel-base.js latches the
  * first currentBrowser it sees on the (per-file) jsdom window, so each test
@@ -41,7 +43,10 @@ function installChromeStub() {
     for (const area of ['sync', 'local', 'session']) {
         stub.storage[area].get = (_keys: unknown, cb: any) =>
             cb?.(area === 'local' ? session : {})
-        stub.storage[area].set = (_items: unknown, cb: any) => cb?.()
+        stub.storage[area].set = (items: unknown, cb: any) => {
+            storageWrites.push(items)
+            cb?.()
+        }
         stub.storage[area].remove = (_keys: unknown, cb: any) => cb?.()
     }
     stub.runtime.lastError = undefined
@@ -51,7 +56,7 @@ function installChromeStub() {
         sent.push(msg)
         if (msg.action === 'recordExtensionActivity') {
             // Never answering models a worker that is still delivering.
-            if (answerActivity) cb({ sent: true })
+            if (answerActivity) cb(activityAnswer)
             return
         }
         // No active tab: the popup resolves its "unsupported" view.
@@ -79,6 +84,8 @@ beforeEach(() => {
     sent = []
     session = {}
     answerActivity = true
+    activityAnswer = { sent: true }
+    storageWrites = []
 })
 
 describe('popup open → daily-active event', () => {
@@ -94,6 +101,26 @@ describe('popup open → daily-active event', () => {
 
         expect(activityMessages()[0]).toEqual(guest)
         expect(guest).toEqual({ action: 'recordExtensionActivity' })
+    })
+
+    // logError writes to storage; the error row proves this check can see it.
+    it.each([
+        [
+            'the worker skipping a non-toolbar page: not logged',
+            { skipped: 'not-toolbar-popup' },
+            false,
+        ],
+        ['a worker error: logged', { error: 'boom' }, true],
+    ])('%s', async (_label, answer, logged) => {
+        activityAnswer = answer
+
+        await openPopup()
+        await waitFor(() => expect(activityMessages()).toHaveLength(1))
+        await act(async () => {})
+
+        expect(
+            JSON.stringify(storageWrites).includes('recordPopupActivity'),
+        ).toBe(logged)
     })
 
     it('the popup paints without waiting on the worker’s answer', async () => {

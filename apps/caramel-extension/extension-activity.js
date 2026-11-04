@@ -4,8 +4,9 @@
 // WHAT IT IS. "Opted-in daily active Google Chrome installations", not total
 // DAU. background.js reportDailyActive sends it, in this order and failing
 // closed at each step:
-//   1. the popup was opened (popup-core.js recordPopupActivity, the ONLY
-//      trigger; the worker refuses the message from any other sender);
+//   1. the toolbar popup was opened (popup-core.js recordPopupActivity, the
+//      ONLY trigger; the worker refuses any other sender, and answers
+//      not-toolbar-popup when popup.html is open in a tab or window);
 //   2. detectStoreChannel() says Google Chrome (the Chrome zip also ships to
 //      Edge and is converted for Safari; Firefox is its own build);
 //   3. resolveUsageDiagnostics() — the shopper accepted usage diagnostics on

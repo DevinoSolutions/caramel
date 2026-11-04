@@ -7,6 +7,8 @@ import { FINDER_FLAG_MEMORY_KEY } from '../finder-flag-memory.js'
  * the network stubbed. It rides the existing opt-in usage-diagnostics pipeline
  * (usage-diagnostics-consent.js + POST /api/extension/telemetry), so what this
  * pins is the gating order and the delivery state:
+ *   - the toolbar popup only: popup.html in a tab or window (it has sender.tab)
+ *     is skipped before anything is read, written or sent;
  *   - Google Chrome only, by detectStoreChannel (the install classifier);
  *   - nothing — no request (not even the features read), no state, no id —
  *     without accepted usage-diagnostics consent (prompt version 2);
@@ -343,6 +345,50 @@ describe('reportDailyActive — what is sent', () => {
         ).toEqual({ error: 'not_popup' })
         expect(await open({})).toEqual({ error: 'not_popup' })
         expect(fetchCalls).toEqual([])
+    })
+
+    describe.each([
+        [
+            'the apply flow sign-in window',
+            {
+                url: `${EXT}popup.html?isPopup=true&callerId=4`,
+                tab: { id: 9, windowId: 8 },
+                frameId: 0,
+            },
+        ],
+        [
+            'bare popup.html in a tab (typed URL or a website link)',
+            {
+                url: `${EXT}popup.html`,
+                tab: { id: 9, windowId: 8 },
+                frameId: 0,
+            },
+        ],
+    ])('%s is not a toolbar popup open', (_label, sender) => {
+        // beforeEach has consent accepted and the flag on, so only the sender
+        // can be what stops these.
+        it('skips: no fetch at all, no storage write, the id untouched, nothing logged', async () => {
+            expect(await open(sender)).toEqual({
+                skipped: 'not-toolbar-popup',
+            })
+
+            expect(fetchCalls).toEqual([])
+            expect(localSets).toEqual([])
+            expect(STATE_KEY in localData).toBe(false)
+            expect(localData[ID_KEY]).toBe(TEST_ID)
+            expect(localData.caramel_bg_errors).toBeUndefined()
+        })
+
+        it('does not consume the day: the toolbar popup still sends once', async () => {
+            telemetryResponses.push(captured())
+
+            await open(sender)
+            expect(await open()).toEqual({ sent: true })
+            expect(await open()).toEqual({ skipped: 'not-due' })
+
+            expect(telemetryCalls()).toHaveLength(1)
+            expect(sentBody(0).id).toBe(TEST_ID)
+        })
     })
 
     it('delivery does not depend on the popup staying open', async () => {
