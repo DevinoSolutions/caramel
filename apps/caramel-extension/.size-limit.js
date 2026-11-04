@@ -266,7 +266,7 @@ module.exports = [
         // the page once one has answered (store.franklinplanner.com: each
         // refused code 10-12 s -> a few s; a working code the store answers
         // with a gift-card refusal first still gets 4 s for its total).
-        // Measured 112.32 kB (+0.14 kB).
+        // Measured 112.39 kB (+0.21 kB).
         limit: '112.4 KB',
         brotli: false,
     },

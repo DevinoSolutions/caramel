@@ -359,7 +359,13 @@ export async function removeAppliedCoupon(rec, options) {
 // (_caramelStoreAnswers, T-13100).
 function _caramelSaidByIndicator(rec, msg) {
     const el = _firstVisibleErrorEl(rec)
-    return !!el && _isVisible(el) && (el.innerText || '').trim() === msg
+    const said = (el?.innerText || '').trim()
+    return (
+        !!said &&
+        !!msg &&
+        _isVisible(el) &&
+        (said.includes(msg) || msg.includes(said))
+    )
 }
 
 function _firstVisibleErrorEl(rec) {
@@ -1505,10 +1511,14 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                         priorAreaText,
                         null,
                     )
-                    if (said && _caramelSaidSinceSubmit(said, priorAreaText))
-                        return _caramelReadsLikeFound(rec)
-                            ? 'answered'
-                            : 'answered-beside'
+                    if (!said) continue
+                    const saved = _caramelReadsLikeFound(rec)
+                    // A configured box whose own errorIndicator said it is
+                    // judged the way it always was; this waiter is for the
+                    // refusal the indicator missed.
+                    if (!saved && _caramelSaidByIndicator(rec, said)) continue
+                    if (_caramelSaidSinceSubmit(said, priorAreaText))
+                        return saved ? 'answered' : 'answered-beside'
                 }
                 return 'answer-timeout'
             })(),
