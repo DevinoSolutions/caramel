@@ -261,7 +261,11 @@ module.exports = [
         // its own reason, not only the last one (funko.com: 8 refused, 1
         // reported, so the other 7 kept leading the list). Measured 112.12 kB
         // (+0.02 kB).
-        limit: '112.2 KB',
+        // 2026-11-04 (T-13100), raised 112.2 -> 112.3 kB: a refusal read
+        // beside a configured box ends the wait, and the waiters stop reading
+        // the page once one has answered (store.franklinplanner.com: each
+        // refused code 10-12 s -> ~3 s). Measured 112.25 kB (+0.07 kB).
+        limit: '112.3 KB',
         brotli: false,
     },
     {
