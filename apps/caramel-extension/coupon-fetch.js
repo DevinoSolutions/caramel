@@ -252,11 +252,12 @@ export function caramelEstimatedValue(coupon, totalMinor) {
  * So a code never crosses a tier boundary of the list as served: each run of
  * same-tier codes is sorted by value, and the runs keep their order. A tier
  * that drops back (a proven code after an unverified one) is where the app
- * started a sunk group, and that boundary is kept too. So is every group the
- * app marks on a code (attachSignals: keepsFailing, recentlyFailing,
- * recentlyRefused): a code a store refused, or one the app sank, of the SAME
- * tier would otherwise share a run with the codes ahead of it and be lifted
- * back above them by value (T-13810). Stable inside a run, so
+ * started a sunk group, and that boundary is kept too. So are the groups the
+ * app marks on a code (attachSignals: recentlyFailing, recentlyRefused): a
+ * code a store refused, or one the app sank, of the SAME tier would otherwise
+ * share a run with the codes ahead of it and be lifted back above them by
+ * value (T-13810). Order only: the popup's collapse flag and the shopper's
+ * hide/vote never reach this path (coupon-vote.test.mjs). Stable inside a run, so
  * codes we can't value keep their original order: an unvalued coupon is
  * unknown, not worthless, and sinking it below a known-tiny one would be its
  * own way of losing money. */
@@ -270,7 +271,7 @@ export function caramelRankByValue(list, totalMinor) {
             const t = CaramelCoupons.STATUS_META?.[c?.status]?.tier
             const tier =
                 (t === 'green' || t === 'amber' ? t : '') +
-                (c?.keepsFailing ? 'k' : c?.recentlyFailing ? 'f' : '') +
+                (c?.recentlyFailing ? 'f' : '') +
                 (c?.recentlyRefused ? 'r' : '')
             if (i && tier !== prevTier) run++
             prevTier = tier
