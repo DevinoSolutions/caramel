@@ -278,7 +278,11 @@ module.exports = [
         // helpers moved here from the finder (about 1.4 kB of this, see the
         // finder's budget below); the rest is the new apply step. Measured
         // 115.83 kB (+3.31 kB).
-        limit: '116 KB',
+        // 2026-11-05 (T-11235), raised 116 -> 116.4 kB: a "no promo box on
+        // this page" card notes its page, and a later URL takes it down so the
+        // next checkout step is offered a run (Full Source's #shipping step
+        // went unoffered behind the info step's card). Measured 116.10 kB.
+        limit: '116.4 KB',
         brotli: false,
     },
     {
