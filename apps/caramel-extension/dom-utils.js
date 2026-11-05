@@ -1,4 +1,4 @@
-// owns: DOM visibility/wait helpers, price parsing, CSS/XPath query helpers, the mid-attempt navigation handoff (_isVisible, waitForVisible, pickBestMatch, waitForElement, waitForTotalChange, waitUntilReady, getPrice, _isXPath, qOne, qAll, caramel{Mark,Clear,Take}PendingSubmit, caramel{Hold,Take}AppliedWin)
+// owns: DOM visibility/wait helpers, a store's own overlays, price parsing, CSS/XPath query helpers, the mid-attempt navigation handoff (_isVisible, caramelVisible, caramelShownOverlays, caramelOverlayCloseControl, caramelPressEscape, waitForVisible, pickBestMatch, waitForElement, waitForTotalChange, waitUntilReady, getPrice, _isXPath, qOne, qAll, caramel{Mark,Clear,Take}PendingSubmit, caramel{Hold,Take}AppliedWin)
 // load after: caramel-base.js
 //
 // ES module since the WXT P1 port (2026-08-12). Module scope replaces the
@@ -7,7 +7,7 @@
 // content-script call are gone, because `export` is now that statement. The
 // file has NO top-level side effects — no listeners, no DOM reads, no chrome
 // API calls, no window publication — so it exports no init function.
-import { caramelTabHandoff, log } from './caramel-base.js'
+import { caramelTabHandoff, log, sleep } from './caramel-base.js'
 
 /* ---------- DOM waiters ---------- */
 /* ---------- visibility helpers ---------- */
@@ -26,6 +26,127 @@ export function _isVisible(el) {
     }
     return el.offsetParent !== null
 }
+
+const _caramelStyleOf = el => el.ownerDocument.defaultView.getComputedStyle(el)
+
+// Rendered AND given a box. An ancestor collapsed to zero height hides us
+// without a style of our own, so that is checked too.
+export function caramelVisible(el) {
+    if (!el || !el.isConnected || !_isVisible(el)) return false
+    const r = el.getBoundingClientRect()
+    if (r.width < 2 || r.height < 2) return false
+    let p = el.parentElement
+    for (let i = 0; i < 8 && p; i++, p = p.parentElement) {
+        const ps = _caramelStyleOf(p)
+        if (ps.overflow === 'hidden' && p.getBoundingClientRect().height < 2)
+            return false
+    }
+    return true
+}
+
+/* ---------- a store's own overlays ---------- */
+// Noted before something the extension does, and closed afterwards the way a
+// shopper would when that something opened one: the finder's undo of a reveal
+// click (coupon-box-discovery.js) and the apply flow's close of a store alert
+// that answered a code (coupon-apply.js).
+const DIALOG_SEL =
+    'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
+const OVERLAY_NAME_RE = /modal|popup|dialog|overlay|lightbox|drawer/i
+const CLOSE_NAME_RE = /\b(close|dismiss)\b/i
+const CLOSE_CLASS_RE = /(^|[\s_-])close($|[\s_-])/i
+const CLOSE_TEXT_RE = /^(close|dismiss|[×✕✖✗x])$/i
+
+const _caramelClassOf = el =>
+    typeof el.className === 'string'
+        ? el.className
+        : el.getAttribute('class') || ''
+
+// Marked or named as a popup, unlike a header pinned to the top of the page.
+export const caramelOverlayIsModal = el =>
+    el.matches(DIALOG_SEL) ||
+    OVERLAY_NAME_RE.test(_caramelClassOf(el) + ' ' + el.id)
+
+// A dialog, or anything pinned over the page (position: fixed), in view. Our
+// own prompt and cards are never the store's overlay.
+export function caramelOverlayShown(el) {
+    if (el.closest('[id^="caramel"]') || !caramelVisible(el)) return false
+    return el.matches(DIALOG_SEL) || _caramelStyleOf(el).position === 'fixed'
+}
+
+// Where a popup lives: an element the page marks as a dialog, a direct child
+// of <body> (where most popup scripts put theirs), or one named like one.
+// Only these are styled, so a long page is not read element by element.
+export function caramelShownOverlays(doc) {
+    const out = new Set()
+    if (!doc.body) return out
+    const candidates = new Set(doc.querySelectorAll(DIALOG_SEL))
+    for (const el of doc.body.children) candidates.add(el)
+    for (const el of doc.body.getElementsByTagName('*'))
+        if (OVERLAY_NAME_RE.test(_caramelClassOf(el) + ' ' + el.id))
+            candidates.add(el)
+    for (const el of candidates) if (caramelOverlayShown(el)) out.add(el)
+    return out
+}
+
+// The overlay's own close control: a control named close or dismiss (aria
+// label, title, class), or one whose whole text is "×". `refused` is what the
+// caller will not click on top of an order-completing control.
+export function caramelOverlayCloseControl(overlay, refused) {
+    const controls = overlay.querySelectorAll(
+        'button, [role="button"], a, input[type="button"], [class*="close"], [class*="Close"]',
+    )
+    for (const el of controls) {
+        const text = (el.innerText || el.textContent || el.value || '')
+            .toString()
+            .trim()
+            .toLowerCase()
+        const named =
+            CLOSE_NAME_RE.test(el.getAttribute('aria-label') || '') ||
+            CLOSE_NAME_RE.test(el.title || '') ||
+            CLOSE_CLASS_RE.test(_caramelClassOf(el)) ||
+            CLOSE_TEXT_RE.test(text)
+        if (
+            named &&
+            caramelVisible(el) &&
+            !caramelIsForbiddenControl(el) &&
+            !refused(el)
+        )
+            return el
+    }
+    return null
+}
+
+// Escape, as the key a shopper presses: popup scripts listen for it on the
+// page (keydown or keyup). A native <dialog> closes on the browser's own
+// Escape only, which a script's key event never reaches, so it is closed.
+export function caramelPressEscape(doc, overlays) {
+    const target = doc.activeElement || doc.body
+    const Key = doc.defaultView.KeyboardEvent
+    for (const type of ['keydown', 'keyup'])
+        target.dispatchEvent(
+            new Key(type, {
+                key: 'Escape',
+                code: 'Escape',
+                keyCode: 27,
+                which: 27,
+                bubbles: true,
+                cancelable: true,
+            }),
+        )
+    for (const o of overlays)
+        if (o.tagName === 'DIALOG' && o.open && typeof o.close === 'function')
+            o.close()
+}
+
+// Wait (briefly: a popup may fade out) until done() holds. true when it does.
+export async function caramelSettles(done) {
+    for (let waited = 0; waited < 1000; waited += 100) {
+        if (done()) return true
+        await sleep(100)
+    }
+    return done()
+}
+
 // Wait until the selector matches a VISIBLE element. waitForElement only waits
 // for presence — useless for reveal-toggles that unhide pre-rendered markup
 // (the input already "exists" while still display:none). Checks ALL matches,

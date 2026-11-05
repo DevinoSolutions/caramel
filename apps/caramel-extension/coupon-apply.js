@@ -15,7 +15,13 @@ import {
     caramelDisclosureFor,
     caramelFormSubmitIsUnsafe,
     caramelIsForbiddenControl,
+    caramelOverlayCloseControl,
+    caramelOverlayIsModal,
+    caramelOverlayShown,
+    caramelPressEscape,
     caramelPriceElement,
+    caramelSettles,
+    caramelShownOverlays,
     caramelSubmitBesideInput,
     getPrice,
     pickBestMatch,
@@ -1857,6 +1863,107 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     }
 }
 
+/* ------------------------------------- a store alert that answered a code */
+// A store can answer a code in a dialog over the page. Full Source's checkout
+// (T-11267): "Attention. Coupon code is invalid or unrecognized", its close
+// button the only way on. Left open, it covers the cart behind our card for the
+// rest of the run, and what it said is lost as the answer for that code.
+const _caramelOverlayWords = el =>
+    (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim()
+
+// The overlays showing before a code is typed. null when they cannot be read:
+// nothing can then be told apart as new, so nothing gets closed.
+function _caramelNoteOverlays() {
+    try {
+        const nodes = caramelShownOverlays(document)
+        return { nodes, words: new Set([...nodes].map(_caramelOverlayWords)) }
+    } catch (err) {
+        logError('AUTO_INSERT_OVERLAYS_UNREAD', err)
+        return null
+    }
+}
+
+// Opened during this try, about a code, and nothing to fill in. A dialog holding
+// a field may be the coupon box itself or an address form, and a chat prompt or
+// cookie notice that happens to open now is not ours to close. The same words as
+// one already open mean the store drew that dialog again as a new node.
+function _caramelAnswersTheCode(el, words, before, code) {
+    if (before.words.has(words)) return false
+    if ([...before.nodes].some(open => el.contains(open))) return false
+    if (el.querySelector('input:not([type="hidden"]), select, textarea'))
+        return false
+    return (
+        _caramelNamesCoupon(words) ||
+        _caramelFinderSaysNo(words) ||
+        (code.length >= 3 && words.toLowerCase().includes(code.toLowerCase()))
+    )
+}
+
+// A close control must stay on the page: a link elsewhere or a form's submit
+// button does more than close.
+function _caramelCloseLeavesPage(el) {
+    const href = el.closest('a[href]')?.getAttribute('href')?.trim()
+    if (href && !/^(#|javascript:)/i.test(href)) return true
+    return (
+        !!el.form &&
+        ((el.tagName === 'BUTTON' && el.type === 'submit') ||
+            (el.tagName === 'INPUT' && /^(submit|image)$/i.test(el.type)))
+    )
+}
+
+/* Close what the store opened to answer this code, reading it first: its own
+ * close control, else Escape, which is held back while any other dialog shows
+ * because Escape could close that one too. Returns the refusal it held, if it
+ * held one. Never throws: a page that breaks this has not changed the verdict. */
+async function _caramelCloseStoreAlert(before, code) {
+    if (!before) return null
+    try {
+        const shown = [...caramelShownOverlays(document)]
+        const now = shown.filter(el => !before.nodes.has(el))
+        const alerts = now
+            .filter(el => !now.some(o => o !== el && o.contains(el)))
+            .filter(el =>
+                _caramelAnswersTheCode(
+                    el,
+                    _caramelOverlayWords(el),
+                    before,
+                    code,
+                ),
+            )
+        if (!alerts.length) return null
+        const said = alerts
+            .map(el => _caramelSmallestSaying(el, ''))
+            .find(Boolean)
+        const showing = () => alerts.filter(caramelOverlayShown)
+        const tried = []
+        for (const el of alerts) {
+            const x = caramelOverlayCloseControl(el, _caramelCloseLeavesPage)
+            if (!x) continue
+            tried.push('close')
+            x.click()
+            await caramelSettles(() => !caramelOverlayShown(el))
+        }
+        const otherDialog = shown.some(
+            el =>
+                caramelOverlayIsModal(el) &&
+                caramelOverlayShown(el) &&
+                !alerts.some(a => a.contains(el) || el.contains(a)),
+        )
+        if (showing().length && !otherDialog) {
+            tried.push('escape')
+            caramelPressEscape(document, showing())
+            await caramelSettles(() => !showing().length)
+        }
+        const closed = !showing().length
+        log('AUTO_INSERT_STORE_ALERT', { said, tried, closed })
+        recordTiming('AUTO_INSERT_STORE_ALERT', { code, tried, closed })
+        return said ?? null
+    } catch (err) {
+        logError('AUTO_INSERT_STORE_ALERT_FAILED', err)
+        return null
+    }
+}
+
 /* --------------------------------------------------  coupon attempt */
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it) and from
@@ -1968,6 +2075,7 @@ export async function applyCoupon(code, rec) {
         // Everything the verdict will be compared against, captured BEFORE we
         // touch the page (see caramelSnapshotCart).
         const snapshot = caramelSnapshotCart(rec, code)
+        const overlaysBefore = _caramelNoteOverlays()
 
         /* 3] fill & apply — choose method dynamically:
              a) if applyBtn === input → auto-validate on input event
@@ -2056,14 +2164,20 @@ export async function applyCoupon(code, rec) {
 
         /* 4] wait for result and read the verdict — see
              caramelAwaitCouponVerdict for the race and the success rules. */
-        const {
-            success,
-            newTotal,
-            committed,
-            errorMsg,
-            errorIsNew,
-            answeredByRow,
-        } = await caramelAwaitCouponVerdict(rec, snapshot, { code })
+        const verdict = await caramelAwaitCouponVerdict(rec, snapshot, { code })
+        const { success, newTotal, committed, answeredByRow } = verdict
+        let { errorMsg, errorIsNew } = verdict
+        const alertSaid = await _caramelCloseStoreAlert(overlaysBefore, code)
+        // The alert's own sentence beats a window of page text cut around it,
+        // but not what the place the config names for answers said.
+        if (
+            alertSaid &&
+            !success &&
+            !(rec.errorIndicator && errorMsg && errorIsNew)
+        ) {
+            errorMsg = alertSaid
+            errorIsNew = true
+        }
         const elapsed = performance.now() - attemptStart
         log('AUTO_INSERT_ATTEMPT_END', code, {
             success,

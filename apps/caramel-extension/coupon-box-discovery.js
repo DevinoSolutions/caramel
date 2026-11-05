@@ -49,7 +49,13 @@ import {
     _isVisible,
     caramelFindMoney,
     caramelIsForbiddenControl,
+    caramelOverlayCloseControl,
+    caramelOverlayShown,
+    caramelPressEscape,
     caramelSetLastPrices,
+    caramelSettles,
+    caramelShownOverlays,
+    caramelVisible,
     getPrice,
 } from './dom-utils.js'
 
@@ -233,20 +239,7 @@ const ariaOf = el => el.getAttribute('aria-label')
 const styleOf = el => el.ownerDocument.defaultView.getComputedStyle(el)
 const pointer = el => styleOf(el).cursor === 'pointer'
 
-// Rendered AND given a box. An ancestor collapsed to zero height hides us
-// without a style of our own, so that is checked too.
-function visible(el) {
-    if (!el || !el.isConnected || !_isVisible(el)) return false
-    const r = el.getBoundingClientRect()
-    if (r.width < 2 || r.height < 2) return false
-    let p = el.parentElement
-    for (let i = 0; i < 8 && p; i++, p = p.parentElement) {
-        const ps = styleOf(p)
-        if (ps.overflow === 'hidden' && p.getBoundingClientRect().height < 2)
-            return false
-    }
-    return true
-}
+const visible = el => caramelVisible(el)
 
 // The labels that name THIS field. `el.labels` resolves a label[for] to the
 // FIRST element carrying the id, so a form a store draws twice with the same
@@ -1848,130 +1841,45 @@ function toggleRefused(el) {
 // cart. Before each click the overlays already showing are noted; one the
 // click opened is closed the way a shopper would: its own close control, else
 // Escape, else the toggle again when it now reports itself expanded.
-const DIALOG_SEL =
-    'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
-const OVERLAY_NAME_RE = /modal|popup|dialog|overlay|lightbox|drawer/i
-const CLOSE_NAME_RE = /\b(close|dismiss)\b/i
-const CLOSE_CLASS_RE = /(^|[\s_-])close($|[\s_-])/i
-const CLOSE_TEXT_RE = /^(close|dismiss|[×✕✖✗x])$/i
-
-const classOf = el =>
-    typeof el.className === 'string'
-        ? el.className
-        : el.getAttribute('class') || ''
-
-// Our own prompt and cards are never the store's overlay.
-const ownUi = el => !!el.closest('[id^="caramel"]')
-
-// A dialog, or anything pinned over the page (position: fixed), in view.
-function overlayShown(el) {
-    if (ownUi(el) || !visible(el)) return false
-    return el.matches(DIALOG_SEL) || styleOf(el).position === 'fixed'
-}
-
-// Where a popup lives: an element the page marks as a dialog, a direct child
-// of <body> (where most popup scripts put theirs), or one named like one.
-// Only these are styled, so a long page is not read element by element.
-function shownOverlays(doc) {
-    const out = new Set()
-    if (!doc.body) return out
-    const candidates = new Set(doc.querySelectorAll(DIALOG_SEL))
-    for (const el of doc.body.children) candidates.add(el)
-    for (const el of doc.body.getElementsByTagName('*'))
-        if (OVERLAY_NAME_RE.test(classOf(el) + ' ' + el.id)) candidates.add(el)
-    for (const el of candidates) if (overlayShown(el)) out.add(el)
-    return out
-}
 
 // What a click on `toggle` could change, noted before it is clicked.
 const beforeReveal = (doc, toggle) => ({
-    overlays: shownOverlays(doc),
+    overlays: caramelShownOverlays(doc),
     expanded: toggle.getAttribute('aria-expanded'),
 })
 
-// The overlay's own close control: a control named close or dismiss (aria
-// label, title, class), or one whose whole text is "×".
-function closeControl(overlay) {
-    const controls = overlay.querySelectorAll(
-        'button, [role="button"], a, input[type="button"], [class*="close"], [class*="Close"]',
-    )
-    for (const el of controls) {
-        const named =
-            CLOSE_NAME_RE.test(ariaOf(el) || '') ||
-            CLOSE_NAME_RE.test(el.title || '') ||
-            CLOSE_CLASS_RE.test(classOf(el)) ||
-            CLOSE_TEXT_RE.test(norm(textOf(el) || el.value))
-        if (
-            named &&
-            visible(el) &&
-            !caramelIsForbiddenControl(el) &&
-            !navigatesAway(el) &&
-            !toggleRefused(el)
-        )
-            return el
-    }
-    return null
-}
-
-// Escape, as the key a shopper presses: popup scripts listen for it on the
-// page (keydown or keyup). A native <dialog> closes on the browser's own
-// Escape only, which a script's key event never reaches, so it is closed.
-function pressEscape(doc, overlays) {
-    const target = doc.activeElement || doc.body
-    const Key = doc.defaultView.KeyboardEvent
-    for (const type of ['keydown', 'keyup'])
-        target.dispatchEvent(
-            new Key(type, {
-                key: 'Escape',
-                code: 'Escape',
-                keyCode: 27,
-                which: 27,
-                bubbles: true,
-                cancelable: true,
-            }),
-        )
-    for (const o of overlays)
-        if (o.tagName === 'DIALOG' && o.open && typeof o.close === 'function')
-            o.close()
-}
-
-// Wait (briefly: a popup may fade out) until done() holds. true when it does.
-async function settles(done) {
-    for (let waited = 0; waited < 1000; waited += 100) {
-        if (done()) return true
-        await sleep(100)
-    }
-    return done()
-}
+const closeRefused = el => navigatesAway(el) || toggleRefused(el)
 
 /* Put back what clicking `toggle` opened, when no box from it is used. */
 async function undoReveal(doc, toggle, before) {
-    const now = [...shownOverlays(doc)].filter(el => !before.overlays.has(el))
+    const now = [...caramelShownOverlays(doc)].filter(
+        el => !before.overlays.has(el),
+    )
     // The outermost of each: closing it closes what it holds.
     const opened = now.filter(el => !now.some(o => o !== el && o.contains(el)))
     const expandedNow = () =>
         before.expanded !== 'true' &&
         toggle.getAttribute('aria-expanded') === 'true'
     if (!opened.length && !expandedNow()) return
-    const showing = () => opened.filter(overlayShown)
+    const showing = () => opened.filter(caramelOverlayShown)
     const tried = []
     for (const o of opened) {
-        if (!overlayShown(o)) continue
-        const x = closeControl(o)
+        if (!caramelOverlayShown(o)) continue
+        const x = caramelOverlayCloseControl(o, closeRefused)
         if (!x) continue
         tried.push('close')
         x.click()
-        await settles(() => !overlayShown(o))
+        await caramelSettles(() => !caramelOverlayShown(o))
     }
     if (showing().length) {
         tried.push('escape')
-        pressEscape(doc, showing())
-        await settles(() => !showing().length)
+        caramelPressEscape(doc, showing())
+        await caramelSettles(() => !showing().length)
     }
     if (expandedNow() && (showing().length || !opened.length)) {
         tried.push('toggle')
         toggle.click()
-        await settles(() => !showing().length && !expandedNow())
+        await caramelSettles(() => !showing().length && !expandedNow())
     }
     const closed = !showing().length && !expandedNow()
     log('FINDER_TOGGLE_UNDONE', {
