@@ -12,7 +12,7 @@
 //
 // Limits are intentionally per-IP, not per-route, so a scraper pivoting
 // between endpoints doesn't get a fresh budget on each one. The one exception
-// is 'telemetry' (below): a deliberately chatty, low-value, anonymous route
+// is 'telemetry' (below): a deliberately chatty, low-value, unauthenticated route
 // gets its OWN bucket, keyed ip+route, so its traffic can never spend the
 // budget real work (a code submission, a sign-in) depends on.
 import { reportRateLimitRejection } from '@/lib/abuseSignal'

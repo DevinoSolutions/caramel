@@ -65,7 +65,8 @@ export async function captureServerEvent(args: {
     distinctId: string
     properties?: Record<string, unknown>
     /**
-     * Idempotency key for events a client may retry (`extension_installed`).
+     * Idempotency key for events a client may retry (`extension_installed`,
+     * `extension_active`).
      * Becomes the event UUID (PostHog dedupes on it) and `$insert_id`. Must be
      * a valid UUID — posthog-node rejects anything else.
      */

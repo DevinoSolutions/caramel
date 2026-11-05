@@ -48,9 +48,11 @@ import {
     rmSync,
     writeFileSync,
 } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gunzipSync } from 'node:zlib'
 import { chromium } from 'playwright'
 import { stampFor } from './environments.mjs'
 
@@ -158,6 +160,269 @@ async function waitForServiceWorker(context, timeout = 15000) {
         await new Promise(r => setTimeout(r, 200))
     }
     return null
+}
+
+/* ── 7b. the opted-in Google Chrome daily-active event ──────────────────────
+ *
+ * Playwright's Chromium is classified 'chrome' by detectStoreChannel (no Edg/
+ * in its UA), so the browser gate passes here and what is exercised is the
+ * features flag + usage-diagnostics consent gate in front of
+ * POST /api/extension/telemetry (kind 'daily_active').
+ *
+ * Only the toolbar popup counts, so the positive paths open the REAL one with
+ * chrome.action.openPopup (a page.goto is a tab, which the worker skips).
+ *
+ *   (a) every mode: a toolbar popup with no diagnostics consent: the worker
+ *       must write no activity state (and send nothing).
+ *   (a2) every mode: with consent seeded, popup.html in a TAB is skipped by the
+ *       worker as not-toolbar-popup, and sends nothing.
+ *   CARAMEL_E2E_POSTHOG_MOCK_PORT set — the app runs with
+ *     EXTENSION_DAU_TELEMETRY_ENABLED=true, POSTHOG_DATASET=e2e and its e2e
+ *     PostHog host pointed at http://localhost:<port>, where THIS script
+ *     listens. That is a MOCK of PostHog's ingestion endpoint: the real
+ *     posthog-node SDK in the real route sends to it, nothing reaches any real
+ *     PostHog project, and what is verified is the capture REQUEST, not
+ *     ingestion.
+ *     (b) consent v2 + a diagnostics id are seeded, the toolbar popup opens
+ *         and loses focus (which closes it) mid-delivery: exactly one
+ *         `extension_active` under the seeded id, no token/email on the wire,
+ *         the day recorded by the worker;
+ *     (c) a repeat toolbar open the same UTC day sends nothing.
+ *   unset — the app's own .env decides; with the default (flag off) the
+ *     seeded consent must still produce no activity state: the extension
+ *     reads the flag from /api/extension/features and fails closed. */
+const MOCK_PORT = Number(process.env.CARAMEL_E2E_POSTHOG_MOCK_PORT) || 0
+const E2E_DIAGNOSTICS_ID = '7e1c2a9b-3d4f-4a6b-8c5d-9e0f1a2b3c4d'
+
+/** Mock PostHog ingestion: records every POST body (gunzipped, JSON-parsed)
+ * and answers 200 after `holdMs`, so the test can close the popup while the
+ * route — and therefore the worker's request — is still waiting. */
+function startPosthogMock(port, holdMs) {
+    const received = []
+    const server = createServer((req, res) => {
+        const chunks = []
+        req.on('data', c => chunks.push(c))
+        req.on('end', () => {
+            let raw = Buffer.concat(chunks)
+            if (/gzip/.test(req.headers['content-encoding'] || ''))
+                raw = gunzipSync(raw)
+            let body = null
+            try {
+                body = JSON.parse(raw.toString('utf8'))
+            } catch {
+                body = raw.toString('utf8')
+            }
+            received.push({ path: req.url, body })
+            setTimeout(() => {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end('{"status":"Ok"}')
+            }, holdMs)
+        })
+    })
+    return new Promise(resolve =>
+        server.listen(port, '127.0.0.1', () => resolve({ server, received })),
+    )
+}
+
+/** Every captured event object named `name`, wherever the SDK's envelope
+ * (batch v0 or capture v1) put it. */
+function findEvents(node, name, out = []) {
+    if (Array.isArray(node)) node.forEach(n => findEvents(n, name, out))
+    else if (node && typeof node === 'object') {
+        if (node.event === name) out.push(node)
+        else Object.values(node).forEach(v => findEvents(v, name, out))
+    }
+    return out
+}
+
+/** Opens the extension's real toolbar popup in the focused window. Throws (the
+ * suite fails loudly) if the browser refuses. */
+const openToolbarPopup = sw =>
+    sw.evaluate(async () => {
+        const win = await chrome.windows.getLastFocused()
+        await chrome.action.openPopup({ windowId: win.id })
+    })
+
+/** Focusing a page closes the toolbar popup; waits until the browser says so. */
+async function closeToolbarPopup(sw, page) {
+    await page.bringToFront()
+    const start = Date.now()
+    while (Date.now() - start < 5000) {
+        const open = await sw.evaluate(async () =>
+            chrome.runtime
+                .getContexts({ contextTypes: ['POPUP'] })
+                .then(contexts => contexts.length),
+        )
+        if (open === 0) return
+        await new Promise(r => setTimeout(r, 100))
+    }
+    throw new Error('the toolbar popup did not close')
+}
+
+const readActivityStorage = sw =>
+    sw.evaluate(
+        () =>
+            new Promise(res =>
+                chrome.storage.local.get(
+                    ['caramel_activity_state', 'token'],
+                    res,
+                ),
+            ),
+    )
+
+async function waitForActivityState(sw, predicate, timeout = 20000) {
+    const start = Date.now()
+    while (Date.now() - start < timeout) {
+        const s = await readActivityStorage(sw)
+        if (predicate(s.caramel_activity_state)) return s
+        await new Promise(r => setTimeout(r, 250))
+    }
+    return readActivityStorage(sw)
+}
+
+// What the accept path of usage-diagnostics-consent.js would have stored.
+const seedDiagnosticsConsent = sw =>
+    sw.evaluate(
+        id =>
+            new Promise(res =>
+                chrome.storage.local.set(
+                    {
+                        caramel_usage_diagnostics_id: id,
+                        usageDiagnosticsConsent: {
+                            choice: 'accepted',
+                            at: new Date().toISOString(),
+                            promptVersion: 2,
+                        },
+                    },
+                    res,
+                ),
+            ),
+        E2E_DIAGNOSTICS_ID,
+    )
+
+async function checkDailyActiveEvent(context, sw, extensionId) {
+    const popupUrl = `chrome-extension://${extensionId}/popup.html`
+    const focusPage = await context.newPage()
+    // (a) No diagnostics consent yet: nothing recorded, nothing sent.
+    await openToolbarPopup(sw)
+    await focusPage.waitForTimeout(1500)
+    await closeToolbarPopup(sw, focusPage)
+    const before = await readActivityStorage(sw)
+    log(
+        'DAU: popup open without diagnostics consent sends nothing',
+        !before.caramel_activity_state,
+        `state=${JSON.stringify(before.caramel_activity_state ?? null)}`,
+    )
+
+    await seedDiagnosticsConsent(sw)
+    const mock = MOCK_PORT ? await startPosthogMock(MOCK_PORT, 1000) : null
+    try {
+        // (a2) popup.html in a tab, with consent: the worker skips it, by its
+        // answer and not just by the state it did not write.
+        const tabPage = await context.newPage()
+        await tabPage.goto(popupUrl)
+        const tabAnswer = await tabPage.evaluate(() =>
+            chrome.runtime.sendMessage({ action: 'recordExtensionActivity' }),
+        )
+        await tabPage.waitForTimeout(1500)
+        await tabPage.close()
+        const afterTab = await readActivityStorage(sw)
+        log(
+            'DAU: popup.html in a tab is not a toolbar open — skipped, nothing sent',
+            tabAnswer?.skipped === 'not-toolbar-popup' &&
+                !afterTab.caramel_activity_state &&
+                !findEvents(
+                    (mock?.received ?? []).map(r => r.body),
+                    'extension_active',
+                ).length,
+            `answer=${JSON.stringify(tabAnswer)} state=${JSON.stringify(afterTab.caramel_activity_state ?? null)}`,
+        )
+
+        await openToolbarPopup(sw)
+        if (!mock) {
+            await focusPage.waitForTimeout(2500)
+            await closeToolbarPopup(sw, focusPage)
+            const after = await readActivityStorage(sw)
+            log(
+                'DAU: server flag off (app default) — consent alone sends nothing',
+                !after.caramel_activity_state,
+                `state=${JSON.stringify(after.caramel_activity_state ?? null)}`,
+            )
+            return
+        }
+
+        // (b) The capture reached the mock ⇒ the worker's request is inside
+        // the route, which is now waiting on the held mock response. Close the
+        // popup here: delivery must not depend on it.
+        const start = Date.now()
+        while (!mock.received.length && Date.now() - start < 15000)
+            await new Promise(r => setTimeout(r, 100))
+        await closeToolbarPopup(sw, focusPage)
+
+        const after = await waitForActivityState(sw, s => s?.sentDay)
+        const today = new Date().toISOString().slice(0, 10)
+        const events = findEvents(
+            mock.received.map(r => r.body),
+            'extension_active',
+        )
+        const ev = events[0]
+        const props = ev?.properties || {}
+        const wire = JSON.stringify(mock.received)
+        const okEvent =
+            events.length === 1 &&
+            ev.distinct_id === E2E_DIAGNOSTICS_ID &&
+            props.day === today &&
+            props.browser === 'chrome' &&
+            typeof props.ext_version === 'string' &&
+            props.platform === 'extension' &&
+            props.activity_trigger === 'popup_open' &&
+            props.$process_person_profile === false &&
+            !('signed_in' in props) &&
+            !(after.token && wire.includes(after.token)) &&
+            !wire.includes(TEST_EMAIL)
+        log(
+            'DAU: popup → worker → telemetry route → PostHog capture request (MOCK host, not live ingestion)',
+            okEvent,
+            `events=${events.length} keys=${Object.keys(props)
+                .filter(k => !k.startsWith('$lib'))
+                .join(',')}`,
+        )
+        log(
+            'DAU: day recorded by the worker after the popup closed',
+            after.caramel_activity_state?.sentDay === today,
+            JSON.stringify(after.caramel_activity_state),
+        )
+
+        // (c) Same-day repeat open: no second event.
+        await openToolbarPopup(sw)
+        await focusPage.waitForTimeout(2500)
+        await closeToolbarPopup(sw, focusPage)
+        const repeat = findEvents(
+            mock.received.map(r => r.body),
+            'extension_active',
+        )
+        log(
+            'DAU: repeat popup open the same UTC day sends nothing',
+            repeat.length === 1,
+            `events=${repeat.length}`,
+        )
+    } finally {
+        await focusPage.close()
+        mock?.server.close()
+        // Later steps must run without diagnostics consent, as before.
+        await sw.evaluate(
+            () =>
+                new Promise(res =>
+                    chrome.storage.local.remove(
+                        [
+                            'usageDiagnosticsConsent',
+                            'caramel_usage_diagnostics_id',
+                        ],
+                        res,
+                    ),
+                ),
+        )
+    }
 }
 
 async function main() {
@@ -361,6 +626,11 @@ async function main() {
 
             await popup.close()
         }
+
+        // 7b. DAILY-ACTIVE EVENT — popup open → worker gates (flag, consent)
+        // → POST /api/extension/telemetry → the route's PostHog capture
+        // boundary.
+        await checkDailyActiveEvent(context, sw, extensionId)
 
         // 8. DOM INJECTION — real applyCoupon() against a synthetic supported-store DOM
         {

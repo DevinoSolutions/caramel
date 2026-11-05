@@ -24,7 +24,7 @@ const TEST_ID = '0b9e8f2a-4c1d-4e57-9a36-7d5f1c2b8e40'
 const consent = choice => ({
     choice,
     at: '2026-10-15T12:00:00.000Z',
-    promptVersion: 1,
+    promptVersion: 2,
 })
 
 function installWorkerRealm() {
@@ -200,7 +200,7 @@ describe('reportCodeShareFunnel: no send without accepted consent', () => {
 })
 
 describe('reportCodeShareFunnel: what is sent when the shopper opted in', () => {
-    it('posts the allowlisted event, the telemetry id and the consent proof - anonymously', async () => {
+    it('posts the allowlisted event, the telemetry id and the consent proof - pseudonymously', async () => {
         responses.push(ok({ captured: true }))
 
         expect(await invoke(STEP)).toEqual({ sent: true })
@@ -208,13 +208,13 @@ describe('reportCodeShareFunnel: what is sent when the shopper opted in', () => 
         const [call] = telemetryCalls()
         expect(call.url).toMatch(/\/api\/extension\/telemetry$/)
         expect(call.opts.method).toBe('POST')
-        // Anonymous: no bearer, no cookies, despite a stored sign-in token.
+        // Pseudonymous: no bearer, no cookies, despite a stored sign-in token.
         expect(call.opts.headers.Authorization).toBeUndefined()
         expect(call.opts.credentials).toBe('omit')
         const body = JSON.parse(call.opts.body)
         expect(Object.keys(body).toSorted()).toEqual(['consent', 'event', 'id'])
         expect(body.id).toBe(TEST_ID)
-        expect(body.consent).toEqual({ choice: 'accepted', promptVersion: 1 })
+        expect(body.consent).toEqual({ choice: 'accepted', promptVersion: 2 })
         expect(body.event).toEqual({
             step: 'capture_armed',
             store: 'example.com',

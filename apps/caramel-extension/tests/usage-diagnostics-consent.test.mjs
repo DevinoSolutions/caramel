@@ -16,7 +16,7 @@ import {
 } from '../usage-diagnostics-consent.js'
 
 /**
- * usage-diagnostics-consent.js — the opt-in record behind anonymous usage
+ * usage-diagnostics-consent.js — the opt-in record behind pseudonymous usage
  * diagnostics (device-local, never synced), the telemetry id that lives only
  * while the consent stands and is minted only on the accept path, and the Firefox data-collection grant that must back it.
  * Absent / malformed / declined / old-version all mean NO.
@@ -30,7 +30,7 @@ let browser
 const record = (choice, extra = {}) => ({
     choice,
     at: '2026-10-15T12:00:00.000Z',
-    promptVersion: 1,
+    promptVersion: 2,
     ...extra,
 })
 
@@ -80,13 +80,17 @@ describe('parseUsageDiagnosticsConsent', () => {
         ['null', null],
         ['a string', 'accepted'],
         ['an unknown choice', record('maybe')],
-        ['another prompt version', record('accepted', { promptVersion: 2 })],
+        ['another prompt version', record('accepted', { promptVersion: 3 })],
+        [
+            'a v1 yes (the card before it named daily activity)',
+            record('accepted', { promptVersion: 1 }),
+        ],
         [
             'a missing prompt version',
             { choice: 'accepted', at: record('accepted').at },
         ],
         ['an unparsable date', record('accepted', { at: 'yesterday' })],
-        ['a missing date', { choice: 'accepted', promptVersion: 1 }],
+        ['a missing date', { choice: 'accepted', promptVersion: 2 }],
     ])('%s parses to null (= no telemetry)', (_label, raw) => {
         expect(parseUsageDiagnosticsConsent(raw)).toBeNull()
     })
@@ -144,7 +148,7 @@ describe('writeUsageDiagnosticsConsent and the telemetry id', () => {
         expect(localData[USAGE_DIAGNOSTICS_ID_KEY]).toBe(first)
     })
 
-    it('withdrawing records the decline and DELETES the id; a later opt-in gets a new, unlinked one', async () => {
+    it('withdrawing records the decline and DELETES the id; a later opt-in gets a new one', async () => {
         await writeUsageDiagnosticsConsent(browser, 'accepted')
         const first = localData[USAGE_DIAGNOSTICS_ID_KEY]
 

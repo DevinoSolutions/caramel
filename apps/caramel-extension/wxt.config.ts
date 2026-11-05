@@ -134,7 +134,11 @@ export default defineConfig({
                 //
                 // Evidence-based mapping (full outbound audit 2026-08-13; the
                 // ONLY server origin is the build-time baseUrl — no Sentry,
-                // no analytics, nothing third-party):
+                // nothing third-party). The popup-open daily-active event
+                // (extension-activity.js) rides the same opt-in diagnostics
+                // gate as optional.technicalAndInteraction below and is
+                // Google-Chrome-only (detectStoreChannel), so the Firefox build
+                // never sends it and nothing below changes for it:
                 //   required.browsingActivity — the toolbar badge sends every
                 //     visited https domain to /api/coupons on tab switch,
                 //     guests included, no off switch.
@@ -148,7 +152,7 @@ export default defineConfig({
                 //     per-win {store, code, amountCents} records, and is
                 //     double-gated: sign-in AND an off-by-default toggle.
                 //   optional.technicalAndInteraction — 1.4.14: the opt-in
-                //     anonymous code-sharing funnel diagnostics
+                //     pseudonymous code-sharing funnel diagnostics
                 //     (code-share-funnel.js → POST /api/extension/telemetry):
                 //     which step of the offer was reached or why it stopped,
                 //     the store's domain, the extension version and browser.

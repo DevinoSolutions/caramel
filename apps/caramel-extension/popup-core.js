@@ -20,6 +20,7 @@ import {
     currentBrowser,
     isSafariExtensionRuntime,
     log,
+    logError,
 } from './caramel-base.js'
 import { CARAMEL_ENV } from './caramel-env.js'
 import { CaramelCoupons } from './coupon-constants.generated.js'
@@ -147,6 +148,31 @@ export function afterLoginSuccess() {
         return
     }
     afterLoginRerender()
+}
+
+/* ------------------------------------------------------------ */
+/*  Daily-active event                                          */
+/* ------------------------------------------------------------ */
+// Opening the toolbar popup is the ONE qualifying use (guests and signed-in
+// alike, whatever view resolves). This only tells the worker; every decision
+// (the toolbar popup and not this page in a tab or window, Google Chrome, the
+// server flag, the shopper's usage-diagnostics consent, once per UTC day) is
+// the worker's (background.js), which also outlives this page. main.tsx calls
+// it after the first render and never awaits it, so the popup paints the same
+// with or without it. Resolves to the worker's answer, or null when the message
+// failed.
+export async function recordPopupActivity() {
+    try {
+        const resp = await caramelSendMessage({
+            action: 'recordExtensionActivity',
+        })
+        if (resp?.error) logError('recordPopupActivity', resp.error)
+        return resp
+    } catch (err) {
+        // The popup closing first lands here too; the worker carries on.
+        logError('recordPopupActivity', err)
+        return null
+    }
 }
 
 /* ------------------------------------------------------------ */

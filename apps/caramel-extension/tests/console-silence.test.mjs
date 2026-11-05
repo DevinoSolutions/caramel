@@ -55,6 +55,7 @@ const SHIPPED_TO_STRANGERS = [
     'permissions-api.js',
     'usage-diagnostics-consent.js',
     'background.js',
+    'extension-activity.js',
     'tab-handoff.js',
 ]
 // Not in any entrypoint's import graph, but shipped and run in the store's

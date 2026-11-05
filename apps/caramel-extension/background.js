@@ -23,6 +23,12 @@ import {
     readCodeSharingConsent,
 } from './code-sharing-consent.js'
 import {
+    activityDue,
+    buildDailyActiveEvent,
+    utcDay,
+    writeActivityState,
+} from './extension-activity.js'
+import {
     FINDER_FLAG_MEMORY_KEY,
     finderFlagFromMemory,
     finderFlagMemoryEntry,
@@ -106,6 +112,10 @@ export const detectStoreChannel = (runtimeUrl, userAgent) => {
     if (runtimeUrl.startsWith('safari-web-extension://')) return 'safari'
     return /\bEdg(e|A|iOS)?\//.test(userAgent) ? 'edge' : 'chrome'
 }
+
+const storeChannel = () =>
+    detectStoreChannel(currentBrowser.runtime.getURL(''), navigator.userAgent)
+const extVersion = () => currentBrowser.runtime.getManifest().version
 
 // The one-time post-install page (apps/caramel-app/src/app/welcome). `iid` is
 // minted per install and becomes the PostHog event uuid there, so reloading or
@@ -252,7 +262,7 @@ const FEATURES_CACHE_KEY = 'caramel_features'
 const FEATURES_TTL_ON_MS = 6 * 60 * 60 * 1000
 const FEATURES_TTL_OFF_MS = 30 * 60 * 1000
 let _featuresInflight = null // Promise<entry> while a fetch is running
-let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, couponBoxLlm, couponBoxSave, ts }
+let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, couponBoxLlm, couponBoxSave, extensionDauTelemetry, ts }
 
 /* How long one features read may take, start to finish (T-10668). Before
  * this the read had no bound of its own: a storage.session read with no
@@ -317,13 +327,14 @@ function _writeFeaturesSession(entry) {
 
 function _featuresFresh(e) {
     if (!e || typeof e.shopperCodeCapture !== 'boolean') return false
-    // While the promo-box finder or its server pick is on, the short lifetime:
-    // turning either OFF is the kill switch, and it must reach extensions
-    // within 30 minutes.
+    // While the promo-box finder, its server pick or the daily-active event is
+    // on, the short lifetime: turning any of them OFF is the kill switch, and
+    // it must reach extensions within 30 minutes.
     const ttl =
         e.shopperCodeCapture &&
         e.couponBoxDiscovery !== true &&
-        e.couponBoxLlm !== true
+        e.couponBoxLlm !== true &&
+        e.extensionDauTelemetry !== true
             ? FEATURES_TTL_ON_MS
             : FEATURES_TTL_OFF_MS
     return Date.now() - e.ts < ttl
@@ -345,6 +356,8 @@ async function _fetchFeatures() {
         couponBoxLlm: json.couponBoxLlm === true,
         // The same rule for saving a found box as a store's config.
         couponBoxSave: json.couponBoxSave === true,
+        // The same rule for the popup-open daily-active event.
+        extensionDauTelemetry: json.extensionDauTelemetry === true,
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
@@ -413,6 +426,18 @@ function _shopperCaptureEnabled() {
     return _features().then(e => e.shopperCodeCapture)
 }
 
+// One switch of the cached features entry, failing closed: anything but a
+// literal true, or any failure to read it (logged), is off. Every flag read
+// this way gates an addition, never a requirement.
+async function _featureOn(name) {
+    try {
+        return (await _features())[name] === true
+    } catch (err) {
+        logError('features', err)
+        return false
+    }
+}
+
 /* Answers the content script's couponBoxDiscoveryEnabled message. A failed or
  * late features read (FEATURES_READ_DEADLINE_MS included) is answered with the
  * last flag the server gave, under its 30-minute rule (finder-flag-memory.js),
@@ -472,15 +497,9 @@ function _rememberedFinderFlag() {
     )
 }
 
-// Answers the content script's couponBoxLlmEnabled message, the same way.
-async function couponBoxLlmEnabled() {
-    try {
-        return (await _features()).couponBoxLlm === true
-    } catch (err) {
-        logError('features', err)
-        return false
-    }
-}
+// Answers the content script's couponBoxLlmEnabled message. No remembered
+// flag here: a failed or late read is off.
+const couponBoxLlmEnabled = () => _featureOn('couponBoxLlm')
 
 /* Asks the server which element of a page outline is the promo box (see
  * coupon-box-outline.js and the finder's caramelPickedRecord). The outline is
@@ -708,7 +727,7 @@ export async function submitShopperCode(message) {
  * is decided HERE: the shopper's usageDiagnosticsConsent must be accepted and,
  * on Firefox, the browser's data-collection grant must be held
  * (usage-diagnostics-consent.js). Otherwise the answer is `{ skipped }` and no
- * request is made. The request is ANONYMOUS on purpose: no bearer, no cookies,
+ * request is made. The request is PSEUDONYMOUS on purpose: no bearer, no cookies,
  * the per-device telemetry id as the only identity (READ here, never minted: the
  * accept path owns minting, so a missing id means skip), the consent record as the
  * proof the server checks (403 consent-required), and a payload that only
@@ -721,17 +740,62 @@ export async function submitShopperCode(message) {
 export async function reportCodeShareFunnel(message) {
     const consent = await resolveUsageDiagnostics(currentBrowser)
     if (!consent) return { skipped: 'no-diagnostics-consent' }
-    const event = buildFunnelEvent({
-        step: message.step,
-        reason: message.reason,
-        store: message.store,
-        extVersion: currentBrowser.runtime.getManifest().version,
-        browser: detectStoreChannel(
-            currentBrowser.runtime.getURL(''),
-            navigator.userAgent,
-        ),
-        sharingPromptVersion: codeSharingPromptVersion(),
-    })
+    return postUsageDiagnostic(
+        buildFunnelEvent({
+            step: message.step,
+            reason: message.reason,
+            store: message.store,
+            extVersion: extVersion(),
+            browser: storeChannel(),
+            sharingPromptVersion: codeSharingPromptVersion(),
+        }),
+    )
+}
+
+/* The popup-open daily-active event (extension-activity.js has the whole
+ * model). Every gate fails closed BEFORE anything is read or written: Google
+ * Chrome only, then the usage-diagnostics gate (local, so a shopper who never
+ * opted in causes no request at all), then the cached features flag exactly
+ * true (a failed read is off); only then the per-day state, and the send
+ * through postUsageDiagnostic. Popups opened back to back share one in-flight
+ * attempt. A failure (a throw, or the server refusing the proof) cools the day
+ * down and is answered/logged as such; it is never retried on a timer. */
+let _dailyActiveInflight = null
+function reportDailyActive() {
+    return (_dailyActiveInflight ??= _reportDailyActive().finally(() => {
+        _dailyActiveInflight = null
+    }))
+}
+
+async function _reportDailyActive() {
+    if (storeChannel() !== 'chrome') return { skipped: 'not-chrome' }
+    if (!(await resolveUsageDiagnostics(currentBrowser)))
+        return { skipped: 'no-diagnostics-consent' }
+    if (!(await _featureOn('extensionDauTelemetry')))
+        return { skipped: 'disabled' }
+    const now = Date.now()
+    const day = utcDay(now)
+    if (!(await activityDue(currentBrowser, day, now)))
+        return { skipped: 'not-due' }
+    let res
+    try {
+        res = await postUsageDiagnostic(
+            buildDailyActiveEvent(day, extVersion()),
+        )
+    } finally {
+        // Sent → the day is done; a throw (res unset) or the server refusing
+        // the proof → the bounded cooldown, then the throw carries on. No id /
+        // consent withdrawn mid-flight: nothing was sent, nothing to note.
+        if (!res || res.sent || res.skipped === 'consent-rejected')
+            await writeActivityState(currentBrowser, day, Date.now(), res?.sent)
+    }
+    return res
+}
+
+/* The ONE diagnostics POST (pseudonymous: the diagnostics id, no bearer, no
+ * cookies), shared by the funnel and the daily-active event; callers have
+ * already passed resolveUsageDiagnostics. */
+async function postUsageDiagnostic(event) {
     const id = await readTelemetryId(currentBrowser)
     if (!id) return { skipped: 'no-diagnostics-id' }
     // The shopper may have withdrawn while the id was being read: the record is
@@ -940,7 +1004,7 @@ export function initBackground() {
 
     // Withdrawing diagnostics consent (the popup toggle or "No thanks") deletes
     // the telemetry id: sends stop at once because the gate reads the record, and
-    // a later opt-in starts a new id that cannot be joined to this one. The
+    // a later opt-in starts a new id that we do not join to this one. The
     // record is device-local, so only this device's own changes arrive here.
     currentBrowser.storage.onChanged.addListener((changes, area) => {
         if (area !== 'local' || !changes[USAGE_DIAGNOSTICS_CONSENT_KEY]) return
@@ -1023,14 +1087,7 @@ export function initBackground() {
             saveInstallId(currentBrowser, iid).catch(err =>
                 logError('onInstalledSaveInstallId', err),
             )
-            const url = welcomeUrl(
-                detectStoreChannel(
-                    currentBrowser.runtime.getURL(''),
-                    navigator.userAgent,
-                ),
-                currentBrowser.runtime.getManifest().version,
-                iid,
-            )
+            const url = welcomeUrl(storeChannel(), extVersion(), iid)
             currentBrowser.tabs.create({ url }, () => {
                 if (currentBrowser.runtime.lastError)
                     logError(
@@ -1367,6 +1424,34 @@ export function initBackground() {
                     .catch(err => {
                         logError('fetchSupportedStores', err)
                         sendResponse({ supported: [], error: String(err) })
+                    })
+
+                return true
+            } else if (message.action === 'recordExtensionActivity') {
+                // The daily-active event (extension-activity.js). Sent ONLY by
+                // the popup page on open (popup-core.js recordPopupActivity);
+                // refused from anywhere else — a content script must never
+                // count as a use. Done here, not in the popup, so closing the
+                // popup does not cancel the request mid-flight.
+                const popupUrl = currentBrowser.runtime.getURL('popup.html')
+                if (!sender?.url?.startsWith(popupUrl)) {
+                    sendResponse({ error: 'not_popup' })
+                    return
+                }
+                // Only the toolbar popup counts. The same page in a tab or
+                // window (the apply flow's sign-in, a typed URL, a website's
+                // link: popup.html is web-accessible) has sender.tab, which
+                // the browser sets and the page cannot. An expected answer,
+                // not an error: nothing is read, written, sent or logged.
+                if (sender.tab) {
+                    sendResponse({ skipped: 'not-toolbar-popup' })
+                    return
+                }
+                reportDailyActive()
+                    .then(resp => sendResponse(resp))
+                    .catch(err => {
+                        logError('recordExtensionActivity', err)
+                        sendResponse({ error: String(err) })
                     })
 
                 return true

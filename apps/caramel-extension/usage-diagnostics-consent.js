@@ -1,10 +1,11 @@
-// owns: the anonymous-usage-diagnostics CONSENT record (usageDiagnosticsConsent
+// owns: the pseudonymous usage-diagnostics CONSENT record (usageDiagnosticsConsent
 // in chrome.storage.LOCAL), the per-device telemetry id that exists only while
 // that consent stands, and the Firefox data-collection grant that must back it.
 //
 // WHY A SECOND CONSENT. Reporting where the code-sharing offer drops shoppers
-// (code-share-funnel.js) is data leaving the browser that is not needed to
-// run Caramel, so it is OFF until the shopper says yes to a small card in the
+// (code-share-funnel.js), and the Google Chrome popup-open daily-activity
+// event (extension-activity.js), are data leaving the browser that is not
+// needed to run Caramel, so they are OFF until the shopper says yes to a small card in the
 // popup (or switches the Settings toggle on, which is the same explicit yes).
 // Absent, malformed, declined, or another prompt version all parse to "no".
 //
@@ -17,7 +18,7 @@
 // sharing a code and sending diagnostics are different questions, and a yes to
 // one must never stand in for the other.
 //
-// Shape: { choice: 'accepted' | 'declined', at: ISO-8601 string, promptVersion: 1 }
+// Shape: { choice: 'accepted' | 'declined', at: ISO-8601 string, promptVersion: 2 }
 // Bump USAGE_DIAGNOSTICS_PROMPT_VERSION when the card's meaning changes: every
 // shopper is asked again, by construction (same rule as the sharing record).
 //
@@ -27,7 +28,8 @@
 // "skip", never "mint"), so a report racing a withdrawal cannot resurrect it. It
 // is NOT the install id (`iid`, install-attribution.js, which is tied to the
 // sign-up) and never a user id; withdrawing consent deletes it, so a later opt-in
-// starts a new, unlinked id.
+// starts a new id that we do not join to the old one.
+// Pseudonymous, not anonymous: the id still singles out one device while it exists.
 //
 // FIREFOX. The manifest lists `technicalAndInteraction` as an OPTIONAL data
 // collection permission (wxt.config.ts); Firefox shows its own prompt when we
@@ -39,7 +41,10 @@
 import { getPermissionsApi } from './permissions-api.js'
 
 export const USAGE_DIAGNOSTICS_CONSENT_KEY = 'usageDiagnosticsConsent'
-const USAGE_DIAGNOSTICS_PROMPT_VERSION = 1
+// 2 (2026-10-22): the card also names the Google Chrome popup-open daily
+// activity event (extension-activity.js), so a v1 "yes" (checkout diagnostics
+// only) no longer counts and every shopper is asked again.
+const USAGE_DIAGNOSTICS_PROMPT_VERSION = 2
 // storage.local key: the telemetry id (a bare UUID string) while consent stands.
 export const USAGE_DIAGNOSTICS_ID_KEY = 'caramel_usage_diagnostics_id'
 const FIREFOX_DATA_PERMISSION = { data_collection: ['technicalAndInteraction'] }
@@ -62,7 +67,9 @@ export function usageDiagnosticsAccepted(record) {
     return record?.choice === 'accepted'
 }
 
-function storageCall(browser, area, method, arg, what) {
+// The callback storage API as a promise that REJECTS on lastError (named by
+// `what`). Also used by extension-activity.js for its per-day state.
+export function storageCall(browser, area, method, arg, what) {
     return new Promise((resolve, reject) => {
         try {
             browser.storage[area][method](arg, res => {

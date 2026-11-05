@@ -1,4 +1,8 @@
 import PrivacyPolicy from '@/components/PrivacyPolicy'
+import { faqItems } from '@/lib/faqItems'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
@@ -63,6 +67,74 @@ describe('privacy policy coverage', () => {
         )
     })
 
+    it('discloses the opt-in Google Chrome daily activity event without absolute anonymity claims', () => {
+        const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
+        // The extension does send (opt-in) diagnostics, so no "no analytics".
+        expect(normalized).not.toContain('no ads, no analytics')
+        expect(normalized).toContain('Usage diagnostics, only if you opt in.')
+        expect(normalized).toContain('Daily activity (Google Chrome only).')
+        expect(normalized).toContain(
+            'Nothing described in this paragraph is sent before you opt in.',
+        )
+        expect(normalized).toContain(
+            "When you open the extension's popup in Google Chrome, at most once per day: the date (in UTC), the extension version and the browser name",
+        )
+        expect(normalized).toContain(
+            'It is sent without your sign-in token and without saying whether you are signed in',
+        )
+        expect(normalized).toContain(
+            'under a pseudonymous ID: a random ID created on this device when you opt in',
+        )
+        expect(normalized).toContain(
+            'they also reach it with your IP address and browser type (user agent), which our server and proxy logs keep',
+        )
+        expect(normalized).toContain(
+            'It is not sent from Microsoft Edge, Firefox or Safari',
+        )
+        expect(normalized).toContain('switch on "Send usage diagnostics"')
+        expect(normalized).not.toMatch(/anonymous usage diagnostics/i)
+        // Not "the only analytics", and no unlinkability promise: IP and user
+        // agent reach our server logs.
+        expect(normalized).not.toMatch(/only analytics/i)
+        expect(normalized).not.toMatch(
+            /(cannot|can't|can never|never) be (linked|joined)/i,
+        )
+        expect(normalized).not.toContain('anything that identifies you')
+        expect(normalized).toContain('Effective Date: October 22, 2026')
+    })
+
+    it('the FAQ calls usage diagnostics pseudonymous, with no unlinkability promise', () => {
+        const answer = faqItems.find(
+            item =>
+                item.question ===
+                'What data does the Caramel extension collect?',
+        )?.answer
+        expect(answer).toContain('Diagnostics are pseudonymous, not anonymous')
+        expect(answer).not.toMatch(/only analytics/i)
+        expect(answer).not.toMatch(
+            /(cannot|can't|can never|never) be (linked|joined)/i,
+        )
+    })
+
+    // The reviewer's finding (overstated anonymity) started in code comments
+    // the next session copies into copy, so the server side of the pipeline is
+    // held to the same word. "not anonymous" is the one allowed spelling.
+    it.each([
+        'src/app/api/extension/telemetry/route.ts',
+        'src/lib/extensionActivity.ts',
+        'src/lib/analytics/codeShareFunnel.ts',
+    ])('%s does not call usage diagnostics anonymous', file => {
+        const appRoot = path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            '../..',
+        )
+        const source = fs.readFileSync(path.join(appRoot, file), 'utf8')
+        expect(source).not.toMatch(/(?<!not )anonym/i)
+        expect(source).not.toMatch(
+            /(cannot|can't|can never|never) be (linked|joined)|nothing here can/i,
+        )
+    })
+
     it('discloses what the coupon-box finder and server pick send (wording delegated 2026-10-13)', () => {
         const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
         for (const claim of [
@@ -77,7 +149,6 @@ describe('privacy policy coverage', () => {
             "Devino's own AI model proxy",
             "which currently passes the request to NVIDIA's hosted model service (NIM)",
             'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
-            'Effective Date: October 14, 2026',
             'for that store and page shape',
             'Your IP address is used to rate-limit these requests.',
         ]) {

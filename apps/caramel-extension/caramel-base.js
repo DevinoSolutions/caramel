@@ -520,7 +520,7 @@ export function caramelOnCodeSharingConsentChanged(onChange) {
 }
 
 /* --------------------------------------------------  usage-diagnostics consent */
-// The shopper's answer to "send anonymous usage diagnostics?" — see
+// The shopper's answer to "send pseudonymous usage diagnostics?" — see
 // usage-diagnostics-consent.js. The popup card and the Settings toggle are the
 // ONLY writers; background.js reads the same record to gate every send.
 

@@ -52,7 +52,7 @@ export function SettingsView({
     // (checkoutCodeSharingConsent). No record, a declined one, or one that
     // could not be read all display OFF.
     const [shareCodes, setShareCodes] = useState(false)
-    // Anonymous usage diagnostics are ON only while the consent is accepted AND
+    // Pseudonymous usage diagnostics are ON only while the consent is accepted AND
     // (Firefox) the browser's data-collection grant is held; an unreadable
     // record displays OFF, like the sharing switch.
     const [diagnostics, setDiagnostics] = useState(false)
@@ -262,11 +262,13 @@ export function SettingsView({
 
             <label className="settings-row">
                 <span className="settings-copy">
-                    <span>Send anonymous usage diagnostics</span>
+                    <span>Send usage diagnostics</span>
                     <small>
-                        Only at checkout on a supported store. Never your codes,
-                        your cart, the other pages you visit, or anything that
-                        identifies you.
+                        Pseudonymous, under a random ID for this device: at
+                        checkout on a supported store, and once a day in Google
+                        Chrome when you open Caramel. Never your codes, your
+                        cart, the other pages you visit, or your account
+                        details.
                     </small>
                 </span>
                 <input

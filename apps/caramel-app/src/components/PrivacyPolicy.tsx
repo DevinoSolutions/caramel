@@ -55,7 +55,10 @@ const PrivacyPolicy = () => {
                     <Para>
                         The Caramel extension talks only to Caramel&apos;s own
                         server (grabcaramel.com). The extension itself contains
-                        no ads, no analytics and no third-party trackers.
+                        no ads, no third-party trackers and no third-party
+                        analytics code. Everything it sends to our server,
+                        including the usage diagnostics you can opt in to, is
+                        described below.
                     </Para>
                     <Sub>Whether or not you are signed in</Sub>
                     <Bullets
@@ -142,29 +145,59 @@ const PrivacyPolicy = () => {
                             </>,
                             <>
                                 <strong>
-                                    Anonymous usage diagnostics, only if you opt
-                                    in.
+                                    Usage diagnostics, only if you opt in.
                                 </strong>{' '}
                                 If you press Allow on the extension&apos;s
                                 &quot;Help improve Caramel?&quot; card, or
-                                switch on &quot;Send anonymous usage
-                                diagnostics&quot; in its settings (it is off by
-                                default; Firefox also asks for its own
-                                permission), the extension sends anonymous
-                                diagnostics when you are at checkout on a
-                                supported store: which store, whether the
-                                code-sharing offer appeared, and why a code
-                                wasn&apos;t shared, along with the extension
-                                version and your browser. These events go to our
-                                self-hosted analytics under a random ID created
-                                on this device when you opt in, not linked to
-                                your account or install ID. They never include
+                                switch on &quot;Send usage diagnostics&quot; in
+                                its settings (it is off by default; Firefox also
+                                asks for its own permission), the extension
+                                sends usage diagnostics to our server. Nothing
+                                described in this paragraph is sent before you
+                                opt in. These diagnostics are:
+                                <ul className="mt-2 list-disc space-y-1 pl-6">
+                                    <li>
+                                        <strong>Checkout diagnostics.</strong>{' '}
+                                        When you are at checkout on a supported
+                                        store: which store, whether the
+                                        code-sharing offer appeared, and why a
+                                        code wasn&apos;t shared, along with the
+                                        extension version and your browser.
+                                    </li>
+                                    <li>
+                                        <strong>
+                                            Daily activity (Google Chrome only).
+                                        </strong>{' '}
+                                        When you open the extension&apos;s popup
+                                        in Google Chrome, at most once per day:
+                                        the date (in UTC), the extension version
+                                        and the browser name, so we can count
+                                        how many opted-in Chrome installations
+                                        are used each day. It is sent without
+                                        your sign-in token and without saying
+                                        whether you are signed in, so it is the
+                                        same whether or not you have an account.
+                                        It is not sent from Microsoft Edge,
+                                        Firefox or Safari; other browsers that
+                                        install Caramel from the Chrome Web
+                                        Store may be counted as Chrome.
+                                    </li>
+                                </ul>
+                                Both go to our self-hosted analytics under a
+                                pseudonymous ID: a random ID created on this
+                                device when you opt in, separate from your
+                                account and your install ID. They never include
                                 your codes, your cart, the other pages you
-                                visit, or anything that identifies you. You can
-                                change this anytime in the extension&apos;s
-                                settings. Switching it off deletes this
-                                device&apos;s random diagnostics ID; anything
-                                already sent can&apos;t be linked back to you.
+                                visit, or your account details. Like every
+                                request to our server, they also reach it with
+                                your IP address and browser type (user agent),
+                                which our server and proxy logs keep as
+                                described below. You can change this anytime in
+                                the extension&apos;s settings. Switching it off
+                                stops these diagnostics and deletes this
+                                device&apos;s diagnostics ID, so anything sent
+                                later (if you opt in again) is under a new ID
+                                that is not joined to the old one.
                             </>,
                         ]}
                     />
@@ -482,7 +515,7 @@ const PrivacyPolicy = () => {
             >
                 <div className="bg-caramel/10 text-caramel mb-6 inline-flex items-center gap-3 rounded-full px-6 py-3 text-sm font-semibold">
                     <FaShieldAlt className="h-4 w-4" />
-                    Effective Date: October 14, 2026
+                    Effective Date: October 22, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}

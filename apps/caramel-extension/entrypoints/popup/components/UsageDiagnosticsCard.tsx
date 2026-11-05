@@ -8,7 +8,7 @@ import {
 import { useToast } from './toast'
 
 /**
- * The one-time ask behind anonymous usage diagnostics (see
+ * The one-time ask behind pseudonymous usage diagnostics (see
  * usage-diagnostics-consent.js). Shown while the shopper has not answered —
  * no record, or one for an older prompt version — and gone for good once they
  * press either button; Settings has the toggle to change the answer later.
@@ -84,11 +84,13 @@ export function UsageDiagnosticsCard() {
         >
             <h3 id="usageDiagnosticsTitle">Help improve Caramel?</h3>
             <p>
-                Send anonymous diagnostics when you&apos;re at checkout on a
-                supported store: which store, whether the code-sharing offer
-                appeared, and why a code wasn&apos;t shared. Never your codes,
-                your cart, the other pages you visit, or anything that
-                identifies you. You can change this anytime in Settings.
+                Send pseudonymous diagnostics, under a random ID for this
+                device, when you&apos;re at checkout on a supported store: which
+                store, whether the code-sharing offer appeared, and why a code
+                wasn&apos;t shared. In Google Chrome, also a once-a-day note
+                that you opened Caramel. Never your codes, your cart, the other
+                pages you visit, or your account details. You can change this
+                anytime in Settings.
             </p>
             <div className="diagnostics-card-actions">
                 <button

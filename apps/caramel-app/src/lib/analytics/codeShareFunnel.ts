@@ -10,7 +10,7 @@
 // the store did not visibly accept the code, the capture never armed ...).
 // Those gates were console-only. This event makes each one a query.
 //
-// Consent-gated, anonymous by construction. The extension only sends after the
+// Consent-gated, pseudonymous by construction. The extension only sends after the
 // shopper pressed Allow on a popup card (usageDiagnosticsConsent, off by
 // default), and the request carries that consent as proof; the route refuses
 // (403 `consent-required`) without it, exactly like POST /api/coupons/submit.
@@ -28,6 +28,7 @@
 //
 // Read it in PostHog: event `extension_code_share_funnel`, break down by
 // `step` (and `reason` for the skip steps), filter on `ext_version`.
+import { DailyActiveEventSchema } from '@/lib/extensionActivity'
 import {
     EXTENSION_STORES,
     EXTENSION_VERSION_PATTERN,
@@ -162,14 +163,17 @@ export const CodeShareFunnelEventSchema = z
 export type CodeShareFunnelEvent = z.infer<typeof CodeShareFunnelEventSchema>
 
 /**
- * What the extension sends (background.js reportCodeShareFunnel): the event,
- * its telemetry id, and the consent proof. `consent` is deliberately `unknown`
- * here: a missing, declined or old proof must answer 403 `consent-required`
- * (below), not the generic 422 body-schema error.
+ * What the extension sends (background.js postUsageDiagnostic): the event, its
+ * telemetry id, and the consent proof. The event is a code-share funnel step
+ * (no `kind`: exactly what every shipped build sends) OR the popup-open
+ * daily-active event (`kind: 'daily_active'`, src/lib/extensionActivity.ts).
+ * Both are strict, so neither can carry the other's fields. `consent` is
+ * deliberately `unknown` here: a missing, declined or old proof must answer
+ * 403 `consent-required` (below), not the generic 422 body-schema error.
  */
 export const ExtensionTelemetryBodySchema = z.strictObject({
     id: TELEMETRY_ID,
-    event: CodeShareFunnelEventSchema,
+    event: z.union([CodeShareFunnelEventSchema, DailyActiveEventSchema]),
     consent: z.unknown().optional(),
 })
 

@@ -1,6 +1,6 @@
 // owns: the VOCABULARY and the PAYLOAD ALLOWLIST of the checkout-code-sharing
 // funnel diagnostics (event `extension_code_share_funnel`, sent to
-// POST /api/extension/telemetry only after the shopper opted in to anonymous
+// POST /api/extension/telemetry only after the shopper opted in to pseudonymous
 // usage diagnostics, see usage-diagnostics-consent.js).
 //
 // WHY. Sharing a typed code produced zero submissions on prod and the server

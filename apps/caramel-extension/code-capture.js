@@ -47,7 +47,7 @@
 //
 // Funnel diagnostics (code-share-funnel.js): every point above where the offer
 // can stop reports one step through _report, which only asks the worker; the
-// worker sends nothing unless the shopper opted in to anonymous usage
+// worker sends nothing unless the shopper opted in to pseudonymous usage
 // diagnostics. A step carries the store's domain and an enum, never the code.
 //
 // Known limit (documented, not hidden): a classic form-POST cart answers with a

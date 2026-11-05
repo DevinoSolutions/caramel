@@ -399,6 +399,14 @@ module.exports = [
         // 2026-10-20, merging main (through #348) again: the learned-box
         // memory and pick mode above plus the toolbar badge from #384.
         // Measured 16.91 kB, so the limit is measured + ~0.3 kB.
+        // 2026-10-22, unchanged at 17.2 kB: the opted-in popup-open
+        // daily-active event (its message route, the Chrome/consent/flag gate
+        // and the per-UTC-day state in extension-activity.js), riding the
+        // funnel's existing diagnostics POST, storage wrapper and features
+        // cache instead of a copy of each (the three fail-closed flag reads
+        // became one helper, the manifest-version read another). main measured
+        // 15.69 kB; this measured 17.10 kB, so the next background change
+        // needs a dated raise.
         // 2026-10-26 (T-5446), 17.2 -> 21.5 kB with no code changed: this is
         // now the bundle of entrypoints/background.ts. The old list held
         // background.js alone, so the modules it imports (tab-handoff.js,
@@ -412,7 +420,13 @@ module.exports = [
         // remembered in storage.local, and a failed or late read answers that
         // remembered flag (read alongside the features) instead of a hard
         // "off". Measured 21.54 kB.
-        limit: '21.8 KB',
+        // 2026-11-04, merging main (T-10668 above) into the daily-active branch,
+        // raised 21.8 -> 23.1 kB: both land together. The daily-active code (its
+        // message route, the Chrome/consent/flag gate and extension-activity.js)
+        // measured 1.14 kB on the bundled ruler when it last merged. Measured
+        // 22.77 kB; the production build's background.js is 23.40 kB with WXT's
+        // wrapper. The limit is measured + ~0.3 kB.
+        limit: '23.1 KB',
         brotli: false,
     },
     {
