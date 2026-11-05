@@ -75,6 +75,10 @@ import {
     waitUntilReady,
 } from './dom-utils.js'
 import {
+    caramelDropNoBoxCardFrom,
+    caramelNoteNoBoxCard,
+} from './final-modal.js'
+import {
     caramelStoreListKnown,
     getDomainRecord,
     startCheckoutDetection,
@@ -347,6 +351,8 @@ export async function caramelCreditSettles({
 
 export async function startApplyingCoupons(rec, options) {
     log('=== Starting coupon flow ===')
+    // The page this run looks at; a no-box card is about this page only.
+    const runUrl = location.href
     // A resumed run is the SAME click continuing on a new page, so the overlay
     // says so — "Applying Coupons…" appearing on its own after a reload reads
     // like the extension started itself.
@@ -1062,15 +1068,18 @@ export async function startApplyingCoupons(rec, options) {
             codesAtCheckout,
             t: performance.now(),
         })
-        showFinalModal(
-            0,
-            null,
-            codesAtCheckout
-                ? CODES_AT_CHECKOUT_MESSAGE
-                : "We couldn't find the promo box on this page — copy a code below and paste it where the store asks for a promo code.",
-            false,
-            coupons,
-        )
+        // Not awaited, like every card; noted once it is up.
+        Promise.resolve(
+            showFinalModal(
+                0,
+                null,
+                codesAtCheckout
+                    ? CODES_AT_CHECKOUT_MESSAGE
+                    : "We couldn't find the promo box on this page — copy a code below and paste it where the store asks for a promo code.",
+                false,
+                coupons,
+            ),
+        ).then(() => caramelNoteNoBoxCard(runUrl))
         return
     }
 
@@ -1979,7 +1988,8 @@ export function caramelHandleUrlChanged(url) {
     const seen = String(url || '')
     if (!seen || _caramelEvaluatedUrls.has(seen)) return false
     _caramelEvaluatedUrls.add(seen)
-    log('URL_CHANGED_REDETECT', { url: seen })
+    const droppedNoBoxCard = caramelDropNoBoxCardFrom(seen)
+    log('URL_CHANGED_REDETECT', { url: seen, droppedNoBoxCard })
     startCheckoutDetection().catch(err =>
         logError('re-detection after URL change failed', err),
     )
