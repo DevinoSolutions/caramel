@@ -271,7 +271,14 @@ module.exports = [
         // keeps the app's refused and sunk groups as run boundaries, so a code
         // the stores refused is not lifted back over its tier peers. Measured
         // 112.52 kB locally (+0.13 kB).
-        limit: '112.7 KB',
+        // 2026-11-05 (T-11267), raised 112.7 -> 116 kB: a store alert that
+        // opened during a code attempt and answers it is read, closed through
+        // its own control or Escape, and its refusal kept as that code's
+        // answer, while any dialog already open is left alone. The overlay
+        // helpers moved here from the finder (about 1.4 kB of this, see the
+        // finder's budget below); the rest is the new apply step. Measured
+        // 115.83 kB (+3.31 kB).
+        limit: '116 KB',
         brotli: false,
     },
     {
@@ -457,9 +464,12 @@ module.exports = [
         // 2026-10-31 (T-11710), raised 41.3 -> 42.3 kB: a bag total drawn
         // before sales tax is read as its subtotal, and a row's screen-reader
         // copy of its amount is not counted (ikea.com/us). Measured 41.69 kB.
+        // 2026-11-05 (T-11267), lowered 42.3 -> 40.8 kB: the overlay helpers
+        // moved to dom-utils.js, shared with the apply flow's close of a store
+        // alert. Measured 41.69 -> 40.29 kB.
         // It is written only here: tests/finder-module-build.test.mjs reads
         // it.
-        limit: '42.3 KB',
+        limit: '40.8 KB',
         brotli: false,
     },
     {

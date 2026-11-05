@@ -31,7 +31,13 @@ import {
     _isVisible,
     caramelFindMoney,
     caramelIsForbiddenControl,
+    caramelOverlayCloseControl,
+    caramelOverlayShown,
+    caramelPressEscape,
     caramelSetLastPrices,
+    caramelSettles,
+    caramelShownOverlays,
+    caramelVisible,
     getPrice,
 } from './dom-utils.js'
 import {
@@ -146,7 +152,13 @@ export function caramelLoadFinder() {
                     _isVisible,
                     caramelFindMoney,
                     caramelIsForbiddenControl,
+                    caramelOverlayCloseControl,
+                    caramelOverlayShown,
+                    caramelPressEscape,
                     caramelSetLastPrices,
+                    caramelSettles,
+                    caramelShownOverlays,
+                    caramelVisible,
                     getPrice,
                     _caramelResetDiscoveryOn,
                 })
