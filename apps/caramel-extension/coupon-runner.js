@@ -1068,14 +1068,17 @@ export async function startApplyingCoupons(rec, options) {
             codesAtCheckout,
             t: performance.now(),
         })
-        showFinalModal(
-            0,
-            null,
-            codesAtCheckout
-                ? CODES_AT_CHECKOUT_MESSAGE
-                : "We couldn't find the promo box on this page — copy a code below and paste it where the store asks for a promo code.",
-            false,
-            coupons,
+        // Not awaited, like every card; noted once it is up.
+        Promise.resolve(
+            showFinalModal(
+                0,
+                null,
+                codesAtCheckout
+                    ? CODES_AT_CHECKOUT_MESSAGE
+                    : "We couldn't find the promo box on this page — copy a code below and paste it where the store asks for a promo code.",
+                false,
+                coupons,
+            ),
         ).then(() => caramelNoteNoBoxCard(runUrl))
         return
     }
