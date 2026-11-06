@@ -115,6 +115,37 @@ describe('background reportOutcome', () => {
         expect(calls.some(c => c.url.endsWith('coupons/increment'))).toBe(false)
     })
 
+    // T-10427: the store's refusal is redacted before it leaves the browser,
+    // with the server's rule: the shopper's other code goes, the code being
+    // reported stays readable.
+    it('redacts a code the store echoed in its refusal, keeping the reported code', async () => {
+        await invoke({
+            action: 'reportOutcome',
+            id: '42',
+            outcome: 'failed',
+            storeReason: 'FALL18 cannot be combined with MYCODE5',
+            code: 'FALL18',
+        })
+        await flush()
+        const body = JSON.parse(calls[0].body)
+        expect(body).toEqual({
+            outcome: 'failed',
+            storeReason: 'FALL18 cannot be combined with [code]',
+        })
+    })
+
+    it('cuts a long refusal to the 200 characters the route accepts', async () => {
+        await invoke({
+            action: 'reportOutcome',
+            id: '42',
+            outcome: 'failed',
+            storeReason: `This promotion has expired. ${'x'.repeat(400)}`,
+            code: 'FALL18',
+        })
+        await flush()
+        expect(JSON.parse(calls[0].body).storeReason).toHaveLength(200)
+    })
+
     it('apply flow (no awaitResult): unchanged — answers success at once even if the POST fails', async () => {
         status = 500
         const resp = await invoke({
@@ -129,5 +160,35 @@ describe('background reportOutcome', () => {
             'coupons/42/report',
             'coupons/increment',
         ])
+    })
+})
+
+describe('background classifyCart (T-10427)', () => {
+    let calls
+    beforeEach(() => {
+        calls = []
+        globalThis.fetch = async (url, opts) => {
+            calls.push({ url: String(url), body: opts?.body })
+            return { ok: true, status: 200, json: async () => ({}) }
+        }
+    })
+
+    it('drops a discount row and redacts a code-shaped token before sending', async () => {
+        await invoke({
+            action: 'classifyCart',
+            signals: {
+                domain: 'shop.test',
+                cart_items: ['Discount: SAVE10', 'Dell XPS13 Laptop', 'Widget'],
+            },
+        })
+        expect(JSON.parse(calls[0].body)).toEqual({
+            domain: 'shop.test',
+            cart_items: ['Dell [code] Laptop', 'Widget'],
+        })
+    })
+
+    it('sends signals with no cart rows as they are', async () => {
+        await invoke({ action: 'classifyCart', signals: { domain: 'a.test' } })
+        expect(JSON.parse(calls[0].body)).toEqual({ domain: 'a.test' })
     })
 })

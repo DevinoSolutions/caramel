@@ -29,6 +29,13 @@ import {
 } from './finder-flag-memory.js'
 import { saveInstallId } from './install-attribution.js'
 import { caramelTabHandoffs } from './tab-handoff.js'
+// The server's own redaction rules (T-9959), bundled from the app so the cart
+// rows, the box-pick outline and a store's refusal are cleaned BEFORE they
+// leave the browser (T-10427). The server applies them again on arrival, for
+// builds older than this one.
+import { scrubCartItems } from '../caramel-app/src/lib/cartItemScrub.ts'
+import { redactStoreReason } from '../caramel-app/src/lib/codeShapedTokens.ts'
+import { scrubOutline } from '../caramel-app/src/lib/outlineScrub.ts'
 import {
     USAGE_DIAGNOSTICS_CONSENT_KEY,
     deleteTelemetryId,
@@ -499,6 +506,30 @@ async function couponBoxLlmEnabled() {
  * whole ask 24s, so the request can outwait the server's own limit; the page
  * waits PICK_WAIT_MS, 29s (coupon-box-discovery.js), so an answer sent inside
  * this deadline always reaches it. Raise one, raise the ones after it. */
+/* The cart signals classify-cart may see: the rows go through the server's
+ * own cart scrub (discount lines dropped, code-shaped tokens redacted). */
+export function scrubCartSignals(signals) {
+    const s = signals && typeof signals === 'object' ? signals : {}
+    if (!Array.isArray(s.cart_items)) return s
+    return {
+        ...s,
+        cart_items: scrubCartItems(
+            s.cart_items.filter(item => typeof item === 'string'),
+        ),
+    }
+}
+
+/* A store's refusal as the report may carry it: redacted with the server's
+ * rule (the catalog code being reported stays readable), then cut to the
+ * route's 200 characters, which refuses the WHOLE report above that. */
+const STORE_REASON_MAX = 200
+export function scrubStoreReason(reason, code) {
+    if (typeof reason !== 'string') return reason
+    return redactStoreReason(reason, typeof code === 'string' ? code : null)
+        .trim()
+        .slice(0, STORE_REASON_MAX)
+}
+
 export const COUPON_BOX_PICK_DEADLINE_MS = 24000
 const COUPON_BOX_PICK_TIMEOUT_MS = 23000
 const COUPON_BOX_PICK_MIN_MS = 3000
@@ -514,7 +545,13 @@ async function couponBoxPick({ domain, outline }) {
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ domain, outline }),
+                body: JSON.stringify({
+                    domain,
+                    outline:
+                        typeof outline === 'string'
+                            ? scrubOutline(outline)
+                            : outline,
+                }),
             },
             token,
         ),
@@ -1074,7 +1111,7 @@ export function initBackground() {
                 fetchCaramelApi(caramelUrl('api/classify-cart'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(message.signals || {}),
+                    body: JSON.stringify(scrubCartSignals(message.signals)),
                 })
                     .then(async r => {
                         if (!r.ok) return { error: `HTTP ${r.status}` }
@@ -1154,13 +1191,16 @@ export function initBackground() {
                 // Trust-loop signal from the apply flow (coupon-runner). Fire-and-forget:
                 // errors are logged, never surfaced — a report must not break checkout.
                 // A "worked" outcome also bumps the public usage counter.
-                const { id, outcome, storeReason, awaitResult } = message
+                const { id, outcome, storeReason, code, awaitResult } = message
                 const report = fetchCaramelApi(
                     caramelUrl(`api/coupons/${id}/report`),
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ outcome, storeReason }),
+                        body: JSON.stringify({
+                            outcome,
+                            storeReason: scrubStoreReason(storeReason, code),
+                        }),
                     },
                 )
                 if (awaitResult) {

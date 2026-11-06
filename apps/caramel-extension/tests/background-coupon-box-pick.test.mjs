@@ -153,6 +153,22 @@ describe('couponBoxPick', () => {
         })
     })
 
+    it('scrubs the outline before it leaves the browser: a code chip, an email and digits', async () => {
+        // T-10427: the server's own outline scrub (outlineScrub.ts) runs here
+        // too, so an applied-code chip never reaches the network.
+        responses.push(features(true), ok({ outcome: 'no_box' }))
+
+        await invoke({
+            ...PICK,
+            outline:
+                '- [3] button "Remove SAVE10"\n- [4] link "help@shop.com"\n- [5] text "Total $49"',
+        })
+
+        expect(JSON.parse(pickCalls()[0].opts.body).outline).toBe(
+            '- [3] button "Remove [code]"\n- [4] link "[email]"\n- [5] text "Total $##"',
+        )
+    })
+
     it('a refusal is passed back as an error, never retried', async () => {
         responses.push(features(true), {
             ok: false,

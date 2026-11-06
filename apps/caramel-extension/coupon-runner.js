@@ -145,8 +145,10 @@ function _reasonNamesCode(reason, code) {
 // Fire-and-forget trust-loop report → background (content scripts can't hit
 // the API directly). Best-effort: an asleep/unreachable SW must never break
 // the apply flow, so send errors are swallowed. No-op without a real coupon
-// id (the #caramel-test mock list carries none).
-export function reportOutcome(id, outcome, storeReason) {
+// id (the #caramel-test mock list carries none). `code` is the code being
+// reported: the background keeps it readable when it redacts the store's
+// reason (T-10427); it is not sent on.
+export function reportOutcome(id, outcome, storeReason, code) {
     if (!id) return
     try {
         const p = currentBrowser.runtime.sendMessage({
@@ -154,6 +156,7 @@ export function reportOutcome(id, outcome, storeReason) {
             id: String(id),
             outcome,
             storeReason,
+            code,
         })
         if (p && typeof p.then === 'function') p.catch(() => {})
     } catch (e) {
@@ -1922,7 +1925,7 @@ export async function startApplyingCoupons(rec, options) {
                     reason: 'the box was found by the finder and the store reason names neither the code nor a generic rejection',
                 })
             } else {
-                reportOutcome(failId, 'failed', reason)
+                reportOutcome(failId, 'failed', reason, failCode)
             }
         }
         // Nothing auto-applied. Hand the tried codes to the modal so the user
