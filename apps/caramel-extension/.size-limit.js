@@ -423,7 +423,12 @@ module.exports = [
         // remembered in storage.local, and a failed or late read answers that
         // remembered flag (read alongside the features) instead of a hard
         // "off". Measured 21.54 kB.
-        limit: '21.8 KB',
+        // 2026-11-06 (T-10427), raised 21.8 -> 25.6 kB: the server's own
+        // redaction rules (codeShapedTokens.ts, cartItemScrub.ts and
+        // outlineScrub.ts, imported from the app, never copied) run here on
+        // the cart rows, the box-pick outline and a store's refusal before
+        // they leave the browser. Measured 25.34 kB.
+        limit: '25.6 KB',
         brotli: false,
     },
     {
