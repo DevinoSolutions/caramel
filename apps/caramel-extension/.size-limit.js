@@ -471,9 +471,13 @@ module.exports = [
         // 2026-11-05 (T-11267), lowered 42.3 -> 40.8 kB: the overlay helpers
         // moved to dom-utils.js, shared with the apply flow's close of a store
         // alert. Measured 41.69 -> 40.29 kB.
+        // 2026-11-06 (T-14872), raised 40.8 -> 43 kB: a sales tax the store
+        // first shows as a code lands is set aside, and the code is judged by
+        // the deduction line or shipping drop it drew (johnstonmurphy.com).
+        // Measured 40.29 -> 42.42 kB.
         // It is written only here: tests/finder-module-build.test.mjs reads
         // it.
-        limit: '40.8 KB',
+        limit: '43 KB',
         brotli: false,
     },
     {
