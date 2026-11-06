@@ -1668,6 +1668,28 @@ describe('applyCoupon wait — the same refusal sentence again', () => {
         expect(res.errorIsNew).toBe(true)
     })
 
+    /* T-14842 again, the 1.4.40 store package on funko.com 2026-11-06: the
+     * store empties #invalidCouponCode ~10 ms after the click, before the
+     * wait's first read, and draws the sentence back ~250 ms later. The wait
+     * saw an empty indicator gain text and ended, but never marked it a
+     * redraw, so the verdict compared it with the pre-submit snapshot (the
+     * same words) and codes 2-4 again came back with no error. */
+    it('a sentence taken down before the wait began and drawn again is this code’s refusal', async () => {
+        const FUNKO = 'Please enter a valid Promo Code'
+        showError(FUNKO) // code 1's answer, still on the page
+        const rec = { ...BASE, errorIndicator: '#err' }
+        document.getElementById('apply').addEventListener('click', () => {
+            showError('')
+            setTimeout(() => showError(FUNKO), 250)
+        })
+
+        const res = await applyCoupon('NOPEBBB2', rec)
+
+        expect(res.success).toBe(false)
+        expect(res.errorMsg).toBe(FUNKO)
+        expect(res.errorIsNew).toBe(true)
+    })
+
     it('a sentence that simply stays put is still not an answer', async () => {
         showError(SENTENCE)
         const rec = { ...BASE, errorIndicator: '#err' }
