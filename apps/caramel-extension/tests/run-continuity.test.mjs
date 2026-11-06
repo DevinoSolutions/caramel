@@ -417,4 +417,40 @@ describe('picking the loop back up after the store navigated', () => {
         expect(await runRecord()).toBeNull()
         expect(finalModalCalls[0][0]).toBeCloseTo(20, 2)
     })
+
+    // 4inkjets.com (Magento, T-8654): the cart's totals are drawn by script a
+    // moment after the page loads, so the total was not there yet when the
+    // reloaded page looked. FALL18 took 18% off, was read as "unreadable", and
+    // the run put INK18 on top of it and ended on "couldn't find the promo box".
+    it('waits for a total the store draws after load, so the win is seen', async () => {
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('FALL18', 'c1', [84.95])
+        setTimeout(() => {
+            const el = document.createElement('div')
+            el.id = 'total'
+            Object.defineProperty(el, 'innerText', {
+                value: '$69.66',
+                configurable: true,
+            })
+            document.body.appendChild(el)
+        }, 1500)
+
+        await startCheckoutDetection()
+
+        expect(applyCalls).toEqual([])
+        expect(await runRecord()).toBeNull()
+        expect(finalModalCalls[0][0]).toBeCloseTo(15.29, 2)
+    }, 20000)
+
+    it('does not put the next code on a cart whose total it read before but cannot read now', async () => {
+        // The code it just submitted may have won: a second code would replace it.
+        await caramelBeginRun()
+        await caramelMarkPendingSubmit('FALL18', 'c1', [84.95])
+
+        await startCheckoutDetection()
+
+        expect(applyCalls).toEqual([])
+        expect(finalModalCalls).toHaveLength(1)
+        expect(finalModalCalls[0][2]).toMatch(/check your order summary/)
+    }, 20000)
 })

@@ -282,7 +282,12 @@ module.exports = [
         // this page" card notes its page, and a later URL takes it down so the
         // next checkout step is offered a run (Full Source's #shipping step
         // went unoffered behind the info step's card). Measured 116.10 kB.
-        limit: '116.4 KB',
+        // 2026-11-06 (T-8654), raised 116.4 -> 116.7 kB: a page a submit
+        // reloads to waits for a total the store draws after load (Magento,
+        // 4inkjets.com), and a config run whose total read before the submit
+        // but not after stops instead of chaining over a possible win.
+        // Measured 116.45 kB.
+        limit: '116.7 KB',
         brotli: false,
     },
     {

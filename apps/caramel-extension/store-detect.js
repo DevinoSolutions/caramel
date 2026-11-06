@@ -1005,6 +1005,17 @@ async function _caramelContinueRun(rec, finder = false) {
     return true
 }
 
+// The total, read again until the store has drawn it; NaN after waitMs.
+async function _caramelTotalOnceDrawn(read, waitMs = 6000) {
+    const until = Date.now() + waitMs
+    let total = read()
+    while (!Number.isFinite(total) && Date.now() < until) {
+        await sleep(250)
+        total = read()
+    }
+    return total
+}
+
 async function _resumePendingSubmit() {
     const pending = await caramelTakePendingSubmit()
     if (!pending) return false
@@ -1026,6 +1037,19 @@ async function _resumePendingSubmit() {
               ? getPrice(rec.priceContainer, { returnLargest: true })
               : NaN
     let now = readTotal()
+    // A cart that draws its totals by script after load (Magento's summary on
+    // 4inkjets.com, T-8654) has no total yet when this document looks: a code
+    // that took 18% off was read as "unreadable" and the run went on over it.
+    // The total was readable before the submit, so wait for it to be drawn.
+    // A finder attempt is not: its reader already refuses a summary caught
+    // mid-render (caramelFinderReadTotal), and it stops the run below.
+    if (
+        !Number.isFinite(now) &&
+        !pending.finder &&
+        rec?.priceContainer &&
+        pending.prices.length
+    )
+        now = await _caramelTotalOnceDrawn(readTotal)
     // Same tightest-defensible-baseline rule the in-page path uses, against the
     // prices captured before the submit — it can never overstate a saving.
     const baseline = caramelBaselineFor(now, pending.prices)
@@ -1107,13 +1131,15 @@ async function _resumePendingSubmit() {
 
     // That code didn't win, and on this kind of cart every code costs a page
     // load. Carry the run on rather than making the shopper click per code.
-    // A finder run goes on only when it could read the total and it did not
-    // move: an unreadable total may be hiding a win (the store renamed the
-    // row), and submitting the next code onto that cart could replace it.
-    if (pending.finder && !Number.isFinite(now))
+    // A run goes on only when it could read the total and it did not move: an
+    // unreadable total may be hiding a win (the store renamed the row), and
+    // submitting the next code onto that cart could replace it. A finder run
+    // always measured one; a config run did when its total read before the
+    // submit (a config whose total never reads still chains, as it always has).
+    if (!Number.isFinite(now) && (pending.finder || pending.prices.length))
         log('AUTO_INSERT_RUN_STOPS', {
             reason: 'total unreadable',
-            finder: true,
+            finder: !!pending.finder,
         })
     else if (await _caramelContinueRun(rec, !!pending.finder)) return true
     await caramelEndRun()
