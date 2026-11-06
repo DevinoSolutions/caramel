@@ -25,6 +25,7 @@
 // for the ingest route, which drops the entry after a store-config upsert
 // so a freshly pushed selector is served without waiting out the TTL.
 import { AUTO_DETECT_ORIGIN } from '@/lib/catalog/applyCatalogRows'
+import { servedPriceContainer } from '@/lib/catalog/shopifyCheckoutTotal'
 import { couponInputNamesOtherField } from '@/lib/catalog/storeConfigSanity'
 import { listSupportedStoreConfigs } from '@/lib/couponsRepo'
 import { requiredCapabilityFor } from '@/lib/extensionCapabilityGates'
@@ -62,7 +63,13 @@ async function build(): Promise<SupportedStoresPayload> {
         domain: r.store_name,
         couponInput: r.coupon_input_xpath,
         couponSubmit: r.apply_button_xpath,
-        priceContainer: r.price_container_xpath ?? undefined,
+        // A Shopify checkout row gets the one-page checkout total first
+        // (shopifyCheckoutTotal.ts, T-9860).
+        priceContainer:
+            servedPriceContainer(
+                r.coupon_input_xpath,
+                r.price_container_xpath,
+            ) ?? undefined,
         showInput: r.show_input_xpath ?? undefined,
         dismissButton: r.dismiss_button_xpath ?? undefined,
         successIndicator: r.success_indicator_xpath ?? undefined,
