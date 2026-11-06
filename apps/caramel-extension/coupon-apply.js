@@ -83,8 +83,12 @@ const GENERIC_REMOVE_SELECTORS_SCOPED =
 // every refused code waited out the whole window and the run stopped after two
 // codes (EARLY_PROBE), before FPBDAY, which takes $19.50 to $15.60. The same
 // phrase is in ERROR_WORDS_RE below.
+// "not recognised" too (T-14842): johnvarvatos.com refuses every code with
+// "Promo code is not recognised. Please try another." The finder already read
+// it as a refusal (_CARAMEL_FINDER_NO_RE), but the runner's report gate did not,
+// so no refused code there ever reached the catalog as 'failed'.
 export const GENERIC_ERROR_TEXT_RE =
-    /\b(invalid|expired|not\s+(valid|applicable|eligible)|limited\s+to|cannot\s+be\s+(applied|redeemed)|does(?:n['’]?t|\s+not)\s+apply|no\s+eligible|enter\s+a\s+valid|nicht|ungültig|abgelaufen|expiré|expirado|caducado)\b/i
+    /\b(invalid|expired|not\s+(valid|applicable|eligible|recogni[sz]ed)|limited\s+to|cannot\s+be\s+(applied|redeemed)|does(?:n['’]?t|\s+not)\s+apply|no\s+eligible|enter\s+a\s+valid|nicht|ungültig|abgelaufen|expiré|expirado|caducado)\b/i
 // `abgelaufen` / `expiré` / `expirado` / `caducado` are the same word as
 // "expired" in the four European languages our catalogue actually covers, and
 // each one is unambiguous — unlike the bare `nicht` above, they cannot appear in
