@@ -355,6 +355,9 @@ export interface HeroTicketSceneProps {
     // Fires once the GL context is created so the parent can cross-fade the
     // poster out from under the canvas.
     onReady?: () => void
+    // Fires when the browser drops the GL context (Safari does, under memory
+    // pressure): the loop is already stopped, the parent shows the poster.
+    onContextLost?: () => void
 }
 
 // Shared caramel-glass material for every ticket so they read as one family.
@@ -912,6 +915,7 @@ export default function HeroTicketScene({
     active,
     isDark,
     onReady,
+    onContextLost,
 }: HeroTicketSceneProps): React.JSX.Element {
     // Shared mutable reveal state (see RevealGate). Deliberately NOT the
     // Canvas onCreated signal: context creation precedes the first real
@@ -939,6 +943,20 @@ export default function HeroTicketScene({
                 alpha: true,
                 antialias: true,
                 powerPreference: 'high-performance',
+            }}
+            // A lost context hands three null shaders: the next frame threw
+            // "shaderSource must be an instance of WebGLShader" from the
+            // render loop (CARAMEL-3R, Safari, T-14851). Stop the loop at
+            // once, then let the parent put the poster back.
+            onCreated={state => {
+                state.gl.domElement.addEventListener(
+                    'webglcontextlost',
+                    () => {
+                        state.setFrameloop('never')
+                        onContextLost?.()
+                    },
+                    { once: true },
+                )
             }}
         >
             <SceneContents
