@@ -1,5 +1,6 @@
 import sitemap from '@/app/sitemap'
 import { AGENT_GUIDES } from '@/lib/agentSetup/agentSetup.config'
+import { STORE_PAGE_REVISED_AT } from '@/lib/seo/sitemapStores'
 import type { MetadataRoute } from 'next'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -183,30 +184,50 @@ describe('sitemap.ts — store entries are canonical, lowercase, deduped, policy
         expect(gap?.priority).toBe(0.7)
     })
 
-    it('carries lastModified through as the newest updated_at folded into the base, and omits it when no row had one', async () => {
+    it('carries lastModified through as the newest updated_at folded into the base, when that is newer than the store page revision', async () => {
         repoMock.listStoreSitemapEntries.mockResolvedValue([
             {
                 site: 'athleta.gap.com',
                 coupon_count: 7,
-                last_updated: d('2026-09-10T12:00:00Z'),
+                last_updated: d('2026-11-02T12:00:00Z'),
             },
             {
                 site: 'gap.com',
                 coupon_count: 30,
                 last_updated: d('2026-08-15T00:00:00Z'),
             },
-            { site: 'nodate.com', coupon_count: 1, last_updated: null },
         ])
 
         const entries = await renderSitemap()
         const gap = entries.find(e => e.url === `${ORIGIN}/coupons/gap.com`)
-        expect(gap?.lastModified).toEqual(d('2026-09-10T12:00:00Z'))
+        expect(gap?.lastModified).toEqual(d('2026-11-02T12:00:00Z'))
+        // Static routes never invent a date.
+        expect(
+            entries.find(e => e.url === `${ORIGIN}/`)?.lastModified,
+        ).toBeUndefined()
+    })
 
-        const nodate = entries.find(
-            e => e.url === `${ORIGIN}/coupons/nodate.com`,
-        )
-        expect(nodate).toBeDefined()
-        expect(nodate?.lastModified).toBeUndefined()
+    // T-7856: coursera.org's codes last changed 2026-08-04, so its lastmod
+    // said August after the store page was rewritten on 2026-10-24, and Google
+    // never recrawled it. A store page is never older than its own revision.
+    it('never dates a store page before the store page revision, with or without a catalog date', async () => {
+        repoMock.listStoreSitemapEntries.mockResolvedValue([
+            {
+                site: 'coursera.org',
+                coupon_count: 4,
+                last_updated: d('2026-08-04T11:19:49Z'),
+            },
+            { site: 'nodate.com', coupon_count: 1, last_updated: null },
+        ])
+
+        const entries = await renderSitemap()
+        for (const store of ['coursera.org', 'nodate.com']) {
+            expect(
+                entries.find(e => e.url === `${ORIGIN}/coupons/${store}`)
+                    ?.lastModified,
+            ).toEqual(STORE_PAGE_REVISED_AT)
+        }
+        expect(STORE_PAGE_REVISED_AT).toEqual(d('2026-10-24T18:42:40Z'))
         // Static routes never invent a date either.
         expect(
             entries.find(e => e.url === `${ORIGIN}/`)?.lastModified,
