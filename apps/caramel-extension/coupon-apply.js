@@ -1407,7 +1407,12 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         // its node removed from the page), the error that comes back is the
         // store's answer to this code. The verdict below reads it as one too
         // (errorRedrawn, T-14842).
-        let baseErrGone = false
+        // A store quick enough to take its sentence down before this first
+        // read (funko.com: ~10 ms after the click, T-14842) leaves baseErr
+        // empty; the snapshot taken before we submitted still has the words,
+        // so they have already gone.
+        const errShownBeforeSubmit = errorBaseline.text
+        let baseErrGone = !!errShownBeforeSubmit && !baseErr
         const startedAt = performance.now()
         while (performance.now() - startedAt < maxMs) {
             const nowSuccess = qAll(appliedSel).length
@@ -1418,7 +1423,11 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
             if (baseErr && (!t || (baseErrEl && !baseErrEl.isConnected)))
                 baseErrGone = true
             if (t.length && (t !== baseErr || baseErrGone)) {
-                if (t === baseErr) errorRedrawn = t
+                if (
+                    t === baseErr ||
+                    (baseErrGone && t === errShownBeforeSubmit)
+                )
+                    errorRedrawn = t
                 return 'errored'
             }
             await sleep(200)
