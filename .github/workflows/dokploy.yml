@@ -14,7 +14,7 @@
 # private network: the image goes to GHCR (a public package, so Dokploy pulls without a credential) and the release is a GitHub
 # Deployment plus a manifest line in the release job log that Dokploy reads itself.
 #
-# THE IMAGE. ghcr.io/devinosolutions/caramel-web, tagged <prod|dev>-<first 12 of the sha>. The NEXT_PUBLIC_* values are inlined into the
+# THE IMAGE. ghcr.io/devinosolutions/caramel/web, tagged <prod|dev>-<first 12 of the sha>. The NEXT_PUBLIC_* values are inlined into the
 # browser bundle at build time, so dev and prod are DIFFERENT images of the same commit. They are public client values, which is why
 # they are repository VARIABLES and not secrets: PROD_NEXT_PUBLIC_* for main and DEV_NEXT_PUBLIC_* for dev. They are repository variables,
 # not GitHub Environment variables, because a job that names an environment creates a GitHub Deployment. NEXT_PUBLIC_BASE_URL is required.
@@ -111,7 +111,7 @@ jobs:
                   file: Dockerfile
                   platforms: linux/amd64
                   push: true
-                  tags: ghcr.io/devinosolutions/caramel-web:${{ steps.args.outputs.tag }}
+                  tags: ghcr.io/devinosolutions/caramel/web:${{ steps.args.outputs.tag }}
                   build-args: ${{ steps.args.outputs.build-args }}
                   provenance: false
                   sbom: false
@@ -127,7 +127,7 @@ jobs:
               run: |
                   set -euo pipefail
                   [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no image digest from the build"; exit 1; }
-                  ref="ghcr.io/devinosolutions/caramel-web@${DIGEST}"
+                  ref="ghcr.io/devinosolutions/caramel/web@${DIGEST}"
                   raw=''
                   for attempt in 1 2 3; do
                     if docker buildx imagetools inspect --raw "${ref}" > "${RUNNER_TEMP}/manifest.raw"; then
@@ -139,12 +139,12 @@ jobs:
                   # Dokploy pulls without a credential: prove the package is public with an anonymous token and a manifest HEAD.
                   code=000
                   for attempt in 1 2 3; do
-                    token="$(curl -fsS "https://ghcr.io/token?scope=repository:devinosolutions/caramel-web:pull" | jq -r '.token // empty' || true)"
-                    code="$(curl -s -o /dev/null -w '%{http_code}' -I -H "Authorization: Bearer ${token}" -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json' "https://ghcr.io/v2/devinosolutions/caramel-web/manifests/${DIGEST}" || true)"
+                    token="$(curl -fsS "https://ghcr.io/token?scope=repository:devinosolutions/caramel/web:pull" | jq -r '.token // empty' || true)"
+                    code="$(curl -s -o /dev/null -w '%{http_code}' -I -H "Authorization: Bearer ${token}" -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json' "https://ghcr.io/v2/devinosolutions/caramel/web/manifests/${DIGEST}" || true)"
                     [ "${code}" = 200 ] && break
                     sleep $((attempt * 5))
                   done
-                  [ "${code}" = 200 ] || { echo "::error::ghcr.io/devinosolutions/caramel-web is not pullable anonymously (HTTP ${code}); make the package public"; exit 1; }
+                  [ "${code}" = 200 ] || { echo "::error::ghcr.io/devinosolutions/caramel/web is not pullable anonymously (HTTP ${code}); make the package public"; exit 1; }
                   echo "digest_web=${DIGEST}" >> "${GITHUB_OUTPUT}"
                   echo "- \`${ref}\`" >> "${GITHUB_STEP_SUMMARY}"
 
@@ -172,7 +172,7 @@ jobs:
                   {
                     echo "key=${key}"
                     echo 'lines<<EOF_IMAGES'
-                    echo "${key}/web=ghcr.io/devinosolutions/caramel-web@${DIGEST_WEB}"
+                    echo "${key}/web=ghcr.io/devinosolutions/caramel/web@${DIGEST_WEB}"
                     echo 'EOF_IMAGES'
                   } >> "${GITHUB_OUTPUT}"
             - uses: DevinoSolutions/dokploy-release@d66a2e9a36c7c154f92f9aa18b7f7aced6e73b77 # v1.1.0
