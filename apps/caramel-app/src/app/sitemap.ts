@@ -10,6 +10,7 @@ import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
 import {
     STORE_SITEMAP_ROW_LIMIT,
     collapseStoreRows,
+    storeLastModified,
 } from '@/lib/seo/sitemapStores'
 import { bucketStoresByLetter, directoryPath } from '@/lib/seo/storeDirectory'
 import type { MetadataRoute } from 'next'
@@ -69,8 +70,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // and filtered by the SAME indexability policy the page's robots meta
     // uses (src/lib/seo/storeIndexability.ts) — so every store <loc> here is
     // its own canonical and never a noindexed page. `lastModified` is the
-    // newest `coupons.updated_at` folded into that base: a real catalog
-    // timestamp, the freshness signal Google needs to re-read a sitemap.
+    // newest `coupons.updated_at` folded into that base, or the store page's
+    // own last revision (STORE_PAGE_REVISED_AT) when that is newer: both are
+    // real changes to the page, the freshness signal Google needs to recrawl.
     const [storeRows, activeSources] = await Promise.all([
         listStoreSitemapEntries(STORE_SITEMAP_ROW_LIMIT),
         listActiveSources(),
@@ -112,7 +114,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         })),
         ...stores.map(store => ({
             url: `${origin}/coupons/${encodeURIComponent(store.base)}`,
-            ...(store.lastModified ? { lastModified: store.lastModified } : {}),
+            lastModified: storeLastModified(store.lastModified),
             changeFrequency: 'daily' as const,
             priority: 0.7,
         })),

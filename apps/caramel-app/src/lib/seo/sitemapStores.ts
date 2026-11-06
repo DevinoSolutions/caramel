@@ -24,6 +24,32 @@ import { resolveStoreDomain } from '@/lib/storeDomain'
  */
 export const STORE_SITEMAP_ROW_LIMIT = 5000
 
+/**
+ * When the store page itself last changed in a way Google reads: its title,
+ * H1, meta description or main content (not a styling or tooling change). A
+ * store's sitemap `lastmod` is never older than this.
+ *
+ * Why (T-7856, 2026-11-06): `lastmod` used to be the catalog date alone, so a
+ * store whose codes had not changed since August kept telling Google "nothing
+ * new since August" after the 2026-09-30 titles and the 2026-10-24 intent
+ * pilot rewrote its page. Google did not recrawl those pages (coursera.org and
+ * dominos.com: last crawl 2026-09-19) and kept ranking the old version.
+ *
+ * Bump it, to the go-live time, with any PR that changes what the store page
+ * says. Current value: #491 (1caee022), the search-intent titles, H1s and
+ * freshness line, live 2026-10-24 18:42 UTC.
+ */
+export const STORE_PAGE_REVISED_AT = new Date('2026-10-24T18:42:40Z')
+
+/** A store's sitemap `lastmod`: its newest code change, or the store page's
+ * own last revision when that is newer. */
+export function storeLastModified(catalogUpdatedAt: Date | null): Date {
+    return (
+        newerOf(catalogUpdatedAt, STORE_PAGE_REVISED_AT) ??
+        STORE_PAGE_REVISED_AT
+    )
+}
+
 /** One `GROUP BY site` row from couponsRepo.listStoreSitemapEntries. */
 export type StoreSitemapRow = {
     site: string | null
