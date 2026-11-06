@@ -1388,6 +1388,9 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
          gains text). Many sites (logos.com, hybris-style carts) need
          1.5-3s to render their applied row; fixed 1.2s sleeps cause
          the next attempt to mis-attribute the prior code's row. */
+    // The indicator's sentence, when the store took it down after we
+    // submitted and drew the same words again (see waitForCartSignal).
+    let errorRedrawn = ''
     async function waitForCartSignal(maxMs) {
         const baseSuccess = qAll(appliedSel).length
         // Use _firstVisibleErrorEl so multi-error-container sites
@@ -1402,8 +1405,8 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
         // (comfrt.com 2026-10-26: 10s a code, 4 of 8 codes in the budget,
         // T-9176). Once that sentence has gone (blank or hidden at a read, or
         // its node removed from the page), the error that comes back is the
-        // store's answer to this code. Only ends the wait; the verdict below
-        // still reads the error the way it always has.
+        // store's answer to this code. The verdict below reads it as one too
+        // (errorRedrawn, T-14842).
         let baseErrGone = false
         const startedAt = performance.now()
         while (performance.now() - startedAt < maxMs) {
@@ -1414,7 +1417,10 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
                 errEl && _isVisible(errEl) ? (errEl.innerText || '').trim() : ''
             if (baseErr && (!t || (baseErrEl && !baseErrEl.isConnected)))
                 baseErrGone = true
-            if (t.length && (t !== baseErr || baseErrGone)) return 'errored'
+            if (t.length && (t !== baseErr || baseErrGone)) {
+                if (t === baseErr) errorRedrawn = t
+                return 'errored'
+            }
             await sleep(200)
         }
         return 'timeout-' + maxMs + 'ms'
@@ -1706,9 +1712,15 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     }
     // The store's answer is read around the box: the one it drew, if it did.
     if (rec.caramelFound) caramelRemarkFoundBox(false, rec)
+    // A sentence the store took down and drew again was not there when it
+    // answered: read it like one drawn into an empty indicator. funko.com
+    // says "Please enter a valid Promo Code" to every code, no rejection word
+    // in it, and codes 2-4 came back with no error at all (T-14842).
     const errorText = detectCouponError(
         rec,
-        errorBaseline,
+        errorRedrawn
+            ? { text: '', visible: errorBaseline.visible }
+            : errorBaseline,
         code,
         priorAreaText,
         alertsBefore,
@@ -1724,8 +1736,11 @@ export async function caramelAwaitCouponVerdict(rec, snapshot, opts) {
     // Quotable only if the store said it BECAUSE of us (see
     // _caramelCouponAreaText). Detection above is deliberately untouched.
     // Or the store drew it again for this code (_caramelWatchRedraws): the
-    // last read of the watch, which ends here.
-    const errorIsNew = _caramelSaidSinceSubmit(errorMsg, priorAreaText)
+    // last read of the watch, which ends here. Or its indicator took it down
+    // and said it again (errorRedrawn).
+    const errorIsNew =
+        _caramelSaidSinceSubmit(errorMsg, priorAreaText) ||
+        (!!errorRedrawn && errorText === errorRedrawn)
     snapshot.redraws?.stop()
     if (
         errorIsNew &&
