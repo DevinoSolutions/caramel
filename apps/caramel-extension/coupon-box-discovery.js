@@ -1739,13 +1739,132 @@ function newDeduction(el, base) {
     return off
 }
 
+/* A code that takes money off can make the store work out sales tax at the
+ * same moment, and the total then goes UP (T-14872). johnstonmurphy.com (SFCC,
+ * no config, 2026-11-06): before a code its summary read "Sales Tax calculated
+ * in checkout" and "Estimated Total $198.95"; FREESHIP26 drew "Shipping
+ * Discount - $9.95" and, with it, "Sales Tax $18.90". The total read $207.90,
+ * and a code that worked was called a miss.
+ *
+ * So the read before a code records whether the page showed a tax amount, the
+ * deduction lines it showed and its shipping charge. A later read on a page
+ * that now shows a tax amount it did not show before sets that tax aside: the
+ * total without it is what the code's own moves left. That is believed only
+ * when the page shows WHY the total (less the tax) fell, to the cent: a new
+ * deduction line ("Shipping Discount - $9.95") or a shipping charge that fell
+ * by that much. A tax the page already showed and that changed is not set
+ * aside: that costs a win, never invents one. */
+const TAX_WORDS = /\btax(?:es)?\b/i
+const TAX_LABEL =
+    /^(?:(?:estimated|est\.?|sales|state|local|order) )*tax(?:es)?(?: \(.*\))?:?$/i
+const TAX_NOT = /total|incl|exclud|before|after|free|exempt/i
+const DEDUCT_WORDS = /discount|promo|coupon|voucher|savings?\b/i
+const DEDUCT_LABEL =
+    /^(?:(?:shipping|delivery|order|cart|basket) )?(?:coupon|discount|promo(?:tion)?|voucher|savings?)s?(?: code)?\b[^.!?]{0,30}$/i
+// DISCOUNT_NOT without "shipping" and "savings": a shipping discount and a
+// "Savings" row are the lines a code draws here.
+const DEDUCT_NOT =
+    /total|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card|not appl|pending|up to|next/i
+const SHIP_WORDS = /shipping|delivery/i
+const SHIP_LABEL =
+    /^(?:(?:standard|ground|estimated|est\.?) )?(?:shipping|delivery)(?: (?:&|and) handling)?:?$/i
+const SHIP_NOT = /discount|free|over|away|tax|total|insur|protect/i
+
+// Every shown row under a label: its amount (NaN unless exactly one) and the
+// line it reads as.
+function shownRows(doc, LABEL, NOT, words) {
+    return scanTotalRows(doc, LABEL, NOT, { words })
+        .filter(h => h.visible)
+        .map(h => {
+            const money = caramelFindMoney(textOf(h.el))
+            return {
+                label: h.label,
+                amount: money.length === 1 ? Math.abs(money[0].value) : NaN,
+                line: (h.line || textOf(h.el)).replace(/\s+/g, ' ').trim(),
+            }
+        })
+}
+
+// The one shipping charge the page shows: its amount, 0 for a row that reads
+// "Free", NaN for none or more than one.
+function shippingShown(doc) {
+    const rows = shownRows(doc, SHIP_LABEL, SHIP_NOT, SHIP_WORDS)
+    if (rows.length) return rows.length === 1 ? rows[0].amount : NaN
+    const tw = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+        acceptNode: n =>
+            SHIP_WORDS.test(n.textContent)
+                ? NodeFilter.FILTER_ACCEPT
+                : NodeFilter.FILTER_SKIP,
+    })
+    let free = 0
+    for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+        const el = n.parentElement
+        const { own } = el ? ownLabel(el) : { own: '' }
+        if (!SHIP_LABEL.test(own) || !visible(el)) continue
+        for (let p = el, i = 0; p && i < 3; p = p.parentElement, i++) {
+            const t = norm(textOf(p))
+            if (t.length > 40) break
+            if (/^\W*free\W*$/.test(t.replace(own, ''))) {
+                free++
+                break
+            }
+        }
+    }
+    return free === 1 ? 0 : NaN
+}
+
+function taxBefore(doc) {
+    return {
+        taxShown: shownRows(doc, TAX_LABEL, TAX_NOT, TAX_WORDS).length > 0,
+        lines: shownRows(doc, DEDUCT_LABEL, DEDUCT_NOT, DEDUCT_WORDS).map(
+            r => `${r.label}|${r.amount}`,
+        ),
+        shipping: shippingShown(doc),
+    }
+}
+
+function taxSetAside(doc, rec, gross) {
+    const base = rec.caramelTaxBase
+    if (!base || base.taxShown) return gross
+    const tax = shownRows(doc, TAX_LABEL, TAX_NOT, TAX_WORDS)
+    if (tax.length !== 1 || !(tax[0].amount > 0)) return gross
+    const cents = n => Math.round(n * 100) / 100
+    const net = cents(gross - tax[0].amount)
+    const drop = cents(base.gross - net)
+    if (!(drop > 0) || !(net > 0)) return gross
+    const same = a => Math.abs(a - drop) < 0.005
+    const line = shownRows(doc, DEDUCT_LABEL, DEDUCT_NOT, DEDUCT_WORDS).some(
+        r =>
+            same(r.amount) &&
+            LINE_AMOUNT.test(r.line) &&
+            !base.lines.includes(`${r.label}|${r.amount}`),
+    )
+    const ship = shippingShown(doc)
+    const shipFell =
+        Number.isFinite(base.shipping) &&
+        Number.isFinite(ship) &&
+        same(cents(base.shipping - ship))
+    if (!line && !shipFell) return gross
+    caramelSetLastPrices([net])
+    rec.caramelNetted = true
+    return net
+}
+
 function finderTotal(selector, kind, doc, rec, baseline, code) {
     if (rec) {
         rec.caramelNetted = false
-        if (baseline) rec.caramelSubtotalBase = null
+        if (baseline) {
+            rec.caramelSubtotalBase = null
+            rec.caramelTaxBase = null
+        }
     }
     const gross = positiveTotal(selector)
-    if (kind !== 'subtotal' || !(gross > 0) || !rec) return gross
+    if (!(gross > 0) || !rec) return gross
+    if (kind !== 'subtotal') {
+        if (!baseline) return taxSetAside(doc, rec, gross)
+        rec.caramelTaxBase = { gross, ...taxBefore(doc) }
+        return gross
+    }
     const el = doc.querySelector(selector)
     if (baseline) {
         rec.caramelSubtotalBase = { gross, code, ...summaryBefore(el) }
@@ -2873,7 +2992,10 @@ export function caramelFinderTotalNow(
 ) {
     // A baseline read that fails below must not leave the last code's
     // baseline (and its code name) for this code's later reads.
-    if (baseline) rec.caramelSubtotalBase = null
+    if (baseline) {
+        rec.caramelSubtotalBase = null
+        rec.caramelTaxBase = null
+    }
     const el = doc.querySelector(rec.priceContainer)
     if (!el || !el.isConnected || !_isVisible(el)) {
         const row = findSameTotalRow(doc, {
