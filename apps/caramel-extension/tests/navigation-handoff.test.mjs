@@ -556,7 +556,8 @@ describe('store-detect.js — the page after the navigation', () => {
 
     it('says it cannot tell, rather than guessing, when nothing is readable', async () => {
         // No price on the page at all — the case where treating "submitted +
-        // reloaded" as success would invent a saving.
+        // reloaded" as success would invent a saving. The page first waits out
+        // a total the store might still draw (store-detect.js, T-8654).
         await caramelMarkPendingSubmit('THEO20', 'c1', [73.9])
 
         await startCheckoutDetection()
@@ -567,7 +568,7 @@ describe('store-detect.js — the page after the navigation', () => {
         expect(message).toMatch(/check your order summary/i)
         expect(recordedSavings).toEqual([])
         expect(reportedOutcomes).toEqual([])
-    })
+    }, 20000)
 
     it('never turns a price RISE into a saving', async () => {
         // Shipping added after the reload: the tightest-baseline rule has no
