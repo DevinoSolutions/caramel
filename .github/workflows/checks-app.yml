@@ -470,21 +470,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v6
-        with:
-          run_install: false
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright
-        run: pnpm --filter caramel-app exec playwright install --with-deps chromium
-
       # NOTE: the PostHog real-ingestion env is deliberately NOT set here yet.
       # The deployed dev site does not have PostHog baked into its bundle until
       # this branch merges + redeploys, so support-flow.spec.ts's ingestion
@@ -508,26 +493,41 @@ jobs:
       # compose". That happened on 2026-08-08: grabcaramel.com IS the compose
       # stack and answers a real sha.
       #
-      # The two branches need OPPOSITE timeouts, because they deploy in
-      # opposite ways:
-      #   dev  — autodeploy ON. Wait out a real build (a push burst can queue
-      #          one behind another), so 1200s.
-      #   main — autoDeploy is OFF BY DESIGN on the prod compose. No deploy is
-      #          coming, so waiting is pure latency: poll once and fail with the
-      #          exact reason. Before this, a merge that changed any asserted
-      #          copy surfaced as ~13 `locator.fill: Test timeout` errors after
-      #          ~30 minutes (2026-08-09, the auth redesign) — all of which
-      #          meant only "prod is still serving an older commit".
+      # Both branches auto-deploy now (2026-11-07): the prod compose moved to
+      # the native GitHub Actions pull mode, so a merge to main publishes a
+      # release that Dokploy deploys within minutes, exactly like dev. Wait out
+      # a real deploy on both (a push burst can queue one behind another), so
+      # 1200s each. Before this, main polled once with a 0s timeout and the
+      # 237e198d push E2E went red at 22:04Z, fourteen minutes before the deploy
+      # it was waiting for landed at 22:18Z.
       - name: Wait for the deployment to carry this commit
         env:
           VERSION_URL: "${{ github.ref == 'refs/heads/dev' && 'https://dev.grabcaramel.com/api/version' || 'https://grabcaramel.com/api/version' }}"
           EXPECTED_SHA: '${{ github.sha }}'
           GH_TOKEN: '${{ github.token }}'
-          DEPLOY_WAIT_TIMEOUT_SECONDS: "${{ github.ref == 'refs/heads/dev' && '1200' || '0' }}"
-          # Quoted: the prod branch of this expression contains ': ', which YAML
-          # would otherwise read as a nested mapping key.
-          DEPLOY_WAIT_HINT: "${{ github.ref == 'refs/heads/dev' && '' || 'Prod deploys are MANUAL: the Dokploy prod compose has autoDeploy OFF by design, so merging to main never reaches grabcaramel.com. This is not a failed deploy and not a broken build — the E2E suite runs against the LIVE site, so it cannot verify a commit prod is not carrying (prod serving this commit or a descendant of it passes). Deploy the prod compose, then re-run this job once, for the newest merge commit only.' }}"
+          DEPLOY_WAIT_TIMEOUT_SECONDS: '1200'
+          DEPLOY_WAIT_HINT: 'The site is still serving an older commit after 20 minutes. Both environments deploy from GitHub Actions (Dokploy pull mode): check the Dokploy workflow run for this commit and the service deployments tab, then re-run this job once the deploy has landed.'
         run: bash .github/workflows/scripts/wait-for-deploy.sh
+
+      # Order matters: the deploy gate runs BEFORE the toolchain installs. On main the gate polls
+      # once and fails with the exact reason whenever a manual prod deploy has not caught up
+      # (the common case), so installing pnpm deps + a Chromium first spent about 40s of a
+      # runner on every such red before the first useful line. Nothing below needs to run
+      # unless the deployment carries this commit.
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright
+        run: pnpm --filter caramel-app exec playwright install --with-deps chromium
 
       # run-e2e-push.sh wraps `pnpm test:e2e`: when the suite fails while the
       # served sha CHANGED during the run (a manual prod deploy swapped the
