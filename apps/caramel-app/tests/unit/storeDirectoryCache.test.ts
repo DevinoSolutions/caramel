@@ -33,7 +33,12 @@ describe('getStoreDirectoryEntries', () => {
         const entries = await getStoreDirectoryEntries()
         expect(repoMock.listStoreSitemapEntries).toHaveBeenCalledWith(5000)
         expect(entries).toEqual([
-            { base: 'gap.com', couponCount: 37, lastModified: d('2026-09-01') },
+            {
+                base: 'gap.com',
+                couponCount: 37,
+                lastModified: d('2026-09-01'),
+                firstCreatedAt: null,
+            },
         ])
     })
 

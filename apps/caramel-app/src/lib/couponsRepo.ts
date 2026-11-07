@@ -72,6 +72,8 @@ import {
     SiteCountRowSchema,
     type SiteRow,
     SiteRowSchema,
+    type SiteSitemapRow,
+    SiteSitemapRowSchema,
     type SourceRow,
     SourceRowSchema,
     type StatsRow,
@@ -618,24 +620,27 @@ export async function listStoreOptions(
  *
  * `MAX(updated_at)` is the sitemap's `<lastmod>` source — a real catalog
  * timestamp (the producer's last-write stamp), never an invented date.
+ * `MIN(created_at)` is the age of the store page's content, read by
+ * sitemapStorePrune.ts to keep stores too new to have been judged in GSC.
  * `visibleCouponsWhere()` is the same predicate the store page counts with, so
  * a site that appears here has ≥1 visible coupon under that raw slug.
  * `site IS NOT NULL` makes the row's `site` non-null (SiteAggregateRowSchema).
  */
 export async function listStoreSitemapEntries(
     limit: number,
-): Promise<SiteAggregateRow[]> {
+): Promise<SiteSitemapRow[]> {
     const rawRows = await prisma.$queryRaw(Prisma.sql`
         SELECT site,
                COUNT(*)::int AS coupon_count,
-               MAX(updated_at) AS last_updated
+               MAX(updated_at) AS last_updated,
+               MIN(created_at) AS first_created
         FROM coupons
         WHERE ${visibleCouponsWhere()} AND site IS NOT NULL
         GROUP BY site
         ORDER BY site ASC
         LIMIT ${limit}
     `)
-    return parseCouponRows(SiteAggregateRowSchema, rawRows, 'sitemap.stores')
+    return parseCouponRows(SiteSitemapRowSchema, rawRows, 'sitemap.stores')
 }
 
 /** The two raw-slug windows around a store, for the store page's "More stores" links. */

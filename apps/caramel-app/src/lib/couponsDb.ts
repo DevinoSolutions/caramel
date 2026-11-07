@@ -265,6 +265,19 @@ export const SiteAggregateRowSchema = z.object({
 export type SiteAggregateRow = z.infer<typeof SiteAggregateRowSchema>
 
 /**
+ * app/sitemap.ts's own read: SiteAggregateRow plus `first_created`, the
+ * `MIN(created_at)` of the site's visible coupons — how long the store page has
+ * had content (sitemapStorePrune.ts's "too new to judge" guard). Its own schema
+ * so the neighbour-window reads that share SiteAggregateRowSchema do not pay
+ * for a column they never use. `created_at` is NOT NULL, so a group always has
+ * one; `z.coerce.date()` for the same driver-tolerance reason as `last_updated`.
+ */
+export const SiteSitemapRowSchema = SiteAggregateRowSchema.extend({
+    first_created: z.coerce.date(),
+})
+export type SiteSitemapRow = z.infer<typeof SiteSitemapRowSchema>
+
+/**
  * supported-stores/page.tsx's "Recently added" strip — one row per store that
  * has just become supported, newest first.
  *

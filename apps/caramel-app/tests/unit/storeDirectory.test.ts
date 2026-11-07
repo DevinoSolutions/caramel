@@ -260,6 +260,7 @@ describe('pickNeighbourStores', () => {
                 base: 'gap.com',
                 couponCount: 37,
                 lastModified: d('2026-09-01T00:00:00Z'),
+                firstCreatedAt: null,
             },
         ])
     })

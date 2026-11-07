@@ -55,6 +55,12 @@ export type StoreSitemapRow = {
     site: string | null
     coupon_count: number
     last_updated: Date | null
+    /**
+     * `MIN(created_at)` of the site's visible coupons. Optional: only the
+     * sitemap read selects it (the A–Z directory and neighbour windows share
+     * this type and never look at it); absent = age unknown.
+     */
+    first_created?: Date | null
 }
 
 /** One canonical `/coupons/<base>` sitemap entry. */
@@ -63,6 +69,22 @@ export type StoreSitemapEntry = {
     couponCount: number
     /** Newest `coupons.updated_at` across every slug folded into this base. */
     lastModified: Date | null
+    /**
+     * Oldest `coupons.created_at` across every slug folded into this base — how
+     * long the store page has had content. `null`/absent = unknown (any folded
+     * slug without a known date); collapseStoreRows always sets it.
+     */
+    firstCreatedAt?: Date | null
+}
+
+// Unknown age is contagious: one slug of a base with no known creation date
+// makes the whole base unknown, so the prune guard keeps it in the sitemap.
+function olderOf(
+    a: Date | null | undefined,
+    b: Date | null | undefined,
+): Date | null {
+    if (!a || !b) return null
+    return b.getTime() < a.getTime() ? b : a
 }
 
 function newerOf(a: Date | null, b: Date | null): Date | null {
@@ -73,7 +95,8 @@ function newerOf(a: Date | null, b: Date | null): Date | null {
 
 /**
  * Group rows by their registrable domain, summing counts and keeping the
- * newest timestamp, then keep only the bases the indexability policy admits.
+ * newest update and the oldest creation timestamp, then keep only the bases
+ * the indexability policy admits.
  * Rows whose `site` resolves to no store (null, '', a bare public suffix, a
  * non-domain string) are dropped — the page would `noindex` them anyway.
  * Output is sorted by base for a stable, diffable sitemap.
@@ -96,11 +119,16 @@ export function collapseStoreRows(
                 existing.lastModified,
                 row.last_updated,
             )
+            existing.firstCreatedAt = olderOf(
+                existing.firstCreatedAt,
+                row.first_created ?? null,
+            )
         } else {
             byBase.set(base, {
                 base,
                 couponCount: count,
                 lastModified: row.last_updated,
+                firstCreatedAt: row.first_created ?? null,
             })
         }
     }
