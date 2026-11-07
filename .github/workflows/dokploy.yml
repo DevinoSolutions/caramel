@@ -1,0 +1,187 @@
+# Builds the `web` image of docker-compose.yml ONCE per commit on a GitHub-hosted runner, pushes it to GHCR by digest and publishes a
+# Dokploy release (T-15041). Dokploy never builds Caramel from source once this file is live: it polls GitHub (outbound only), reads the
+# release, checks it against this run and deploys the digest. This file holds no Dokploy address and no Dokploy API key. The only step
+# that talks to the Dokploy contract is the public action DevinoSolutions/dokploy-release. Same shape as UpUp (DevinoSolutions/UpUp #690).
+#
+# ONE FILE FOR BOTH ENVIRONMENTS. The ref decides the target:
+#   dev   (push or manual run) -> GitHub Environment `development` -> Dokploy compose "caramel-compose"             (release key `caramel-dev`)
+#   main  (push or manual run) -> GitHub Environment `production`  -> Dokploy compose "Caramel Prod Compose (LIVE)" (release key `caramel`)
+# Every push to main or dev builds that commit once and publishes one release. Nothing reaches a server until the Dokploy compose of that
+# key has a Connect (Dokploy Settings, GitHub Actions); the Connect, not this file, decides whether a release is deployed. The file does
+# not depend on dev containing main: a push to main publishes the production release by itself.
+# Pull requests are not built here: the compose-build job in checks-app.yml already builds the same Dockerfile and boots the stack.
+#
+# WHY HOSTED RUNNERS. Caramel is PUBLIC; the organisation self-hosted runner group refuses public repositories. Nothing here needs the
+# private network: the image goes to GHCR (a public package, so Dokploy pulls without a credential) and the release is a GitHub
+# Deployment plus a manifest line in the release job log that Dokploy reads itself.
+#
+# THE IMAGE. ghcr.io/devinosolutions/caramel/web, tagged <prod|dev>-<first 12 of the sha>. The NEXT_PUBLIC_* values are inlined into the
+# browser bundle at build time, so dev and prod are DIFFERENT images of the same commit. They are public client values, which is why
+# they are repository VARIABLES and not secrets: PROD_NEXT_PUBLIC_* for main and DEV_NEXT_PUBLIC_* for dev. They are repository variables,
+# not GitHub Environment variables, because a job that names an environment creates a GitHub Deployment. NEXT_PUBLIC_BASE_URL is required.
+# A variable that is empty or unset is left out of the build, so the Dockerfile default applies (the same default docker-compose.yml
+# uses). WHEN A NEXT_PUBLIC_* VALUE CHANGES IN THE DOKPLOY ENVIRONMENT TAB, CHANGE THE SAME PROD_/DEV_ VARIABLE TOO, or the next build
+# keeps the old value. Runtime secrets (auth, email, OpenRouter, extension OAuth, ...) never appear here: they stay in the Dokploy
+# Environment tab. The package must be PUBLIC (Settings of the package on GitHub).
+#
+# THE RELEASE. After the image is pushed and verified, the `release` job publishes ONE release for the branch Dokploy compose: the key
+# is `caramel` (main) or `caramel-dev` (dev), the compose service is web (postgres keeps its own image), and the image is taken from a
+# job output of THIS run (a tag is refused). The manifest is read from the release job log (`upload-artifact: false`). Dokploy deploys it
+# only once a Connect exists for that key (Dokploy Settings, GitHub Actions); until then the release is published and ignored, exactly
+# like a dry run. Only the release job names an environment: production (main only) or development (dev only), each with a deployment
+# branch policy that Dokploy re-reads at every acceptance.
+#
+# Layer cache: GitHub own (type=gha, mode=min to stay inside the repository cache quota). A branch cannot write the default branch scope.
+name: Dokploy
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+concurrency:
+  # One run per ref; a newer push waits behind the running one. Never cancel a run that may be publishing a release.
+  group: dokploy-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  build:
+    name: build web
+    # main and dev, on push or by a manual run; any other ref is skipped.
+    if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # No `environment:` here on purpose: it would create a GitHub Deployment for the build.
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest_web: ${{ steps.verify.outputs.digest_web }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Collect the build arguments
+        id: args
+        env:
+          # The exact `args:` of the web build block in docker-compose.yml.
+          NAMES: >-
+            NEXT_PUBLIC_BASE_URL NEXT_PUBLIC_SENTRY_DSN NEXT_PUBLIC_GOOGLE_ANALYTICS_ID NEXT_PUBLIC_API_ENCRYPTION_ENABLED
+            NEXT_PUBLIC_POSTHOG_DATASET NEXT_PUBLIC_POSTHOG_HOST NEXT_PUBLIC_POSTHOG_KEY
+            NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_HOST NEXT_PUBLIC_POSTHOG_E2E_TEST_PROJECT_CAPTURE_TOKEN
+          REF: ${{ github.ref }}
+          # Repository variables only (PROD_* / DEV_*); the script below picks the set of the branch. Public client values, not secrets.
+          VARS_JSON: ${{ toJSON(vars) }}
+        run: |
+          set -euo pipefail
+          prefix=DEV_
+          [ "${REF}" != refs/heads/main ] || prefix=PROD_
+          set_names=()
+          {
+            echo 'build-args<<EOF_BUILD_ARGS'
+            for name in ${NAMES}; do
+              value="$(printf '%s' "${VARS_JSON}" | jq -r --arg key "${prefix}${name}" '.[$key] // ""')"
+              case "${value}" in *$'\n'*|*$'\r'*) echo "::error::variable ${prefix}${name} is not a single line" >&2; exit 1 ;; esac
+              if [ "${name}" = "NEXT_PUBLIC_BASE_URL" ] && [ -z "${value}" ]; then
+                echo "::error::the repository variable ${prefix}NEXT_PUBLIC_BASE_URL is not defined" >&2; exit 1
+              fi
+              # An empty argument would clobber the Dockerfile default: leave it out instead.
+              [ -z "${value}" ] || { set_names+=("${name}"); echo "${name}=${value}"; }
+            done
+            echo 'EOF_BUILD_ARGS'
+          } >> "${GITHUB_OUTPUT}"
+          echo "build args set from ${prefix}* variables (names only): ${set_names[*]:-none}"
+          case "${REF}" in
+            refs/heads/main) tag=prod ;;
+            *) tag=dev ;;
+          esac
+          echo "tag=${tag}-${GITHUB_SHA:0:12}" >> "${GITHUB_OUTPUT}"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build once and push web
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+          DOCKER_BUILD_SUMMARY: false
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/devinosolutions/caramel/web:${{ steps.args.outputs.tag }}
+          build-args: ${{ steps.args.outputs.build-args }}
+          provenance: false
+          sbom: false
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=caramel-web
+          cache-to: type=gha,mode=min,scope=caramel-web
+      - name: Check that GHCR serves the pushed digest
+        id: verify
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no image digest from the build"; exit 1; }
+          ref="ghcr.io/devinosolutions/caramel/web@${DIGEST}"
+          raw=''
+          for attempt in 1 2 3; do
+            if docker buildx imagetools inspect --raw "${ref}" > "${RUNNER_TEMP}/manifest.raw"; then
+              raw="sha256:$(sha256sum "${RUNNER_TEMP}/manifest.raw" | cut -d' ' -f1)"; break
+            fi
+            sleep $((attempt * 5))
+          done
+          [ "${raw}" = "${DIGEST}" ] || { echo "::error::GHCR does not serve the pushed manifest by its digest"; exit 1; }
+          # Dokploy pulls without a credential: prove the package is public with an anonymous token and a manifest HEAD.
+          code=000
+          for attempt in 1 2 3; do
+            token="$(curl -fsS "https://ghcr.io/token?scope=repository:devinosolutions/caramel/web:pull" | jq -r '.token // empty' || true)"
+            code="$(curl -s -o /dev/null -w '%{http_code}' -I -H "Authorization: Bearer ${token}" -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json' "https://ghcr.io/v2/devinosolutions/caramel/web/manifests/${DIGEST}" || true)"
+            [ "${code}" = 200 ] && break
+            sleep $((attempt * 5))
+          done
+          [ "${code}" = 200 ] || { echo "::error::ghcr.io/devinosolutions/caramel/web is not pullable anonymously (HTTP ${code}); make the package public"; exit 1; }
+          echo "digest_web=${DIGEST}" >> "${GITHUB_OUTPUT}"
+          echo "- \`${ref}\`" >> "${GITHUB_STEP_SUMMARY}"
+
+  release:
+    name: publish the Dokploy release
+    needs: build
+    if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The only job with an environment: its deployment branch policy gates the release and Dokploy re-reads that policy.
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Compose the image list
+        id: images
+        env:
+          DIGEST_WEB: ${{ needs.build.outputs.digest_web }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          key=caramel-dev; [ "${REF}" != refs/heads/main ] || key=caramel
+          [[ "${DIGEST_WEB}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no digest for web from the build job"; exit 1; }
+          {
+            echo "key=${key}"
+            echo 'lines<<EOF_IMAGES'
+            echo "${key}/web=ghcr.io/devinosolutions/caramel/web@${DIGEST_WEB}"
+            echo 'EOF_IMAGES'
+          } >> "${GITHUB_OUTPUT}"
+      - uses: DevinoSolutions/dokploy-release@d66a2e9a36c7c154f92f9aa18b7f7aced6e73b77 # v1.1.0
+        with:
+          service: ${{ steps.images.outputs.key }}
+          environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
+          delivery: pull
+          # Policy: no actions/upload-artifact in this workflow. Dokploy reads the manifest line from this job log.
+          upload-artifact: 'false'
+          existing-image: ${{ steps.images.outputs.lines }}
+          compose: docker-compose.yml
