@@ -180,7 +180,7 @@ const drivenInput = () =>
 const drivenSubmit = () =>
     document.querySelector(appliedWith[0]?.rec.couponSubmit)?.id ?? null
 const gaveCodesToCopy = () =>
-    expect(finalModals.at(-1)[2]).toMatch(/couldn't find the promo box/)
+    expect(finalModals.at(-1)[2]).toMatch(/takes promo codes at checkout/)
 // Every click on the page, by element id.
 const watchClicks = () => {
     const seen = []

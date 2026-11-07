@@ -9,7 +9,13 @@ import SwiftUI
 /// two in step; apps/caramel-extension/tests/apple-container-parity.test.mjs
 /// fails when they drift.
 enum OnboardingCopy {
-    static let openSettings = "Open the Settings app, then go to Safari > Extensions. (On iOS 18 and later it is Settings > Apps > Safari > Extensions.)"
+    /// Only the route this device has: iOS 18 moved Safari under Settings > Apps.
+    static var openSettings: String {
+        if #available(iOS 18, *) {
+            return "Open the Settings app, then go to Apps > Safari > Extensions."
+        }
+        return "Open the Settings app, then go to Safari > Extensions."
+    }
     static let turnOn = "Tap Caramel and turn on Allow Extension."
     static let allowEverySite = "In Safari, tap the page menu at the left of the address bar, choose Caramel, then Always Allow > Always Allow on Every Website."
 }

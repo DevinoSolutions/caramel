@@ -507,13 +507,14 @@ reads Sendly's OWN email list (`GET /api/emails`, newest first, cursor-paged via
 classifies the window, and raises **exactly
 one** Sentry event per bad clock hour:
 
-| Window contains                | Sentry                                                 |
-| ------------------------------ | ------------------------------------------------------ |
-| only `DELIVERED`/`SENT`/…      | nothing (one `[email-health] ok …` log line)           |
-| any failure status             | `Transactional email delivery degraded`, level `error` |
-| only stuck/delayed sends       | same message, level `warning`                          |
-| page budget ran out (gap)      | `…health check incomplete`, level `warning`            |
-| provider unreachable / refused | `…health check failed`, level `error`                  |
+| Window contains                 | Sentry                                                 |
+| ------------------------------- | ------------------------------------------------------ |
+| only `DELIVERED`/`SENT`/…       | nothing (one `[email-health] ok …` log line)           |
+| one `BOUNCED`, nothing else bad | `Transactional email bounced`, level `warning`         |
+| any other failure status        | `Transactional email delivery degraded`, level `error` |
+| only stuck/delayed sends        | same message, level `warning`                          |
+| page budget ran out (gap)       | `…health check incomplete`, level `warning`            |
+| provider unreachable / refused  | `…health check failed`, level `error`                  |
 
 The event carries counts, statuses, the window and the sender domain — **never** a
 recipient, subject or body. The list rows' PII fields are dropped at the parse

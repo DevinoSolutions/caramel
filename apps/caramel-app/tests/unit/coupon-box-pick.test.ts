@@ -59,12 +59,12 @@ import {
     CouponBoxOutlineTooLargeError,
     MAX_OUTLINE_BYTES,
     pickCouponBox,
-    scrubOutline,
 } from '@/lib/couponBoxPick'
 import {
     COUPON_BOX_PICK_BUDGET,
     resetCouponBoxPickBudgetForTests,
 } from '@/lib/couponBoxPickBudget'
+import { scrubOutline } from '@/lib/outlineScrub'
 import { MIN_PAID_PATH_DEADLINE_SECONDS } from '@/lib/proxy-fallback-headers'
 import { couponBoxCases } from '../../evals/fixtures/coupon-box-cases'
 

@@ -136,6 +136,23 @@ export function decideEmailDeliveryHealthMonitor(
 }
 
 /**
+ * One bounce and nothing else wrong: one address that does not exist, not an
+ * outage. Sendly's log held exactly this on 2026-11-01 (CARAMEL-2B), 1 BOUNCED
+ * among 127 sends over 15 days. It stays reported, under its own warning: on the
+ * old provider 55 bounces reached no human, so silence would reopen that gap.
+ */
+function isLoneBounce(report: EmailDeliveryHealthReport): boolean {
+    return (
+        report.status === 'degraded' &&
+        report.failed === 1 &&
+        report.byStatus.BOUNCED === 1 &&
+        report.delayed === 0 &&
+        report.stuckPending === 0 &&
+        !report.truncated
+    )
+}
+
+/**
  * Report a window to Sentry — at most one event per clock hour. A 'degraded',
  * 'incomplete' (coverage gap) or 'error' window is an issue; 'ok' and 'skipped'
  * are not. Never throws: a
@@ -154,13 +171,17 @@ export async function reportEmailDeliveryHealth(
     lastSentryHourBucket = bucket
 
     try {
-        const level = report.failed > 0 || report.status === 'error'
+        const loneBounce = isLoneBounce(report)
+        const level =
+            !loneBounce && (report.failed > 0 || report.status === 'error')
         const message =
             report.status === 'error'
                 ? 'Transactional email delivery health check failed'
                 : report.status === 'incomplete'
                   ? 'Transactional email delivery health check incomplete'
-                  : 'Transactional email delivery degraded'
+                  : loneBounce
+                    ? 'Transactional email bounced'
+                    : 'Transactional email delivery degraded'
         Sentry.captureMessage(message, {
             level: level ? 'error' : 'warning',
             tags: {

@@ -11,6 +11,9 @@ interface FailingCodesDisclosureProps {
     coupons: Coupon[]
     /** Where the first collapsed code sits in the full list (stagger index only). */
     startIndex: number
+    /** The page clock the cards' relative-time lines are computed from
+     *  (CouponsSection `now`). */
+    now: number
     /** More pages remain, so more flagged codes may still arrive: the count reads "N+". */
     moreToLoad?: boolean
     /** Every code in the list is flagged (and none are left to load): say so above the disclosure. */
@@ -27,6 +30,7 @@ interface FailingCodesDisclosureProps {
 export default function FailingCodesDisclosure({
     coupons,
     startIndex,
+    now,
     moreToLoad = false,
     allFlagged = false,
 }: FailingCodesDisclosureProps) {
@@ -76,6 +80,7 @@ export default function FailingCodesDisclosure({
                             key={coupon.id}
                             coupon={coupon}
                             index={startIndex + offset}
+                            now={now}
                         />
                     ))}
                 </AnimatePresence>

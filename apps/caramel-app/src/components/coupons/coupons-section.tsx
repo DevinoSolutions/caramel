@@ -45,7 +45,16 @@ interface CouponsSectionProps {
      *  (a visual-regression baseline); the store page renders more (see
      *  STORE_PAGE_SIZE there). */
     pageSize?: number
+    /** The server's clock (ms) when it rendered this page. Every card's
+     *  "Worked 3h ago" / "Reported not working 11h ago" line is computed from
+     *  it, never from the browser's own clock: a visitor whose clock is off by
+     *  an hour got different text than the server HTML and a React hydration
+     *  error (CARAMEL-18). */
+    renderedAt: number
 }
+
+// How often the relative-time lines move on while the page stays open.
+const CLOCK_TICK_MS = 60 * 1000
 
 const DEFAULT_PAGE_SIZE = COUPONS_BODY.pageSize
 
@@ -59,7 +68,20 @@ export default function CouponsSection({
     heroAction,
     heroNote,
     pageSize = DEFAULT_PAGE_SIZE,
+    renderedAt,
 }: CouponsSectionProps) {
+    // The server's render time until the page has hydrated, so the first
+    // client render matches the server HTML exactly. After that it keeps
+    // ticking on the server's clock: the browser's clock is read only for the
+    // time elapsed since mount, so a wrong clock cannot shift the labels.
+    const [now, setNow] = useState(renderedAt)
+    useEffect(() => {
+        const mountedAt = Date.now()
+        const id = setInterval(() => {
+            setNow(renderedAt + (Date.now() - mountedAt))
+        }, CLOCK_TICK_MS)
+        return () => clearInterval(id)
+    }, [renderedAt])
     const ITEMS_PER_PAGE = pageSize
     const MIN_LOADING_DELAY_MS = 350
 
@@ -421,6 +443,7 @@ export default function CouponsSection({
                                             key={`${coupon.id}-${index}`}
                                             coupon={coupon}
                                             index={index}
+                                            now={now}
                                         />
                                     ))}
                                 </AnimatePresence>
@@ -428,6 +451,7 @@ export default function CouponsSection({
                             <FailingCodesDisclosure
                                 coupons={failingCoupons}
                                 startIndex={mainCoupons.length}
+                                now={now}
                                 moreToLoad={hasMore}
                                 allFlagged={
                                     !hasMore && mainCoupons.length === 0

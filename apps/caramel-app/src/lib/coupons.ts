@@ -358,6 +358,34 @@ export function isRecentlyFailing(
 }
 
 /**
+ * Failure quorum at which a code orders after the unrefused codes of its OWN
+ * proof tier (T-13810). Any distinct reporter whose attributable failure is
+ * newer than the last worked quorum puts it there. It is a reorder inside one
+ * tier, never a sink across tiers and never a removal: a refused proven code
+ * still leads every unverified one. Safe from a swarm because the low-trust
+ * reporters of a coupon together stop at MAX_LOW_TRUST_FAIL_WEIGHT, so no
+ * number of anonymous reports moves a code further than this one step.
+ * funko.com, 2026-11-03: codes the store refused (fail_weight 1-2) still led
+ * the list at rating 4.2, because only FAILING_MIN_FAIL_WEIGHT moved anything.
+ */
+export const REFUSED_MIN_FAIL_WEIGHT = 1
+
+/**
+ * True when at least one distinct reporter's failure stands (failWeight of at
+ * least REFUSED_MIN_FAIL_WEIGHT) and the latest failure is within
+ * FAILING_WINDOW_MS. The same window rule as isRecentlyFailing, at the lower
+ * threshold; couponsRepo.refusedInTierSql() is its SQL twin.
+ */
+export function isRecentlyRefused(
+    signal: FailureSignal,
+    now: number = Date.now(),
+): boolean {
+    if ((signal.failWeight ?? 0) < REFUSED_MIN_FAIL_WEIGHT) return false
+    const failedAge = workedAgeMs(signal.lastFailedAt, now)
+    return failedAge !== null && failedAge <= FAILING_WINDOW_MS
+}
+
+/**
  * Failure quorum needed before a code is COLLAPSED (not merely sunk): a third
  * established account on top of the two that sink it. Higher than
  * FAILING_MIN_FAIL_WEIGHT because collapsing is the stronger presentation.

@@ -1646,6 +1646,50 @@ describe('applyCoupon wait — the same refusal sentence again', () => {
         expect(performance.now() - started).toBeLessThan(4000)
     })
 
+    /* T-14842, funko.com 2026-11-06 (payment step, 4 fake codes): the store
+     * empties #invalidCouponCode ~30 ms after Apply and writes "Please enter a
+     * valid Promo Code" back ~400 ms later, for every code. The wait ended on
+     * it, but the verdict still read the redrawn sentence as the stale one: no
+     * rejection word, a non-empty baseline, so codes 2-4 came back with no
+     * error and were never marked rejected. */
+    it('the sentence it drew again is this code’s refusal, quoted and attributable', async () => {
+        const FUNKO = 'Please enter a valid Promo Code'
+        showError(FUNKO) // code 1's answer, still on the page
+        const rec = { ...BASE, errorIndicator: '#err' }
+        respond(() => {
+            showError('')
+            setTimeout(() => showError(FUNKO), 400)
+        })
+
+        const res = await applyCoupon('NOPEBBB2', rec)
+
+        expect(res.success).toBe(false)
+        expect(res.errorMsg).toBe(FUNKO)
+        expect(res.errorIsNew).toBe(true)
+    })
+
+    /* T-14842 again, the 1.4.40 store package on funko.com 2026-11-06: the
+     * store empties #invalidCouponCode ~10 ms after the click, before the
+     * wait's first read, and draws the sentence back ~250 ms later. The wait
+     * saw an empty indicator gain text and ended, but never marked it a
+     * redraw, so the verdict compared it with the pre-submit snapshot (the
+     * same words) and codes 2-4 again came back with no error. */
+    it('a sentence taken down before the wait began and drawn again is this code’s refusal', async () => {
+        const FUNKO = 'Please enter a valid Promo Code'
+        showError(FUNKO) // code 1's answer, still on the page
+        const rec = { ...BASE, errorIndicator: '#err' }
+        document.getElementById('apply').addEventListener('click', () => {
+            showError('')
+            setTimeout(() => showError(FUNKO), 250)
+        })
+
+        const res = await applyCoupon('NOPEBBB2', rec)
+
+        expect(res.success).toBe(false)
+        expect(res.errorMsg).toBe(FUNKO)
+        expect(res.errorIsNew).toBe(true)
+    })
+
     it('a sentence that simply stays put is still not an answer', async () => {
         showError(SENTENCE)
         const rec = { ...BASE, errorIndicator: '#err' }
@@ -1655,6 +1699,7 @@ describe('applyCoupon wait — the same refusal sentence again', () => {
         const res = await applyCoupon('SILENT', rec)
 
         expect(res.success).toBe(false)
+        expect(res.errorIsNew).toBeFalsy()
         // The whole answer window: the stale sentence did not end it.
         expect(performance.now() - started).toBeGreaterThanOrEqual(9500)
     }, 20_000)

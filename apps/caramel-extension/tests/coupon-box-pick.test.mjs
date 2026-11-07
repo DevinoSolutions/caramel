@@ -6,6 +6,8 @@ import { initCaramelBase } from '../caramel-base.js'
 import {
     _caramelResetDiscoveryFlag,
     caramelDiscoveredRecord,
+    caramelFinderMayAsk,
+    caramelFinderPageKind,
     caramelFinderSeesKeptPick,
     caramelRemarkFoundBox,
     PICK_WAIT_MS,
@@ -201,7 +203,7 @@ const box = (input, button, toggle = null) => ({
 
 const run = () => startApplyingCoupons(caramelConfiglessRecord('shop.test'))
 const gaveCodesToCopy = () =>
-    expect(finalModals.at(-1)[2]).toMatch(/couldn't find the promo box/)
+    expect(finalModals.at(-1)[2]).toMatch(/takes promo codes at checkout/)
 
 beforeAll(() => {
     installChromeStub()
@@ -1149,7 +1151,7 @@ describe('a pick is kept, by name, for the next page in the tab', () => {
         pickBareBox()
         await caramelDiscoveredRecord(NO_CONFIG)
 
-        window.history.replaceState({}, '', '/checkout')
+        window.history.replaceState({}, '', '/cart/review')
         reload(BARE_BOX + TOTAL)
 
         expect(await caramelFinderSeesKeptPick('shop.test')).toBe(false)
@@ -1361,5 +1363,90 @@ describe('the pick memory is the extension’s, never the page’s', () => {
         await caramelDiscoveredRecord(NO_CONFIG)
 
         expect(pickCalls).toHaveLength(1)
+    })
+})
+
+// T-10535: many stores take a code only at checkout, and their cart says so.
+// A cart with no box tells the shopper the codes go in at checkout, and the
+// finder looks again there, with one more server ask: at most one per kind of
+// page (cart, checkout) per store per tab session.
+describe('a store whose box is only at checkout', () => {
+    const reload = (path, html) => {
+        _caramelResetDiscoveryFlag()
+        window.history.replaceState({}, '', path)
+        document.body.innerHTML = html
+    }
+
+    it('a cart with no box: the card says the codes go in at checkout, and lists them', async () => {
+        document.body.innerHTML = '<div class="lines">One item</div>' + TOTAL
+
+        await run()
+
+        expect(pickCalls).toHaveLength(1)
+        const [amount, , message, , codes] = finalModals.at(-1)
+        expect(amount).toBe(0)
+        expect(message).toMatch(/takes promo codes at checkout/)
+        expect(message).not.toMatch(/\b(?:AI|model|bot|LLM)\b/i)
+        expect(codes.map(c => c.code)).toEqual(COUPONS.map(c => c.code))
+    })
+
+    it('the checkout gets one more ask after the cart, and uses the box it finds', async () => {
+        document.body.innerHTML = '<div class="lines">One item</div>' + TOTAL
+        await run()
+        expect(pickCalls).toHaveLength(1)
+
+        reload('/checkout', BARE_BOX + TOTAL)
+        expect(await caramelFinderMayAsk('shop.test')).toBe(true)
+        answer = req =>
+            box(idx(req.outline, /textbox/), idx(req.outline, /button "Go"/))
+        await run()
+
+        expect(pickCalls).toHaveLength(2)
+        expect(appliedWith).toHaveLength(1)
+    })
+
+    it('the checkout is asked at most once, and the cart is not asked again', async () => {
+        document.body.innerHTML = '<div class="lines">One item</div>' + TOTAL
+        await run()
+        reload('/checkout', '<div class="lines">One item</div>' + TOTAL)
+        await run()
+        expect(pickCalls).toHaveLength(2)
+
+        reload('/checkout/payment', '<div>One item</div>' + TOTAL)
+        expect(await caramelFinderMayAsk('shop.test')).toBe(false)
+        await run()
+        reload('/cart', '<div>One item</div>' + TOTAL)
+        expect(await caramelFinderMayAsk('shop.test')).toBe(false)
+        await run()
+
+        expect(pickCalls).toHaveLength(2)
+    })
+
+    it('no box on the checkout either: the card says so plainly, not "at checkout"', async () => {
+        reload('/checkout', '<div class="lines">One item</div>' + TOTAL)
+
+        await run()
+
+        expect(pickCalls).toHaveLength(1)
+        expect(finalModals.at(-1)[2]).toMatch(/couldn't find the promo box/)
+    })
+
+    it('reads the kind of page from the path, a cart word first', () => {
+        const kind = (path, host = 'shop.test') =>
+            caramelFinderPageKind({
+                location: { pathname: path, hostname: host },
+            })
+        expect(kind('/cart')).toBe('cart')
+        expect(kind('/checkout/cart/')).toBe('cart')
+        expect(kind('/basket.php')).toBe('cart')
+        expect(kind('/checkout')).toBe('checkout')
+        expect(kind('/checkouts/abc123')).toBe('checkout')
+        expect(kind('/kasse')).toBe('checkout')
+        expect(kind('/checkout/onepage/')).toBe('checkout')
+        expect(kind('/secure/checkout.ss', 'checkout.shop.test')).toBe(
+            'checkout',
+        )
+        expect(kind('/order')).toBe('cart')
+        expect(kind('/products/checkout-mat')).toBe('cart')
     })
 })

@@ -16,6 +16,12 @@ export interface HandleRouteErrorOptions {
     /** Extra response headers to preserve (e.g. CORS) — merged with the
      * `x-request-id` header this helper always sets. */
     headers?: HeadersInit
+    /** Sentry severity override. Omitted = Sentry's default (`error`); pass
+     * `'warning'` for an expected upstream failure such as a model timeout. */
+    level?: Sentry.SeverityLevel
+    /** Sentry grouping fingerprint. Omitted = Sentry's stack-frame grouping,
+     * which changes every build; pass one to group by cause instead. */
+    fingerprint?: string[]
 }
 
 /**
@@ -46,12 +52,16 @@ export function handleRouteError(
         message = 'Internal server error',
         status = 500,
         headers,
+        level,
+        fingerprint,
     } = options
 
     const derivedRoute = route ?? (req ? new URL(req.url).pathname : undefined)
     const requestId = crypto.randomUUID()
 
     Sentry.captureException(error, {
+        ...(level ? { level } : {}),
+        ...(fingerprint ? { fingerprint } : {}),
         tags: {
             ...(derivedRoute ? { route: derivedRoute } : {}),
             ...(req?.method ? { method: req.method } : {}),

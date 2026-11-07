@@ -51,6 +51,8 @@ const NO_SIGNAL = {
     failCount: 0,
     failWeight: 0,
     keepsFailing: false,
+    recentlyFailing: false,
+    recentlyRefused: false,
 }
 
 beforeEach(() => {
@@ -85,6 +87,8 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
                 failCount: 0,
                 failWeight: 0,
                 keepsFailing: false,
+                recentlyFailing: false,
+                recentlyRefused: false,
             },
             { id: '2', code: 'B', ...NO_SIGNAL },
         ])
@@ -112,7 +116,62 @@ describe('attachSignals (app-owned lastWorkedAt merge)', () => {
             failWeight: 6,
             // A collapse-level quorum, the latest recent, no success since.
             keepsFailing: true,
+            recentlyFailing: true,
+            recentlyRefused: true,
         })
+    })
+
+    it('marks the groups the store list order puts a code in: refused from one reporter, sunk from the quorum, neither once cleared or stale (T-13810)', async () => {
+        const failed = new Date(Date.now() - 60 * 60 * 1000)
+        const stale = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000)
+        signalState.rows = [
+            // One anonymous reporter (the low-trust pool's whole weight).
+            {
+                couponId: '1',
+                lastWorkedAt: null,
+                lastFailedAt: failed,
+                failCount: 1,
+                failWeight: 1,
+            },
+            // The sink quorum.
+            {
+                couponId: '2',
+                lastWorkedAt: null,
+                lastFailedAt: failed,
+                failCount: 2,
+                failWeight: 4,
+            },
+            // A worked quorum cleared it.
+            {
+                couponId: '3',
+                lastWorkedAt: failed,
+                lastFailedAt: failed,
+                failCount: 5,
+                failWeight: 0,
+            },
+            // A refusal older than the window no longer counts.
+            {
+                couponId: '4',
+                lastWorkedAt: null,
+                lastFailedAt: stale,
+                failCount: 1,
+                failWeight: 2,
+            },
+        ]
+
+        const out = await attachSignals([
+            { id: '1' },
+            { id: '2' },
+            { id: '3' },
+            { id: '4' },
+        ])
+
+        expect(out.map(c => [c.recentlyRefused, c.recentlyFailing])).toEqual([
+            [true, false],
+            [true, true],
+            [false, false],
+            [false, false],
+        ])
     })
 
     it('keepsFailing is false for a sink-only quorum (weight 4) and for a cleared quorum (weight 0), true at the collapse weight even with a later worked stamp', async () => {

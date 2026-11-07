@@ -16,9 +16,13 @@ import { toast } from 'sonner'
 interface CouponCardProps {
     coupon: Coupon
     index: number
+    /** The page clock (CouponsSection `now`, anchored to the server's render
+     *  time). Never Date.now(): the browser's clock can be hours off, and the
+     *  "Xh ago" text would then differ from the server HTML (CARAMEL-18). */
+    now: number
 }
 
-export default function CouponCard({ coupon, index }: CouponCardProps) {
+export default function CouponCard({ coupon, index, now }: CouponCardProps) {
     const [showCode, setShowCode] = useState(false)
     // Unlike showCode (a 3-second overlay), this stays true once the shopper
     // has copied the code, so the "Did it work?" question outlives the overlay.
@@ -63,14 +67,14 @@ export default function CouponCard({ coupon, index }: CouponCardProps) {
     // "Worked Xh ago" line nor the proven-by-use Verified upgrade (both read
     // lastWorkedAt) may sit beside a "Reported not working" hint. These are
     // shopper/extension reports, so the hint says "Reported", never "Broken".
-    const failing = isRecentlyFailing(coupon)
-    const failedAgo = failing ? formatFailedAgo(coupon.lastFailedAt) : null
+    const failing = isRecentlyFailing(coupon, now)
+    const failedAgo = failing ? formatFailedAgo(coupon.lastFailedAt, now) : null
     const lastWorkedAt = failing ? null : coupon.lastWorkedAt
-    const workedAgo = formatWorkedAgo(lastWorkedAt)
+    const workedAgo = formatWorkedAgo(lastWorkedAt, now)
     // Catalog status badge, upgraded to Verified when a shopper's apply in
     // the last 24h proved an unverified code (coupons.ts couponBadge) — so a
     // green "Just worked" line never sits next to an "Unverified" badge.
-    const catalogBadge = couponBadge(coupon.status, lastWorkedAt)
+    const catalogBadge = couponBadge(coupon.status, lastWorkedAt, now)
     // A code shoppers keep reporting as not working must not carry the green
     // Verified badge beside that hint: the catalog's check is older than the
     // reports. Other tiers (unverified, restricted, ...) are unaffected.

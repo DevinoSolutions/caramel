@@ -49,7 +49,13 @@ import {
     _isVisible,
     caramelFindMoney,
     caramelIsForbiddenControl,
+    caramelOverlayCloseControl,
+    caramelOverlayShown,
+    caramelPressEscape,
     caramelSetLastPrices,
+    caramelSettles,
+    caramelShownOverlays,
+    caramelVisible,
     getPrice,
 } from './dom-utils.js'
 
@@ -233,20 +239,7 @@ const ariaOf = el => el.getAttribute('aria-label')
 const styleOf = el => el.ownerDocument.defaultView.getComputedStyle(el)
 const pointer = el => styleOf(el).cursor === 'pointer'
 
-// Rendered AND given a box. An ancestor collapsed to zero height hides us
-// without a style of our own, so that is checked too.
-function visible(el) {
-    if (!el || !el.isConnected || !_isVisible(el)) return false
-    const r = el.getBoundingClientRect()
-    if (r.width < 2 || r.height < 2) return false
-    let p = el.parentElement
-    for (let i = 0; i < 8 && p; i++, p = p.parentElement) {
-        const ps = styleOf(p)
-        if (ps.overflow === 'hidden' && p.getBoundingClientRect().height < 2)
-            return false
-    }
-    return true
-}
+const visible = el => caramelVisible(el)
 
 // The labels that name THIS field. `el.labels` resolves a label[for] to the
 // FIRST element carrying the id, so a form a store draws twice with the same
@@ -1362,6 +1355,19 @@ const TOTAL_NOT =
 const SUB_LABEL =
     /^(order |cart |merchandise |product |est\.? |estimated )?sub[- ]?total( \(.*\))?:?$|^product total:?$|^zwischensumme|^sous-total|^subtota(al|le)\b|^del ?summ?a?\b|^välisumma|^suma częściowa|^totale parziale|^total parcial|^小[计計]|^mezisoučet|^medzisúčet|^ara toplam|^részösszeg|^υποσύνολο|^tạm tính|^المجموع الفرعي|^ยอดรวมย่อย/i
 const SUB_NOT = /sav(ed?|ings?)\b|discount|shipping|tax|points/i
+// A total the store draws before SALES tax because tax is worked out at
+// checkout (ikea.com/us "Total excluding tax", the only total on its bag). It
+// is the bag's subtotal under another name, so it is read as one, and only
+// when the cart shows no total and no subtotal at all (subtotalRows). A VAT or
+// HT net total is not this: a European cart that draws one shows the VAT too,
+// and a cart that shows only that net total still shows no total.
+const PRETAX_LABEL =
+    /^(?:(?:order|cart|bag|basket|estimated|est\.?) )?total ?\(?(?:excluding|excl\.?|before|pre-?) ?(?:sales )?tax(?:es)?\)?:?$/i
+const PRETAX_NOT = /sav(ed?|ings?)\b|discount|shipping|points/i
+function subtotalRows(doc) {
+    const hits = scanTotalRows(doc, SUB_LABEL, SUB_NOT)
+    return hits.length ? hits : scanTotalRows(doc, PRETAX_LABEL, PRETAX_NOT)
+}
 // The words a total or subtotal label is made of: a text node holding none of
 // them is no label, and scanTotalRows never looks at it.
 const TOTAL_WORDS =
@@ -1400,6 +1406,29 @@ const moneyCount = t =>
 // (a struck-through price, a "free shipping over $150" line) is not a total
 // we can read honestly, because its largest number need not be the total.
 const ROW_MAX = 90
+
+// A row's text without the copy a screen reader is given: a 1px box with its
+// overflow hidden (ikea.com draws "$79.99" for the eye and "Total excluding
+// tax $ 79.99" in one, inside the same cell). That copy is the same amount
+// again, and counting it made every such row hold two amounts and be no row.
+// Only leaves holding a digit are looked at, so a row costs a few style reads.
+function srOnly(el) {
+    const cs = styleOf(el)
+    return (
+        cs.position === 'absolute' &&
+        parseFloat(cs.width) <= 1 &&
+        parseFloat(cs.height) <= 1 &&
+        /hidden|clip/.test(cs.overflow)
+    )
+}
+function shownRowText(el) {
+    let t = textOf(el)
+    for (const leaf of el.querySelectorAll('*')) {
+        if (leaf.children.length || !/\d/.test(leaf.textContent)) continue
+        if (srOnly(leaf)) t = t.replace(textOf(leaf), ' ')
+    }
+    return t
+}
 
 // An element's own words, and the same with amount and parentheses cut: a
 // label may carry its own amount ("Bag total: £32.00 (1 Item)").
@@ -1468,11 +1497,11 @@ function scanTotalRows(
             // that took $6 off the total never counted.
             // Only the hidden LABEL is put back: the row's other hidden text
             // (a compare-at price, a screen-reader amount) stays out.
-            let t = norm(textOf(p))
+            let t = norm(shownRowText(p))
             if (!t.includes(own)) t = norm(own + ' ' + t)
             if (t.length > ROW_MAX || moneyCount(t) > 1) {
                 const sib = (prev || el).nextElementSibling
-                const st = sib ? norm(textOf(sib)) : ''
+                const st = sib ? norm(shownRowText(sib)) : ''
                 if (
                     st.length <= 40 &&
                     AMOUNT_ONLY.test(st) &&
@@ -1533,7 +1562,7 @@ function findTotalRow(doc, kind) {
     let hits =
         kind === 'subtotal' ? [] : scanTotalRows(doc, TOTAL_LABEL, TOTAL_NOT)
     if (!hits.length && kind !== 'total') {
-        hits = scanTotalRows(doc, SUB_LABEL, SUB_NOT)
+        hits = subtotalRows(doc)
         found = 'subtotal'
     }
     const shown = hits.filter(h => h.visible)
@@ -1558,7 +1587,7 @@ function findSameTotalRow(doc, was) {
     const kind = was.kind === 'subtotal' ? 'subtotal' : 'total'
     const hits =
         kind === 'subtotal'
-            ? scanTotalRows(doc, SUB_LABEL, SUB_NOT)
+            ? subtotalRows(doc)
             : scanTotalRows(doc, TOTAL_LABEL, TOTAL_NOT)
     if (hits.length < was.rows) return null
     const same = hits.filter(h => h.label === was.label)
@@ -1710,13 +1739,132 @@ function newDeduction(el, base) {
     return off
 }
 
+/* A code that takes money off can make the store work out sales tax at the
+ * same moment, and the total then goes UP (T-14872). johnstonmurphy.com (SFCC,
+ * no config, 2026-11-06): before a code its summary read "Sales Tax calculated
+ * in checkout" and "Estimated Total $198.95"; FREESHIP26 drew "Shipping
+ * Discount - $9.95" and, with it, "Sales Tax $18.90". The total read $207.90,
+ * and a code that worked was called a miss.
+ *
+ * So the read before a code records whether the page showed a tax amount, the
+ * deduction lines it showed and its shipping charge. A later read on a page
+ * that now shows a tax amount it did not show before sets that tax aside: the
+ * total without it is what the code's own moves left. That is believed only
+ * when the page shows WHY the total (less the tax) fell, to the cent: a new
+ * deduction line ("Shipping Discount - $9.95") or a shipping charge that fell
+ * by that much. A tax the page already showed and that changed is not set
+ * aside: that costs a win, never invents one. */
+const TAX_WORDS = /\btax(?:es)?\b/i
+const TAX_LABEL =
+    /^(?:(?:estimated|est\.?|sales|state|local|order) )*tax(?:es)?(?: \(.*\))?:?$/i
+const TAX_NOT = /total|incl|exclud|before|after|free|exempt/i
+const DEDUCT_WORDS = /discount|promo|coupon|voucher|savings?\b/i
+const DEDUCT_LABEL =
+    /^(?:(?:shipping|delivery|order|cart|basket) )?(?:coupon|discount|promo(?:tion)?|voucher|savings?)s?(?: code)?\b[^.!?]{0,30}$/i
+// DISCOUNT_NOT without "shipping" and "savings": a shipping discount and a
+// "Savings" row are the lines a code draws here.
+const DEDUCT_NOT =
+    /total|tax|eligible|exclud|cannot|can't|only|enter|apply|add |have|gift|points|reward|member|minimum|spend|purchase|requir|more|qualif|valid|expire|balance|credit|card|not appl|pending|up to|next/i
+const SHIP_WORDS = /shipping|delivery/i
+const SHIP_LABEL =
+    /^(?:(?:standard|ground|estimated|est\.?) )?(?:shipping|delivery)(?: (?:&|and) handling)?:?$/i
+const SHIP_NOT = /discount|free|over|away|tax|total|insur|protect/i
+
+// Every shown row under a label: its amount (NaN unless exactly one) and the
+// line it reads as.
+function shownRows(doc, LABEL, NOT, words) {
+    return scanTotalRows(doc, LABEL, NOT, { words })
+        .filter(h => h.visible)
+        .map(h => {
+            const money = caramelFindMoney(textOf(h.el))
+            return {
+                label: h.label,
+                amount: money.length === 1 ? Math.abs(money[0].value) : NaN,
+                line: (h.line || textOf(h.el)).replace(/\s+/g, ' ').trim(),
+            }
+        })
+}
+
+// The one shipping charge the page shows: its amount, 0 for a row that reads
+// "Free", NaN for none or more than one.
+function shippingShown(doc) {
+    const rows = shownRows(doc, SHIP_LABEL, SHIP_NOT, SHIP_WORDS)
+    if (rows.length) return rows.length === 1 ? rows[0].amount : NaN
+    const tw = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+        acceptNode: n =>
+            SHIP_WORDS.test(n.textContent)
+                ? NodeFilter.FILTER_ACCEPT
+                : NodeFilter.FILTER_SKIP,
+    })
+    let free = 0
+    for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+        const el = n.parentElement
+        const { own } = el ? ownLabel(el) : { own: '' }
+        if (!SHIP_LABEL.test(own) || !visible(el)) continue
+        for (let p = el, i = 0; p && i < 3; p = p.parentElement, i++) {
+            const t = norm(textOf(p))
+            if (t.length > 40) break
+            if (/^\W*free\W*$/.test(t.replace(own, ''))) {
+                free++
+                break
+            }
+        }
+    }
+    return free === 1 ? 0 : NaN
+}
+
+function taxBefore(doc) {
+    return {
+        taxShown: shownRows(doc, TAX_LABEL, TAX_NOT, TAX_WORDS).length > 0,
+        lines: shownRows(doc, DEDUCT_LABEL, DEDUCT_NOT, DEDUCT_WORDS).map(
+            r => `${r.label}|${r.amount}`,
+        ),
+        shipping: shippingShown(doc),
+    }
+}
+
+function taxSetAside(doc, rec, gross) {
+    const base = rec.caramelTaxBase
+    if (!base || base.taxShown) return gross
+    const tax = shownRows(doc, TAX_LABEL, TAX_NOT, TAX_WORDS)
+    if (tax.length !== 1 || !(tax[0].amount > 0)) return gross
+    const cents = n => Math.round(n * 100) / 100
+    const net = cents(gross - tax[0].amount)
+    const drop = cents(base.gross - net)
+    if (!(drop > 0) || !(net > 0)) return gross
+    const same = a => Math.abs(a - drop) < 0.005
+    const line = shownRows(doc, DEDUCT_LABEL, DEDUCT_NOT, DEDUCT_WORDS).some(
+        r =>
+            same(r.amount) &&
+            LINE_AMOUNT.test(r.line) &&
+            !base.lines.includes(`${r.label}|${r.amount}`),
+    )
+    const ship = shippingShown(doc)
+    const shipFell =
+        Number.isFinite(base.shipping) &&
+        Number.isFinite(ship) &&
+        same(cents(base.shipping - ship))
+    if (!line && !shipFell) return gross
+    caramelSetLastPrices([net])
+    rec.caramelNetted = true
+    return net
+}
+
 function finderTotal(selector, kind, doc, rec, baseline, code) {
     if (rec) {
         rec.caramelNetted = false
-        if (baseline) rec.caramelSubtotalBase = null
+        if (baseline) {
+            rec.caramelSubtotalBase = null
+            rec.caramelTaxBase = null
+        }
     }
     const gross = positiveTotal(selector)
-    if (kind !== 'subtotal' || !(gross > 0) || !rec) return gross
+    if (!(gross > 0) || !rec) return gross
+    if (kind !== 'subtotal') {
+        if (!baseline) return taxSetAside(doc, rec, gross)
+        rec.caramelTaxBase = { gross, ...taxBefore(doc) }
+        return gross
+    }
     const el = doc.querySelector(selector)
     if (baseline) {
         rec.caramelSubtotalBase = { gross, code, ...summaryBefore(el) }
@@ -1804,6 +1952,63 @@ function toggleRefused(el) {
     )
 }
 
+/* ------------------------------------------- undoing a click that found no box */
+// A toggle the finder clicked, from whose reveal no box was then used, must not
+// leave what it opened over the shopper's cart. A store's "Have a coupon
+// code?" can open an info popup that only says codes go in at checkout: the
+// run then ended on the copy-a-code card with that popup still covering the
+// cart. Before each click the overlays already showing are noted; one the
+// click opened is closed the way a shopper would: its own close control, else
+// Escape, else the toggle again when it now reports itself expanded.
+
+// What a click on `toggle` could change, noted before it is clicked.
+const beforeReveal = (doc, toggle) => ({
+    overlays: caramelShownOverlays(doc),
+    expanded: toggle.getAttribute('aria-expanded'),
+})
+
+const closeRefused = el => navigatesAway(el) || toggleRefused(el)
+
+/* Put back what clicking `toggle` opened, when no box from it is used. */
+async function undoReveal(doc, toggle, before) {
+    const now = [...caramelShownOverlays(doc)].filter(
+        el => !before.overlays.has(el),
+    )
+    // The outermost of each: closing it closes what it holds.
+    const opened = now.filter(el => !now.some(o => o !== el && o.contains(el)))
+    const expandedNow = () =>
+        before.expanded !== 'true' &&
+        toggle.getAttribute('aria-expanded') === 'true'
+    if (!opened.length && !expandedNow()) return
+    const showing = () => opened.filter(caramelOverlayShown)
+    const tried = []
+    for (const o of opened) {
+        if (!caramelOverlayShown(o)) continue
+        const x = caramelOverlayCloseControl(o, closeRefused)
+        if (!x) continue
+        tried.push('close')
+        x.click()
+        await caramelSettles(() => !caramelOverlayShown(o))
+    }
+    if (showing().length) {
+        tried.push('escape')
+        caramelPressEscape(doc, showing())
+        await caramelSettles(() => !showing().length)
+    }
+    if (expandedNow() && (showing().length || !opened.length)) {
+        tried.push('toggle')
+        toggle.click()
+        await caramelSettles(() => !showing().length && !expandedNow())
+    }
+    const closed = !showing().length && !expandedNow()
+    log('FINDER_TOGGLE_UNDONE', {
+        how: closed ? tried.at(-1) || null : null,
+        tried,
+        closed,
+        overlays: opened.length,
+    })
+}
+
 /* Can the finder see a promo box on this page, without touching it?
  * Used by checkout detection, so it never clicks: a visible confident box, or a
  * reveal toggle, plus a readable total. */
@@ -1830,7 +2035,8 @@ export function caramelFinderSeesBox(doc = document) {
  * readable total is offered the prompt too.
  *
  * Detection still never asks the server or clicks anything: the pick runs
- * after the tap (caramelPickedRecord), once per store per tab session, and a
+ * after the tap (caramelPickedRecord), once per store and kind of page (cart,
+ * checkout) per tab session, and a
  * "no box" answer ends with the codes handed over to copy. A store already
  * asked this session is not offered again on the strength of this rule. */
 //
@@ -1843,7 +2049,7 @@ export function caramelFinderSeesBox(doc = document) {
 export async function caramelFinderMayAsk(domain, doc = document) {
     if (!(await caramelCouponBoxLlmOn())) return false
     if (ORDER_PLACED_PATH_RE.test(doc.location?.pathname || '')) return false
-    if (await pickAsked(domain || doc.location?.hostname)) return false
+    if (await pickAsked(domain || doc.location?.hostname, doc)) return false
     if (!shownPositiveTotal(doc)) return false
     log('FINDER_MAY_ASK', {})
     return true
@@ -1864,6 +2070,7 @@ function shownPositiveTotal(doc) {
     for (const [label, not] of [
         [TOTAL_LABEL, TOTAL_NOT],
         [SUB_LABEL, SUB_NOT],
+        [PRETAX_LABEL, PRETAX_NOT],
     ]) {
         const shown = scanTotalRows(doc, label, not).filter(h => h.visible)
         if (!shown.length) continue
@@ -1898,6 +2105,8 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
     let found = caramelDiscoverCouponBox(doc)
     const opened = found.inputVisible ? null : found.toggle
+    // Puts back what the toggle click opened, when no box from it is used.
+    let undo = null
     if (!found.inputVisible && found.toggle) {
         if (toggleRefused(found.toggle)) {
             log('AUTO_INSERT_REFUSED_CONTROL', {
@@ -1908,6 +2117,9 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
         const toggle = found.toggle
         const check = checkboxOf(toggle)
         const wasChecked = check?.checked
+        // A checkbox is put back below, by its own checked state.
+        const before = check ? null : beforeReveal(doc, toggle)
+        if (before) undo = () => undoReveal(doc, toggle, before)
         toggle.click()
         for (let waited = 0; waited < 2500; waited += 250) {
             await sleep(250)
@@ -1927,7 +2139,17 @@ export async function caramelDiscoveredRecord(rec, doc = document) {
     }
     if (!found.inputVisible || !confident(found)) {
         log('FINDER_NO_BOX', { reasons: found.reasons })
-        return caramelPickedRecord(rec, doc)
+        // A click that showed no field at all opened nothing the server's
+        // pick could use either: the page is put back before the pick reads
+        // it. A field it did show is left for the pick, and put back only if
+        // the pick does not use it.
+        if (undo && !found.inputVisible) {
+            await undo()
+            undo = null
+        }
+        const picked = await caramelPickedRecord(rec, doc, opened)
+        if (!picked && undo) await undo()
+        return picked
     }
     log('FINDER_PICKED', { reasons: found.reasons })
     return savable(
@@ -2097,7 +2319,8 @@ function finderRecord(rec, found, totalRow, opened) {
 // Any other answer, a refusal or a failure to ask leaves the page exactly as
 // the rules left it: no box, and the codes handed over to copy.
 //
-// At most one ask per store per tab session, whatever came back. A usable
+// At most one ask per store per tab session, whatever came back, and one more
+// on the store's checkout (askKey). A usable
 // pick is also kept, by name (keptPick), for the next page in the tab: a cart
 // that reloads to show the store's answer gets its box found again there.
 // Both are held by the background for this tab and site (tab-handoff.js),
@@ -2134,19 +2357,26 @@ const pickKey = domain =>
 const pickMemo = async () =>
     (await caramelTabHandoff('get', PICK_KEY))?.value || {}
 
-async function pickAsked(domain) {
-    domain = pickKey(domain)
-    if (_pickAsked.has(domain)) return true
+// One ask per store per KIND of page (caramelFinderPageKind): a store whose
+// cart only says codes go in at checkout gets one more ask on its checkout,
+// and no more. The cart keeps the plain store key it always had.
+const askKey = (domain, doc) =>
+    pickKey(domain) +
+    (caramelFinderPageKind(doc) === 'checkout' ? ' checkout' : '')
+
+async function pickAsked(domain, doc) {
+    const key = askKey(domain, doc)
+    if (_pickAsked.has(key)) return true
     // A background that could not answer leaves this page's own memory.
-    return Object.hasOwn(await pickMemo(), domain)
+    return Object.hasOwn(await pickMemo(), key)
 }
 
-async function rememberPick(domain, kept = 1) {
-    domain = pickKey(domain)
-    _pickAsked.add(domain)
+async function rememberPick(domain, doc, kept = 1) {
+    const key = askKey(domain, doc)
+    _pickAsked.add(key)
     await caramelTabHandoff('set', PICK_KEY, {
         ...(await pickMemo()),
-        [domain]: kept,
+        [key]: kept,
     })
 }
 
@@ -2155,8 +2385,28 @@ async function rememberPick(domain, kept = 1) {
 // form-POST cart comes back to its own path; a checkout page with a "code"
 // field of its own is not that page.
 async function keptPick(domain, doc) {
-    const k = (await pickMemo())[pickKey(domain)]
+    const k = (await pickMemo())[askKey(domain, doc)]
     return k?.i && k.p === doc.location?.pathname ? k : null
+}
+
+/* Which page of the store this is: 'checkout' or 'cart'. Decides what the
+ * server may be asked here (askKey) and what the shopper is told when no box
+ * is found: many stores take a code only at checkout, and say so on the cart.
+ * A cart word outranks a checkout word, because Magento keeps its cart under
+ * /checkout/cart/; a page that names neither (a cart drawer, /order) counts as
+ * the cart. A checkout on its own host (checkout.store.com) is one too. */
+const CART_WORD_RE =
+    /(?:^|[/\-_])(?:cart|carts|basket|bag|warenkorb|winkelwagen|winkelmand|carrito|carrello|carrinho|koszyk|varukorg|ostoskori|handlekurv|panier|cesta|kurv)(?:[/.]|$)/i
+const CHECKOUT_WORD_RE =
+    /(?:^|[/\-_])(?:checkouts?|kasse|afrekenen|finalizar-compra|kassa|kassan|caisse|commande|pagamento|zamowienie|onepage)(?:[/.]|$)/i
+// Called from coupon-runner.js.
+export function caramelFinderPageKind(doc = document) {
+    const path = doc.location?.pathname || ''
+    if (CART_WORD_RE.test(path)) return 'cart'
+    return CHECKOUT_WORD_RE.test(path) ||
+        /^checkouts?\./i.test(doc.location?.hostname || '')
+        ? 'checkout'
+        : 'cart'
 }
 
 // What an element is and what it is called: its tag, then its stable name
@@ -2447,7 +2697,8 @@ async function askPick(domain, doc) {
 }
 
 // Called from caramelDiscoveredRecord, after the rules found no box.
-async function caramelPickedRecord(rec, doc) {
+// `clicked`: the toggle the rules already clicked this run, never clicked again.
+async function caramelPickedRecord(rec, doc, clicked = null) {
     if (!(await caramelCouponBoxLlmOn())) return null
     const domain = pickKey(rec.domain || doc.location?.hostname)
     if (!domain) return null
@@ -2455,14 +2706,14 @@ async function caramelPickedRecord(rec, doc) {
     let picked
     if (kept) picked = { ...refindPick(doc, kept), enterOnly: !!kept.e }
     else {
-        if (await pickAsked(domain)) return null
-        await rememberPick(domain)
+        if (await pickAsked(domain, doc)) return null
+        await rememberPick(domain, doc)
         picked = await askPick(domain, doc)
         if (!picked) return null
     }
     // Every pick's button is the box's own (in its form, or its small
     // panel): a far-away "Apply credit" is someone else's apply.
-    const got = await checkedPick(doc, picked, true)
+    const got = await checkedPick(doc, picked, true, clicked)
     if (!got) return null
     const { found, opened, total } = got
     log('FINDER_PICK_USED', {
@@ -2489,7 +2740,7 @@ async function caramelPickedRecord(rec, doc) {
         again.button === (k.b ? found.button : null) &&
         again.toggle === (k.t ? opened : null)
     )
-        await rememberPick(domain, k)
+        await rememberPick(domain, doc, k)
     return savable(
         finderRecord(rec, found, total, opened),
         found,
@@ -2501,9 +2752,10 @@ async function caramelPickedRecord(rec, doc) {
 /* Check a box someone else named (the server's pick, or a pick kept from the
  * last page) on this page, before anything is touched. `picked` holds the
  * elements and whether the box applies on Enter; `own` asks that a button be
- * the box's own (in its form, or its small panel). Returns
- * { found, opened, total } or null. */
-async function checkedPick(doc, picked, own) {
+ * the box's own (in its form, or its small panel). `clicked` is a toggle the
+ * rules already clicked this run without finding a box: it is not clicked
+ * again. Returns { found, opened, total } or null. */
+async function checkedPick(doc, picked, own, clicked = null) {
     // The cart may have re-rendered while the server answered: the baseline is
     // the total as it is now, and with no readable total nothing can be
     // measured.
@@ -2532,9 +2784,15 @@ async function checkedPick(doc, picked, own) {
 
     let found = null
     let opened = null
+    let before = null
     if (input && visible(input)) {
         found = { input, button: buttonFor(input) }
+    } else if (toggle === clicked) {
+        // The rules' click on this toggle showed no box this run; a second
+        // click would only open (or shut) the same thing again.
+        log('FINDER_PICK_TOGGLE_TRIED', {})
     } else if (toggle) {
+        before = beforeReveal(doc, toggle)
         toggle.click()
         for (let waited = 0; waited < 2500 && !found; waited += 250) {
             await sleep(250)
@@ -2552,6 +2810,7 @@ async function checkedPick(doc, picked, own) {
         opened = toggle
     }
     if (!usableBox(found)) {
+        if (before) await undoReveal(doc, toggle, before)
         log('FINDER_PICK_UNUSABLE', {
             input: !!input,
             button: !!button,
@@ -2733,7 +2992,10 @@ export function caramelFinderTotalNow(
 ) {
     // A baseline read that fails below must not leave the last code's
     // baseline (and its code name) for this code's later reads.
-    if (baseline) rec.caramelSubtotalBase = null
+    if (baseline) {
+        rec.caramelSubtotalBase = null
+        rec.caramelTaxBase = null
+    }
     const el = doc.querySelector(rec.priceContainer)
     if (!el || !el.isConnected || !_isVisible(el)) {
         const row = findSameTotalRow(doc, {

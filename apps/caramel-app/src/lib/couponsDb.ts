@@ -162,6 +162,22 @@ export const ShopperDedupeRowSchema = CouponIdRowSchema.extend({
     submittedByUserId: z.string().nullable(),
 })
 
+/** couponsRepo.listCodesSubmittedByUser — "Download your data"'s submitted
+ *  codes. No `id` on purpose: the export names a code by its store and text,
+ *  never by the catalog key. `site` is nullable at the column level (always set
+ *  on a shopper row, but this is the table's shape, not a query guarantee);
+ *  `submittedAt` is `created_at`, `z.coerce.date()` for the same driver
+ *  tolerance RecentStoreRowSchema documents. */
+export const SubmittedCodeRowSchema = z.object({
+    site: z.string().nullable(),
+    code: z.string(),
+    status: z.string(),
+    expired: z.boolean(),
+    submissionSource: z.string().nullable(),
+    submittedAt: z.coerce.date(),
+})
+export type SubmittedCodeRow = z.infer<typeof SubmittedCodeRowSchema>
+
 /** `... RETURNING fail_weight AS "failWeight"` — couponsRepo's coupon_signals
  *  writers (writeWorkedSignal / writeFailedSignal / writeUsageSignal). */
 export const CouponSignalWriteRowSchema = z.object({

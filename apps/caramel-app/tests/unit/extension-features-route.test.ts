@@ -125,6 +125,26 @@ describe('GET /api/extension/features', () => {
         })
     })
 
+    it('the shipped default serves { couponBoxSave: true }, and false switches it off', async () => {
+        const { parseServerEnv } =
+            await vi.importActual<typeof import('@/lib/env')>('@/lib/env')
+        envMock.COUPON_BOX_SAVE_ENABLED = parseServerEnv({
+            ...process.env,
+            COUPON_BOX_SAVE_ENABLED: undefined,
+        }).COUPON_BOX_SAVE_ENABLED
+        expect(
+            (await (await GET(featuresRequest())).json()).couponBoxSave,
+        ).toBe(true)
+
+        envMock.COUPON_BOX_SAVE_ENABLED = parseServerEnv({
+            ...process.env,
+            COUPON_BOX_SAVE_ENABLED: 'false',
+        }).COUPON_BOX_SAVE_ENABLED
+        expect(
+            (await (await GET(featuresRequest())).json()).couponBoxSave,
+        ).toBe(false)
+    })
+
     it('needs no credentials (public read)', async () => {
         const res = await GET(featuresRequest())
 

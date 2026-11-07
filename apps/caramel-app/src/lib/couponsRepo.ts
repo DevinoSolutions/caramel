@@ -46,6 +46,7 @@ import {
     FAILING_WINDOW_DAYS,
     KEEPS_FAILING_MIN_FAIL_WEIGHT,
     PROVEN_COUPON_STATUSES,
+    REFUSED_MIN_FAIL_WEIGHT,
     RESTRICTED_COUPON_STATUSES,
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
@@ -79,6 +80,8 @@ import {
     StoreConfigRowSchema,
     StoreCouponAggregateRowSchema,
     StoreListRowSchema,
+    type SubmittedCodeRow,
+    SubmittedCodeRowSchema,
     TotalCountRowSchema,
     WorkedCountRowSchema,
     parseCouponRows,
@@ -156,6 +159,14 @@ const failingSinkSql = () => failingSignalIdsSql(FAILING_MIN_FAIL_WEIGHT)
  */
 const keepsFailingSql = () => failingSignalIdsSql(KEEPS_FAILING_MIN_FAIL_WEIGHT)
 
+/**
+ * SQL twin of coupons.ts's isRecentlyRefused(): the same predicate at
+ * REFUSED_MIN_FAIL_WEIGHT. proofTierSql orders it INSIDE a proof tier, so a
+ * code a store refused goes after the unrefused codes of its own tier and
+ * never crosses into another (T-13810).
+ */
+const refusedInTierSql = () => failingSignalIdsSql(REFUSED_MIN_FAIL_WEIGHT)
+
 const failingSignalIdsSql = (minFailWeight: number) => Prisma.sql`(id IN (
     SELECT s.coupon_id FROM coupon_signals s
     WHERE s.fail_weight >= ${minFailWeight}
@@ -180,10 +191,15 @@ const failingSignalIdsSql = (minFailWeight: number) => Prisma.sql`(id IN (
  * tier alone was not enough on shopmicas: its 20 highest-rated codes were also
  * `valid`, but one-time referral codes last proven 2026-10-27, and they still
  * filled page 1 ahead of the codes proven that day.
+ *
+ * Inside each tier, a code a store refused (refusedInTierSql) goes after the
+ * ones no store refused, before freshness of proof (T-13810). The proven and
+ * restricted keys come first because they are disjoint: together they name
+ * the tier, so the refused key can never move a code out of its own.
  */
 const proofTierSql = () => {
     const proven = Prisma.join([...PROVEN_COUPON_STATUSES])
-    return Prisma.sql`(status IN (${proven})) DESC, CASE WHEN status IN (${proven}) THEN updated_at END DESC NULLS LAST, (status IN (${Prisma.join([...RESTRICTED_COUPON_STATUSES])})) DESC`
+    return Prisma.sql`(status IN (${proven})) DESC, (status IN (${Prisma.join([...RESTRICTED_COUPON_STATUSES])})) DESC, ${refusedInTierSql()} ASC, CASE WHEN status IN (${proven}) THEN updated_at END DESC NULLS LAST`
 }
 
 /**
@@ -1394,6 +1410,82 @@ export async function findCatalogStoreNames(
         'coupon-box-save.catalog-store-names',
     )
     return Array.from(new Set(rows.map(row => row.name)))
+}
+
+/**
+ * api/account/export GET — the codes this shopper submitted
+ * (submitShopperCoupon), newest first, for "Download your data" (T-12391).
+ * Read-only.
+ *
+ * EVERY status, deliberately without visibleCouponsWhere(): the export answers
+ * "what did I give you", so a code since marked invalid or expired is still the
+ * shopper's and is still listed, with its current status. Scoped by
+ * `submitted_by_user_id = userId` alone, which the (submitted_by_user_id,
+ * created_at) index answers; supplier rows carry NULL there and never match.
+ * No `id` is selected: the export never hands out catalog keys.
+ */
+export async function listCodesSubmittedByUser(
+    userId: string,
+): Promise<SubmittedCodeRow[]> {
+    const rawRows = await prisma.$queryRaw(Prisma.sql`
+        SELECT site, code, status, expired,
+               submission_source AS "submissionSource",
+               created_at AS "submittedAt"
+        FROM coupons
+        WHERE submitted_by_user_id = ${userId}
+        ORDER BY created_at DESC, id DESC
+    `)
+    return parseCouponRows(
+        SubmittedCodeRowSchema,
+        rawRows,
+        'account.submitted-codes',
+    )
+}
+
+/**
+ * api/account/overview GET — how many catalog codes still carry this shopper's
+ * account (submitShopperCoupon), so the danger zone knows "Delete my data" has
+ * something to do and can say what (T-12392). Read-only, and the SAME predicate
+ * unlinkCodesSubmittedByUser writes with, so the button and the route cannot
+ * disagree. Every status: an expired code still names the shopper.
+ */
+export async function countCodesSubmittedByUser(
+    userId: string,
+): Promise<number> {
+    const [row] = parseCouponRows(
+        TotalCountRowSchema,
+        await prisma.$queryRaw(Prisma.sql`
+            SELECT COUNT(*)::int AS total
+            FROM coupons
+            WHERE submitted_by_user_id = ${userId}
+        `),
+        'account.submitted-codes-count',
+    )
+    return row?.total ?? 0
+}
+
+/**
+ * api/account/data/delete POST — "Delete my data" takes the shopper off the
+ * codes they submitted (submitShopperCoupon). Owner-directed 2026-11-03
+ * (T-12392): the codes stay in the catalog for everyone, only the link to the
+ * person goes. It is the same state deleting the ACCOUNT already leaves them in
+ * (the foreign key is ON DELETE SET NULL): `submission_source` stays set, so
+ * the row still reads as shopper-submitted, never as a supplier row.
+ *
+ * A sanctioned catalog write (CLAUDE.md, Hard boundaries), and the narrowest
+ * one: one column, only on the caller's own rows, only ever to NULL. Returned
+ * UNAWAITED so the route runs it inside its one transaction with the other
+ * deletes; awaited on its own, a failure after them would tell the shopper
+ * nothing was removed while their savings were already gone.
+ */
+export function unlinkCodesSubmittedByUser(
+    userId: string,
+): Prisma.PrismaPromise<number> {
+    return prisma.$executeRaw(Prisma.sql`
+        UPDATE coupons
+        SET submitted_by_user_id = NULL
+        WHERE submitted_by_user_id = ${userId}
+    `)
 }
 
 export type SubmitShopperCouponArgs = {

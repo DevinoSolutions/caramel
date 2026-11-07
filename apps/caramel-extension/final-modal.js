@@ -1,5 +1,9 @@
 // Split out of UI-helpers.js (T-5446), moved verbatim: no behavior change.
-import { caramelGetSession, currentBrowser } from './caramel-base.js'
+import {
+    caramelGetSession,
+    caramelOwnHost,
+    currentBrowser,
+} from './caramel-base.js'
 import { CARAMEL_ENV } from './caramel-env.js'
 import { caramelCurrencySymbol } from './dom-utils.js'
 import { hideTestingModal } from './UI-helpers.js'
@@ -119,6 +123,34 @@ export async function showFinalModal(...args) {
     } finally {
         hideTestingModal()
     }
+}
+
+// The card's single way down: its Esc listener goes with it.
+function _caramelTakeDownFinal(host) {
+    if (host.__caramelOnKey)
+        document.removeEventListener('keydown', host.__caramelOnKey)
+    if (host.parentNode) host.parentNode.removeChild(host)
+    _caramelRestoreFocus(host)
+}
+
+/* A card saying "no promo box on this page" is about the page it was shown on
+ * (T-11235). A one-page checkout moves to its next step without a load (Full
+ * Source: #info-guest to #shipping, where the box is), and while any card is up
+ * nothing offers a run, so a card left from the step before cost the shopper
+ * the run on the step that has the box. Such a card notes its page; a later URL
+ * takes it down (coupon-runner.js caramelHandleUrlChanged). A card with a saving
+ * or a code on it is never noted, so it stays until the shopper closes it. */
+const NO_BOX_AT = 'data-caramel-no-box-at'
+export function caramelNoteNoBoxCard(url) {
+    caramelOwnHost('caramel-final-overlay')?.setAttribute(NO_BOX_AT, url)
+}
+// true when a no-box card from another page was taken down.
+export function caramelDropNoBoxCardFrom(url) {
+    const host = caramelOwnHost('caramel-final-overlay')
+    const at = host?.getAttribute(NO_BOX_AT)
+    if (!at || at === url) return false
+    _caramelTakeDownFinal(host)
+    return true
 }
 
 async function _caramelMountFinalModal(
@@ -337,12 +369,7 @@ ${showPrimary ? `<button id="caramel-final-ok-btn">${primaryLabel}</button>` : '
     document.body.appendChild(host)
 
     // Single close path — detaches the Esc listener (no leaked handler).
-    const closeFinal = () => {
-        if (host.__caramelOnKey)
-            document.removeEventListener('keydown', host.__caramelOnKey)
-        if (host.parentNode) document.body.removeChild(host)
-        _caramelRestoreFocus(host)
-    }
+    const closeFinal = () => _caramelTakeDownFinal(host)
 
     // Manual-copy buttons: copies the EXACT code shown (data-code); copied
     // feedback = class toggle (tokened green pair, dark-safe).

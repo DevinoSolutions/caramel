@@ -43,6 +43,8 @@ const signalOverlay: typeof attachSignals = async rows =>
         failCount: 0,
         failWeight: row.id === 'hidden' ? 6 : 0,
         keepsFailing: row.id === 'hidden',
+        recentlyFailing: row.id === 'hidden',
+        recentlyRefused: row.id === 'hidden',
     }))
 
 vi.mock('@/lib/couponSignals', () => ({

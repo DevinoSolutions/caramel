@@ -34,6 +34,7 @@ import {
 } from './code-capture.js'
 import {
     _getTriedCodes,
+    caramelCodeOnOrder,
     caramelPostNavigationVerdict,
     caramelSinkTriedCodes,
     probeCartJson,
@@ -44,7 +45,12 @@ import {
     caramelLoadFinder,
 } from './coupon-box-finder-loader.js'
 import { fetchCoupons } from './coupon-fetch.js'
-import { reportOutcome, startApplyingCoupons } from './coupon-runner.js'
+import {
+    caramelCreditSettles,
+    caramelSettleWindowMs,
+    reportOutcome,
+    startApplyingCoupons,
+} from './coupon-runner.js'
 import {
     caramelBaselineFor,
     caramelClaimRunHop,
@@ -54,6 +60,7 @@ import {
     caramelEndRun,
     caramelSetCurrencySymbol,
     caramelTakeAppliedWin,
+    caramelTakeLinkRun,
     caramelTakePendingSubmit,
     getPrice,
     pickBestMatch,
@@ -81,6 +88,81 @@ function _getCacheTtl() {
     return CARAMEL_ENV.isProduction ? STORE_CACHE_PROD_TTL : STORE_CACHE_DEV_TTL
 }
 
+/* The list is cached packed (2026-10-30, T-10681). Served as JSON it is 1.5 MB
+ * for 3,008 stores, and Safari refused to keep that ("Exceeded storage quota",
+ * Sentry CARAMEL-1D on a fresh install): the extension has no unlimitedStorage
+ * and Safari's cap is far below Chrome's. Most rows share their selectors
+ * (6,880 distinct values across 3,008 rows), so each distinct value is kept
+ * once and a row is a flat list of [key index, value index] pairs, about 0.6
+ * MB. An entry without `v` is the old { data } shape and is still read. */
+const STORE_CACHE_FORMAT = 2
+
+function _indexIn(at, list, x) {
+    if (!at.has(x)) {
+        at.set(x, list.length)
+        list.push(x)
+    }
+    return at.get(x)
+}
+
+export function _packStoreList(rows) {
+    const keys = []
+    const vals = []
+    const keyAt = new Map()
+    const valAt = new Map()
+    return {
+        v: STORE_CACHE_FORMAT,
+        keys,
+        vals,
+        rows: rows.map(r =>
+            Object.entries(r).flatMap(([k, val]) => [
+                _indexIn(keyAt, keys, k),
+                _indexIn(valAt, vals, val),
+            ]),
+        ),
+    }
+}
+
+export function _unpackStoreList(entry) {
+    if (entry?.v === undefined) return entry?.data
+    if (entry.v !== STORE_CACHE_FORMAT || !Array.isArray(entry.rows)) return
+    return entry.rows.map(pairs => {
+        const row = {}
+        for (let i = 0; i < pairs.length; i += 2)
+            row[entry.keys[pairs[i]]] = entry.vals[pairs[i + 1]]
+        return row
+    })
+}
+
+// A refused write used to be an unhandled rejection on the shopper's page.
+// Chrome reports it through lastError on the callback, Safari by rejecting
+// the promise set() returns, so both are watched and reported once.
+function _writeStoreCache(list) {
+    const entry = { ..._packStoreList(list), ts: Date.now() }
+    let reported = false
+    const refused = err => {
+        if (reported) return
+        reported = true
+        logError('storeCacheWrite', err)
+        recordTiming('STORE_CACHE_WRITE_FAILED', {
+            error: String(err?.message || err),
+            bytes: JSON.stringify(entry).length,
+        })
+    }
+    try {
+        const pending = currentBrowser.storage.local.set(
+            { [STORE_CACHE_KEY]: entry },
+            () => {
+                const err = currentBrowser.runtime?.lastError
+                if (err) refused(err)
+            },
+        )
+        if (typeof pending?.catch === 'function') pending.catch(refused)
+    } catch (err) {
+        refused(err)
+    }
+}
+
 export async function getDomainRecord(domain) {
     if (!getDomainRecord.cache) {
         const ttl = _getCacheTtl()
@@ -96,8 +178,9 @@ export async function getDomainRecord(domain) {
                       )
                     : null
             const entry = stored?.[STORE_CACHE_KEY]
-            if (ttl > 0 && entry?.data?.length && Date.now() - entry.ts < ttl) {
-                getDomainRecord.cache = entry.data
+            const list = _unpackStoreList(entry)
+            if (ttl > 0 && list?.length && Date.now() - entry.ts < ttl) {
+                getDomainRecord.cache = list
                 log('Loaded supported domains from local cache')
             }
         } catch {
@@ -142,12 +225,7 @@ export async function getDomainRecord(domain) {
                         resp.supported.length > 0
                     ) {
                         getDomainRecord.cache = resp.supported
-                        currentBrowser.storage.local.set({
-                            [STORE_CACHE_KEY]: {
-                                data: resp.supported,
-                                ts: Date.now(),
-                            },
-                        })
+                        _writeStoreCache(resp.supported)
                         log('Loaded supported domains from API')
                     }
                     break
@@ -170,9 +248,9 @@ export async function getDomainRecord(domain) {
                 const stored = await new Promise(r =>
                     currentBrowser.storage.local.get([STORE_CACHE_KEY], r),
                 )
-                const entry = stored?.[STORE_CACHE_KEY]
-                if (entry?.data?.length) {
-                    getDomainRecord.cache = entry.data
+                const list = _unpackStoreList(stored?.[STORE_CACHE_KEY])
+                if (list?.length) {
+                    getDomainRecord.cache = list
                     log('Loaded supported domains from expired cache')
                 }
             } catch {
@@ -417,9 +495,12 @@ const CARAMEL_CART_FILE_RE =
  * last form is the capture group, at least three letters, and the caller
  * checks it against the start of one of the host's own labels: any other
  * prefix is an ordinary word (/workshop/, /giftshop/, /bishop/), and two
- * letters are too few to name a store (/restore/ on restorationhardware.com). */
+ * letters are too few to name a store (/restore/ on restorationhardware.com).
+ * A bare web is the server's own folder for the shop's pages, like app
+ * (halloweenexpress.com's cart is /web/shoppingcart, measured 2026-10-31
+ * with a promo box and a total in view). */
 const CARAMEL_CART_FILE_PARENT_RE =
-    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|(?:e|web|online|([a-z]{3,}))?(?:store|shop)|checkout|cart|basket|secure|orders?|app)$/i
+    /^(?:[a-z]{2}(?:[-_][a-z]{2})?|(?:e|web|online|([a-z]{3,}))?(?:store|shop)|checkout|cart|basket|secure|orders?|app|web)$/i
 
 /* A path segment that is an action on the cart, written as one word
  * (/app/manageCart/showManageOrder, the hosted order form of a checkout
@@ -744,9 +825,9 @@ async function _finderSeesBox(domain) {
 /* The prompt's half of the finder: a box the rules can see, or, while the
  * couponBoxLlm flag is on, a cart the server could still find one on once the
  * shopper taps (caramelFinderMayAsk). The reload chain (_caramelContinueRun)
- * keeps asking _finderSeesBox alone: the server is asked once per store per
- * tab session, so a page after the ask continues only on a box the rules see
- * or the pick it kept. */
+ * keeps asking _finderSeesBox alone: the server is asked once per store and
+ * kind of page (cart, checkout) per tab session, so a page after the ask
+ * continues only on a box the rules see or the pick it kept. */
 async function _finderMayOffer(domain) {
     if (await _finderSeesBox(domain)) return true
     if (!caramelStoreListKnown() || !_caramelCartIntentSignal()) return false
@@ -767,27 +848,52 @@ async function _finderMayOffer(domain) {
 if (typeof _caramelCodes === 'undefined') {
     var _caramelCodes = null // { domain, list }
 }
+/* The fetch in flight, shared by everyone who asks for the same store's codes
+   before it answers (T-11238, 2026-11-03). The prompt check and the run each
+   used to send their own; the last to answer was cached, and a fetch that
+   failed or timed out was cached as an empty list. A slow failure landing
+   after a good list wiped it: "No codes for this store" on a store with
+   codes, for every later ask on the page. A failure is never cached now, so
+   the next ask tries again. */
+if (typeof _caramelCodesInFlight === 'undefined') {
+    var _caramelCodesInFlight = null // { domain, promise }
+}
 /* Test seam (WXT P1, 2026-08-12): the cache used to be a script global the
    suites reset with `globalThis._caramelCodes = null`; module scope made it
    unreachable, and an import binding cannot be assigned from outside. Only
-   tests/store-detect.test.mjs + tests/configless-store.test.mjs call this. */
+   the suites call this. */
 export function _caramelResetCachedCodes() {
     _caramelCodes = null
+    _caramelCodesInFlight = null
+}
+async function _caramelFetchCodes(domain) {
+    try {
+        const list = await fetchCoupons(domain, '', '')
+        const codes = Array.isArray(list) ? list : []
+        _caramelCodes = { domain, list: codes }
+        return codes
+    } catch (e) {
+        // This ask gets no codes; the cache stays empty so the next one
+        // fetches again instead of reading this failure for the whole page.
+        log('CODES_FETCH_FAILED', { domain, error: String(e?.message || e) })
+        return []
+    }
 }
 export async function getCachedCodes(rec) {
     if (_caramelCodes && _caramelCodes.domain === rec.domain)
         return _caramelCodes.list
-    let list = []
-    try {
-        list = await fetchCoupons(rec.domain, '', '')
-    } catch {
-        list = []
-    }
-    _caramelCodes = {
+    if (_caramelCodesInFlight?.domain === rec.domain)
+        return _caramelCodesInFlight.promise
+    const flight = {
         domain: rec.domain,
-        list: Array.isArray(list) ? list : [],
+        promise: _caramelFetchCodes(rec.domain),
     }
-    return _caramelCodes.list
+    _caramelCodesInFlight = flight
+    try {
+        return await flight.promise
+    } finally {
+        if (_caramelCodesInFlight === flight) _caramelCodesInFlight = null
+    }
 }
 
 /* --------------------------------------------------  init hook */
@@ -899,6 +1005,17 @@ async function _caramelContinueRun(rec, finder = false) {
     return true
 }
 
+// The total, read again until the store has drawn it; NaN after waitMs.
+async function _caramelTotalOnceDrawn(read, waitMs = 6000) {
+    const until = Date.now() + waitMs
+    let total = read()
+    while (!Number.isFinite(total) && Date.now() < until) {
+        await sleep(250)
+        total = read()
+    }
+    return total
+}
+
 async function _resumePendingSubmit() {
     const pending = await caramelTakePendingSubmit()
     if (!pending) return false
@@ -908,21 +1025,57 @@ async function _resumePendingSubmit() {
     // A finder that does not load reads no total, so no saving is measured.
     // The finder is loaded here whatever the flag says now: pending.finder is
     // set only when the page before this navigation ran the finder.
-    const now = pending.finder
-        ? ((await caramelLoadFinder())?.caramelFinderReadTotal(
-              document,
-              pending.finder,
-              pending.finderRow,
-          ) ?? NaN)
-        : rec && rec.priceContainer
-          ? getPrice(rec.priceContainer, { returnLargest: true })
-          : NaN
+    const finder = pending.finder ? await caramelLoadFinder() : null
+    const readTotal = () =>
+        pending.finder
+            ? (finder?.caramelFinderReadTotal(
+                  document,
+                  pending.finder,
+                  pending.finderRow,
+              ) ?? NaN)
+            : rec && rec.priceContainer
+              ? getPrice(rec.priceContainer, { returnLargest: true })
+              : NaN
+    let now = readTotal()
+    // A cart that draws its totals by script after load (Magento's summary on
+    // 4inkjets.com, T-8654) has no total yet when this document looks: a code
+    // that took 18% off was read as "unreadable" and the run went on over it.
+    // The total was readable before the submit, so wait for it to be drawn.
+    // A finder attempt is not: its reader already refuses a summary caught
+    // mid-render (caramelFinderReadTotal), and it stops the run below.
+    if (
+        !Number.isFinite(now) &&
+        !pending.finder &&
+        rec?.priceContainer &&
+        pending.prices.length
+    )
+        now = await _caramelTotalOnceDrawn(readTotal)
     // Same tightest-defensible-baseline rule the in-page path uses, against the
     // prices captured before the submit — it can never overstate a saving.
     const baseline = caramelBaselineFor(now, pending.prices)
-    const saved =
+    let saved =
         Number.isFinite(now) && Number.isFinite(baseline) ? baseline - now : NaN
-    const measured = Number.isFinite(saved) && saved > 0
+    let measured = Number.isFinite(saved) && saved > 0
+
+    // The saving must still stand once the store settles (T-11366, see
+    // caramelCreditSettles in coupon-runner.js) before the card, the "worked"
+    // report or the box save. A drop the store takes back is not a win, and
+    // the run goes on below as for any code that did not win.
+    if (measured) {
+        const orderNames = () => !!caramelCodeOnOrder(rec || {}, [pending.code])
+        const settled = await caramelCreditSettles({
+            code: pending.code,
+            from: baseline,
+            total: now,
+            checkTotal: true,
+            wasNamed: orderNames(),
+            read: () => ({ total: readTotal(), named: orderNames() }),
+            windowMs: caramelSettleWindowMs(baseline, now),
+        })
+        now = settled.total
+        saved = baseline - now
+        measured = settled.held && Number.isFinite(saved) && saved > 0
+    }
 
     log('AUTO_INSERT_RESUMED', {
         code: pending.code,
@@ -978,13 +1131,15 @@ async function _resumePendingSubmit() {
 
     // That code didn't win, and on this kind of cart every code costs a page
     // load. Carry the run on rather than making the shopper click per code.
-    // A finder run goes on only when it could read the total and it did not
-    // move: an unreadable total may be hiding a win (the store renamed the
-    // row), and submitting the next code onto that cart could replace it.
-    if (pending.finder && !Number.isFinite(now))
+    // A run goes on only when it could read the total and it did not move: an
+    // unreadable total may be hiding a win (the store renamed the row), and
+    // submitting the next code onto that cart could replace it. A finder run
+    // always measured one; a config run did when its total read before the
+    // submit (a config whose total never reads still chains, as it always has).
+    if (!Number.isFinite(now) && (pending.finder || pending.prices.length))
         log('AUTO_INSERT_RUN_STOPS', {
             reason: 'total unreadable',
-            finder: true,
+            finder: !!pending.finder,
         })
     else if (await _caramelContinueRun(rec, !!pending.finder)) return true
     await caramelEndRun()
@@ -1110,6 +1265,48 @@ async function _caramelSecondLook() {
     window.__caramel_second_look = stop
 }
 
+/* Carry on a discount-link run the store's own page reloaded under (T-13322,
+ * dom-utils.js caramelHoldLinkRun). It is the same click, not a new run: the
+ * record exists only because the shopper pressed the pill on the page before
+ * this one, × ends it, and it is resumed at most once. Returns true when the
+ * run took the page. */
+async function _caramelResumeLinkRun() {
+    const carry = await caramelTakeLinkRun()
+    if (!carry) return false
+    if (carry.resumed) {
+        log('AUTO_INSERT_LINK_RUN_NOT_RESUMED', {
+            reason: 'already resumed once for this click',
+        })
+        return false
+    }
+    const cart = await probeCartJson()
+    if (!cart || cart.item_count !== carry.items) {
+        log('AUTO_INSERT_LINK_RUN_NOT_RESUMED', {
+            reason: 'the cart is not the one the run was on',
+            items: cart ? cart.item_count : null,
+        })
+        return false
+    }
+    const rec =
+        (await getDomainRecord(location.hostname)) ??
+        caramelConfiglessRecord(location.hostname)
+    log('AUTO_INSERT_LINK_RUN_RESUMES', {
+        next: carry.next,
+        of: carry.planned.length,
+        best: carry.bestCode,
+    })
+    try {
+        await startApplyingCoupons(rec, { resumed: true, linkCarry: carry })
+    } catch (e) {
+        // As for a form-path hop: never leave the shopper behind an
+        // "Applying…" overlay with nothing coming.
+        log('AUTO_INSERT_RESUME_FAILED', { error: String(e) })
+        hideTestingModal()
+        return false
+    }
+    return true
+}
+
 export async function startCheckoutDetection() {
     // Our own apply loop is running on this document (its overlay is up): a
     // re-detection now (the address bar moved, coupon-runner.js) must not take
@@ -1173,6 +1370,9 @@ export async function startCheckoutDetection() {
                 error: String(err?.message || err),
             })
         }
+    // A discount-link run the store's own page reloaded under carries on here
+    // (T-13322), before tryInitialize puts the pill back up over its work.
+    if (!applying && (await _caramelResumeLinkRun())) return
     // An attempt the store's own form POST cut short finishes here, on the page
     // that replaced it — before tryInitialize can re-prompt as if nothing had
     // happened, which is precisely what the user saw before.

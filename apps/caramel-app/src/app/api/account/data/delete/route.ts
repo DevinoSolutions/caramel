@@ -1,4 +1,6 @@
 import { withRoute } from '@/lib/api/withRoute'
+import { couponBoxProposalIdentityWhere } from '@/lib/couponBoxProposalIdentity'
+import { unlinkCodesSubmittedByUser } from '@/lib/couponsRepo'
 import prisma from '@/lib/prisma'
 import {
     SITE_SUGGESTION_SCRUB_DATA,
@@ -9,9 +11,11 @@ import { z } from 'zod'
 
 // POST /api/account/data/delete — the danger zone's "Delete my data".
 //
-// Removes the three login-features tables' rows for the caller: their synced
-// savings history, the stores they follow, and the coupon reports they made.
-// It also SCRUBS the caller's identity off their site suggestions — see below.
+// Removes the caller's rows from the four tables that are theirs alone: their
+// synced savings history, the stores they follow, the coupon reports they
+// made, and the coupon boxes their extension proposed (coupon_box_proposals,
+// T-12391). It also SCRUBS the caller's identity off their site suggestions —
+// see below.
 //
 // WHAT IT DELIBERATELY DOES NOT DO:
 //  - It does NOT delete the account or the login. That is POST
@@ -24,6 +28,12 @@ import { z } from 'zod'
 //    input: deleting the row would silently retract a store request that other
 //    people may also have made, and would corrupt a queue this user does not
 //    own. Nothing new is stamped — a scrub is not an ANSWER to the request.
+//  - It does NOT delete the codes the caller submitted to the catalog, it
+//    UNLINKS them (owner-directed 2026-11-03, T-12392): one sanctioned
+//    catalog write, couponsRepo.ts unlinkCodesSubmittedByUser, nulls
+//    `coupons.submitted_by_user_id` on the caller's own rows. The codes stay
+//    in the catalog for every other shopper; only the link to this person
+//    goes. Deleting the ACCOUNT leaves them the same way (the FK is SET NULL).
 //  - It does NOT flip the savings-sync preference. Turning sync OFF and
 //    DELETING history are two deliberately separate acts: a delete that also
 //    changed a setting the user never touched would make the danger zone do
@@ -60,44 +70,61 @@ export const POST = withRoute(
         const email = session.user.email ?? null
 
         // Which rows identify this account, and what a scrub removes from them,
-        // both come from src/lib/siteSuggestionIdentity.ts. GET
+        // both come from src/lib/siteSuggestionIdentity.ts; which proposals are
+        // the caller's comes from src/lib/couponBoxProposalIdentity.ts. GET
         // /api/account/overview counts rows with the SAME predicate so the
         // danger-zone button knows whether there is anything to do — two
         // hand-written copies would let the page say "Nothing to delete" about
-        // rows this route would happily have scrubbed.
+        // rows this route would happily have deleted or scrubbed.
         //
         // ONE transaction. A partial delete is the worst outcome available
         // here: the user is told their data is gone while some of it remains,
         // and the counts the UI just showed them become a lie. If any of the
-        // four fails, Prisma rolls the whole interactive batch back and
+        // five fails, Prisma rolls the whole interactive batch back and
         // withRoute's catch turns it into a 500 + Sentry — nothing deleted,
         // and the failure toast ("Nothing was removed") is then true.
+        // A proposal deleted here stops counting towards a box's promotion, as
+        // it should; a box already promoted to a store_configs row stays served.
         //
-        // The scrub belongs IN here for exactly that reason: run as a fourth
+        // The scrub belongs IN here for exactly that reason: run as a fifth
         // loose await after a successful transaction, a failure would leave the
-        // three tables emptied and the email still sitting in site_suggestions,
+        // four tables emptied and the email still sitting in site_suggestions,
         // with a 500 telling the user nothing had been removed.
-        const [savingsEvents, favoriteStores, couponReports, siteSuggestions] =
-            await prisma.$transaction([
-                prisma.savingsEvent.deleteMany({ where: { userId } }),
-                prisma.favoriteStore.deleteMany({ where: { userId } }),
-                prisma.couponReport.deleteMany({ where: { userId } }),
-                prisma.siteSuggestion.updateMany({
-                    where: siteSuggestionIdentityWhere({ userId, email }),
-                    data: SITE_SUGGESTION_SCRUB_DATA,
-                }),
-            ])
+        const [
+            savingsEvents,
+            favoriteStores,
+            couponReports,
+            couponBoxProposals,
+            siteSuggestions,
+            submittedCodes,
+        ] = await prisma.$transaction([
+            prisma.savingsEvent.deleteMany({ where: { userId } }),
+            prisma.favoriteStore.deleteMany({ where: { userId } }),
+            prisma.couponReport.deleteMany({ where: { userId } }),
+            prisma.couponBoxProposal.deleteMany({
+                where: couponBoxProposalIdentityWhere(userId),
+            }),
+            prisma.siteSuggestion.updateMany({
+                where: siteSuggestionIdentityWhere({ userId, email }),
+                data: SITE_SUGGESTION_SCRUB_DATA,
+            }),
+            // In the same batch as the rest, for the same reason as the scrub.
+            unlinkCodesSubmittedByUser(userId),
+        ])
 
         return NextResponse.json({
             deleted: {
                 savingsEvents: savingsEvents.count,
                 favoriteStores: favoriteStores.count,
                 couponReports: couponReports.count,
+                couponBoxProposals: couponBoxProposals.count,
             },
             // Reported under its own key, never folded into `deleted`: these
             // rows still exist, and calling that a deletion would be a lie the
             // next reader of this response would believe.
             scrubbed: { siteSuggestions: siteSuggestions.count },
+            // Same for the codes: they are still in the catalog, without you.
+            unlinked: { submittedCodes },
         })
     },
 )

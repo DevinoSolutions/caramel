@@ -20,10 +20,9 @@
 //   2. in the remaining titles, any token mixing letters and digits becomes
 //      "[code]" (codeShapedTokens.ts; shouted words stay, product titles are
 //      full of them).
-import {
-    redactCodeShapedTokens,
-    stripFormatChars,
-} from '@/lib/codeShapedTokens'
+// Relative, not '@/': the extension's background bundles this file too and
+// scrubs the rows before they leave the browser (T-10427).
+import { redactCodeShapedTokens, stripFormatChars } from './codeShapedTokens'
 
 const LABEL =
     '(?:coupon\\s+code|promo\\s+code|discount\\s+code|discounts?|coupons?|promotions?|promo|vouchers?|savings?|you\\s+saved|code)'

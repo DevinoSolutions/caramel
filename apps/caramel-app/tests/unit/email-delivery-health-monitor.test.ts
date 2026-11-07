@@ -198,6 +198,68 @@ describe('reportEmailDeliveryHealth', () => {
         expect(flushMock).toHaveBeenCalled()
     })
 
+    it('files one lone bounce under its own warning, not as degraded delivery', async () => {
+        // CARAMEL-2B: 1 of 1 sends BOUNCED in the hour. One address that does not
+        // exist is not an outage, but it stays visible: on the old provider 55
+        // bounces reached no human, so silence would reopen that gap.
+        const { reportEmailDeliveryHealth } = await freshMonitor()
+        const sent = await reportEmailDeliveryHealth(
+            report({
+                status: 'degraded',
+                scanned: 1,
+                failed: 1,
+                byStatus: { BOUNCED: 1 },
+            }),
+        )
+        expect(sent).toBe(true)
+        const [message, options] = captureMessageMock.mock.calls[0]
+        expect(message).toBe('Transactional email bounced')
+        expect(options.level).toBe('warning')
+        expect(options.extra.failed).toBe(1)
+    })
+
+    it.each([
+        ['two bounces', { failed: 2, byStatus: { BOUNCED: 2 } }],
+        ['one failed send', { failed: 1, byStatus: { FAILED: 1 } }],
+        ['one rejected send', { failed: 1, byStatus: { REJECTED: 1 } }],
+        [
+            'a spam complaint on a delivered mail',
+            { failed: 1, byStatus: { DELIVERED: 1 } },
+        ],
+        [
+            'a bounce and a failed send',
+            { failed: 2, byStatus: { BOUNCED: 1, FAILED: 1 } },
+        ],
+        [
+            'a bounce and a stuck send',
+            {
+                failed: 1,
+                stuckPending: 1,
+                byStatus: { BOUNCED: 1, SENDING: 1 },
+            },
+        ],
+        [
+            'a bounce and a delayed send',
+            {
+                failed: 1,
+                delayed: 1,
+                byStatus: { BOUNCED: 1, DELIVERY_DELAY: 1 },
+            },
+        ],
+        [
+            'a bounce in a window it could not fully read',
+            { failed: 1, truncated: true, byStatus: { BOUNCED: 1 } },
+        ],
+    ])('still calls %s degraded, at error level', async (_name, fields) => {
+        const { reportEmailDeliveryHealth } = await freshMonitor()
+        await reportEmailDeliveryHealth(
+            report({ status: 'degraded', ...fields }),
+        )
+        const [message, options] = captureMessageMock.mock.calls[0]
+        expect(message).toBe('Transactional email delivery degraded')
+        expect(options.level).toBe('error')
+    })
+
     it('downgrades a no-failure window (only stuck sends) to warning level', async () => {
         const { reportEmailDeliveryHealth } = await freshMonitor()
         await reportEmailDeliveryHealth(

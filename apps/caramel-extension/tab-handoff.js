@@ -28,6 +28,9 @@ export const TAB_HANDOFFS = {
     pending_submit: 2 * 60 * 1000,
     applied: 2 * 60 * 1000,
     run: 3 * 60 * 1000,
+    // A discount-link run in progress, for the page the store's own reload
+    // puts up mid-run (T-13322, dom-utils.js caramelHoldLinkRun).
+    link_run: 2 * 60 * 1000,
     // That the server was asked for a store's box in this tab, and the names
     // of a usable pick for the next page: kept for a shopping session.
     box_pick: 12 * 60 * 60 * 1000,

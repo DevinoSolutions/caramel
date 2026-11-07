@@ -159,10 +159,28 @@ export const POST = withRoute(
             // route answers anyone who can forge an extension Origin (T-6228).
             // The detail stays in Sentry, which handleRouteError reports it to.
             // The extension only reads the status (`HTTP <status>`).
+            //
+            // A model timeout is a slow upstream, not a defect here, so a
+            // warning; the fingerprint groups by cause, not by the minified
+            // stack frames, which reopened it as a "new" issue each release
+            // (CARAMEL-3E, T-10497; same fix as coupon-box-pick, T-7526).
+            if (error instanceof OpenRouterError) {
+                return handleRouteError(error, {
+                    req,
+                    message: 'classification failed',
+                    status: 502,
+                    ...(error.timedOut ? { level: 'warning' as const } : {}),
+                    fingerprint: [
+                        'classify-cart',
+                        'model_call',
+                        error.timedOut ? 'timeout' : 'error',
+                    ],
+                })
+            }
             return handleRouteError(error, {
                 req,
                 message: 'classification failed',
-                status: error instanceof OpenRouterError ? 502 : 500,
+                status: 500,
             })
         }
     },

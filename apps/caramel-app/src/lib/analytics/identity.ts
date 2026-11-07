@@ -229,6 +229,15 @@ export function initPosthogInstance(
         // ui_host stays the real host for toolbar links. e2e: direct, as before.
         api_host: hosts.apiHost,
         ...(hosts.uiHost ? { ui_host: hosts.uiHost } : {}),
+        // posthog-js defaults to 'fallback': it first asks for the versioned
+        // /static/<version>/<kind>.js and only then the legacy
+        // /static/<kind>.js?v=<version>. Our self-hosted PostHog has no
+        // versioned paths: it answers them with a 302 to /login, which the
+        // browser follows to OUR /login page (a server render per recorder
+        // load, plus a MIME-type error in the console) before the legacy
+        // retry loads the script. Ask for the legacy URL straight away.
+        // TODO: drop this once the self-hosted PostHog serves /static/<version>/.
+        strict_script_versioning: false,
         capture_pageview: 'history_change',
         capture_pageleave: true,
         // Session recording ON, masked to match the Sentry Replay privacy

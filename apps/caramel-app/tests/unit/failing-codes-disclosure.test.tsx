@@ -50,7 +50,11 @@ const failingOne = (id: string) =>
         keepsFailing: true,
         failCount: 4,
         failWeight: 6,
-        lastFailedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        // 2h01m ago, not exactly 2h: the tests pass now={Date.now()} BEFORE this
+        // runs, so on a slow runner an exact 2h reads "1h ago" (flaked on main).
+        lastFailedAt: new Date(
+            Date.now() - 2 * 60 * 60 * 1000 - 60 * 1000,
+        ).toISOString(),
     })
 
 const filtersResponse = {
@@ -107,7 +111,11 @@ afterEach(() => {
 describe('FailingCodesDisclosure', () => {
     it('renders nothing when there are no collapsed codes', () => {
         const { container } = render(
-            <FailingCodesDisclosure coupons={[]} startIndex={0} />,
+            <FailingCodesDisclosure
+                now={Date.now()}
+                coupons={[]}
+                startIndex={0}
+            />,
         )
         expect(container.innerHTML).toBe('')
     })
@@ -115,6 +123,7 @@ describe('FailingCodesDisclosure', () => {
     it('is a collapsed button (aria-expanded=false) with the exact count, plural and singular', () => {
         const { rerender } = render(
             <FailingCodesDisclosure
+                now={Date.now()}
                 coupons={[failingOne('1'), failingOne('2')]}
                 startIndex={0}
             />,
@@ -126,6 +135,7 @@ describe('FailingCodesDisclosure', () => {
 
         rerender(
             <FailingCodesDisclosure
+                now={Date.now()}
                 coupons={[failingOne('1')]}
                 startIndex={0}
             />,
@@ -140,6 +150,7 @@ describe('FailingCodesDisclosure', () => {
     it('toggles: the controlled region is hidden until opened, then the codes are reachable and keep the "Reported not working" hint', () => {
         render(
             <FailingCodesDisclosure
+                now={Date.now()}
                 coupons={[failingOne('1'), failingOne('2')]}
                 startIndex={0}
             />,
@@ -172,6 +183,7 @@ describe('FailingCodesDisclosure', () => {
     it('moreToLoad shows "N+"; allFlagged shows the line (singular wording for one code)', () => {
         const { rerender } = render(
             <FailingCodesDisclosure
+                now={Date.now()}
                 coupons={[failingOne('1')]}
                 startIndex={0}
                 moreToLoad
@@ -185,6 +197,7 @@ describe('FailingCodesDisclosure', () => {
 
         rerender(
             <FailingCodesDisclosure
+                now={Date.now()}
                 coupons={[failingOne('1')]}
                 startIndex={0}
                 allFlagged
@@ -198,6 +211,7 @@ describe('FailingCodesDisclosure', () => {
     it('keeps the collapsed codes in the server HTML (collapsed, never removed)', () => {
         const html = renderToString(
             <FailingCodesDisclosure
+                now={Date.now()}
                 coupons={[failingOne('1')]}
                 startIndex={0}
             />,
@@ -213,6 +227,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
     it('store list, last page in: good codes in the main list, flagged ones inside the disclosure with an exact count', () => {
         render(
             <CouponsSection
+                renderedAt={Date.now()}
                 defaultFilters={{ site: 'example.com' }}
                 initialCoupons={[
                     coupon('1'),
@@ -246,6 +261,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
     it('while more pages remain, flagged codes loaded so far are STILL rendered (collapsed) and the count reads "N+"', () => {
         render(
             <CouponsSection
+                renderedAt={Date.now()}
                 defaultFilters={{ site: 'example.com' }}
                 initialCoupons={[coupon('1'), failingOne('2')]}
                 initialTotal={9}
@@ -267,6 +283,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
     it('the server HTML of a store list with more pages contains the flagged codes inside the hidden region', () => {
         const html = renderToString(
             <CouponsSection
+                renderedAt={Date.now()}
                 defaultFilters={{ site: 'example.com' }}
                 initialCoupons={[coupon('1'), failingOne('2')]}
                 initialTotal={9}
@@ -307,6 +324,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
 
         render(
             <CouponsSection
+                renderedAt={Date.now()}
                 defaultFilters={{ site: 'example.com' }}
                 initialCoupons={[coupon('1'), failingOne('2')]}
                 initialTotal={3}
@@ -333,6 +351,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
     it('when EVERY code is flagged (last page in) a line says so above the disclosure', () => {
         render(
             <CouponsSection
+                renderedAt={Date.now()}
                 defaultFilters={{ site: 'example.com' }}
                 initialCoupons={[failingOne('1'), failingOne('2')]}
                 initialTotal={2}
@@ -354,6 +373,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
     it('the all-flagged line is absent when healthy codes exist, and absent while more pages remain', () => {
         const { rerender } = render(
             <CouponsSection
+                renderedAt={Date.now()}
                 defaultFilters={{ site: 'example.com' }}
                 initialCoupons={[coupon('1'), failingOne('2')]}
                 initialTotal={2}
@@ -366,6 +386,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
 
         render(
             <CouponsSection
+                renderedAt={Date.now()}
                 defaultFilters={{ site: 'example.com' }}
                 initialCoupons={[failingOne('1')]}
                 initialTotal={5}
@@ -396,6 +417,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
 
         render(
             <CouponsSection
+                renderedAt={Date.now()}
                 defaultFilters={{ site: 'example.com' }}
                 initialCoupons={[coupon('1'), failingOne('2')]}
                 initialTotal={3}
@@ -419,6 +441,7 @@ describe('CouponsSection groups keeps-failing codes at the end of a store list',
     it('a site-less browse list leaves flagged codes in place (no grouping, no disclosure)', () => {
         render(
             <CouponsSection
+                renderedAt={Date.now()}
                 initialCoupons={[failingOne('1'), coupon('2')]}
                 initialTotal={2}
                 disableInitialFetch

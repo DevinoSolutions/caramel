@@ -36,9 +36,16 @@ export const CARAMEL_UI_FALLBACK_CSS =
 
 const CARAMEL_OVERLAY_HOST_CSS =
     'display:block !important;position:fixed;top:0;left:0;width:100vw;height:100vh;height:100dvh;z-index:2147483647;direction:ltr;'
+// The prompt takes the HIGHEST z-index a page can use, not one below it.
+// knix.com's cart drawer is a fixed panel at 2147483647, so at 2147483646 the
+// prompt sat underneath the open drawer and a shopper's tap landed on the
+// drawer (measured 2026-10-31 with a real click at the prompt's centre). At an
+// equal z-index the element later in the page paints on top, and the prompt
+// is appended to the end of <body>. Nothing is lost by the tie with our own
+// overlays: the prompt is removed the moment a run starts.
 export const CARAMEL_HOST_CSS = {
     'caramel-small-prompt':
-        'display:block !important;position:fixed;top:max(20px,env(safe-area-inset-top));right:max(20px,env(safe-area-inset-right));z-index:2147483646;width:min(88vw,300px);cursor:pointer;outline:none;direction:ltr;',
+        'display:block !important;position:fixed;top:max(20px,env(safe-area-inset-top));right:max(20px,env(safe-area-inset-right));z-index:2147483647;width:min(88vw,300px);cursor:pointer;outline:none;direction:ltr;',
     'caramel-testing-overlay': CARAMEL_OVERLAY_HOST_CSS,
     'caramel-final-overlay': CARAMEL_OVERLAY_HOST_CSS,
     // The consent card: a small, NON-modal card in the bottom-right corner, so

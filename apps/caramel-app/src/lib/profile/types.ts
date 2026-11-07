@@ -74,6 +74,23 @@ export interface ProfileOverview {
     siteSuggestions: {
         identifyingCount: number
     }
+    /** Coupon boxes this account's extension proposed for stores with no
+     * config (coupon_box_proposals, T-12391). A COUNT: the danger zone needs it
+     * because "Delete my data" deletes these rows, so a user whose only data is
+     * a proposal must not be told "Nothing to delete". Counted with the same
+     * predicate the delete route deletes with
+     * (src/lib/couponBoxProposalIdentity.ts). */
+    couponBoxProposals: {
+        count: number
+    }
+    /** Catalog codes this account submitted that still carry its id (T-12392).
+     * A COUNT: "Delete my data" takes the account off them (the codes stay in
+     * the catalog), so a user whose only data is a submitted code must not be
+     * told "Nothing to delete". The same predicate the delete route unlinks
+     * with (couponsRepo countCodesSubmittedByUser / unlinkCodesSubmittedByUser). */
+    submittedCodes: {
+        linkedCount: number
+    }
     reports: {
         reportCount: number
         /** null when not derivable from real records — the UI then falls to a

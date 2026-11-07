@@ -321,9 +321,10 @@ model Source {
 // reporter_hash 'legacy' marks the one synthetic row per coupon seeded by migration
 // 20261021213000 to grandfather codes already sunk under the old raw-count rule;
 // it ages out and is cleared by a success like any other reporter row.
-// TODO(T-9212): the "Verified needs 2 distinct reporters" rule (decided in T-4372) is not built yet;
-// it can reuse this table's 'worked' rows, but today those exist only while a
-// coupon has a failure quorum.
+// The "Verified" stamp (coupon_signals.last_worked_at) is not counted from this
+// table: since #459 only an ESTABLISHED account (weight 2, the "one account" half
+// of the T-4372 rule) or a vetted checkout capture stamps it, and low-trust
+// reporters never do, however many agree (couponSignals.recordWorked, T-9212).
 model CouponSignalReporter {
   couponId     String   @map("coupon_id")
   outcome      String

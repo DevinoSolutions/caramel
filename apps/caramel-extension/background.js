@@ -22,8 +22,20 @@ import {
     codeSharingPromptVersion,
     readCodeSharingConsent,
 } from './code-sharing-consent.js'
+import {
+    FINDER_FLAG_MEMORY_KEY,
+    finderFlagFromMemory,
+    finderFlagMemoryEntry,
+} from './finder-flag-memory.js'
 import { saveInstallId } from './install-attribution.js'
 import { caramelTabHandoffs } from './tab-handoff.js'
+// The server's own redaction rules (T-9959), bundled from the app so the cart
+// rows, the box-pick outline and a store's refusal are cleaned BEFORE they
+// leave the browser (T-10427). The server applies them again on arrival, for
+// builds older than this one.
+import { scrubCartItems } from '../caramel-app/src/lib/cartItemScrub.ts'
+import { redactStoreReason } from '../caramel-app/src/lib/codeShapedTokens.ts'
+import { scrubOutline } from '../caramel-app/src/lib/outlineScrub.ts'
 import {
     USAGE_DIAGNOSTICS_CONSENT_KEY,
     deleteTelemetryId,
@@ -249,10 +261,40 @@ const FEATURES_TTL_OFF_MS = 30 * 60 * 1000
 let _featuresInflight = null // Promise<entry> while a fetch is running
 let _featuresMemo = null // { shopperCodeCapture, couponBoxDiscovery, couponBoxLlm, couponBoxSave, ts }
 
+/* How long one features read may take, start to finish (T-10668). Before
+ * this the read had no bound of its own: a storage.session read with no
+ * timeout, then the request (8s to the headers), then a body read with no
+ * timeout at all, since fetchWithTimeout stops its clock at the headers.
+ * caramelSendMessage stops waiting at 15s, and those 15s also pay for waking
+ * this worker, which on a loaded machine takes seconds. On 2026-10-30, with
+ * the PC heavily loaded, the finder flag question went unanswered for 15s on
+ * three configless stores and each page treated the finder as off. Waking a
+ * stopped worker on that loaded PC took ~4.9s, measured the same day. 8s
+ * leaves the page 7s for the wake. A read cut off here keeps running, and if
+ * it ends well it still fills the cache for the next question. */
+const FEATURES_READ_DEADLINE_MS = 8000
+/* The session cache is a shortcut to the network. A session read slower than
+ * this is skipped, so the request still has time inside the deadline: under
+ * load an extension storage call took up to 4.6s (2026-10-27, T-9245). */
+const FEATURES_SESSION_READ_MS = 3000
+
+// `promise`, or a rejection naming `what` when `ms` pass first. The work
+// behind `promise` is not cancelled.
+function withDeadline(promise, ms, what) {
+    let timer
+    const late = new Promise((_, reject) => {
+        timer = setTimeout(
+            () => reject(new Error(`${what}: no answer within ${ms}ms`)),
+            ms,
+        )
+    })
+    return Promise.race([promise, late]).finally(() => clearTimeout(timer))
+}
+
 function _readFeaturesSession() {
-    return new Promise(resolve => {
-        const area = currentBrowser.storage?.session
-        if (!area) return resolve(null)
+    const area = currentBrowser.storage?.session
+    if (!area) return Promise.resolve(null)
+    const read = new Promise(resolve => {
         try {
             area.get([FEATURES_CACHE_KEY], res =>
                 resolve(res?.[FEATURES_CACHE_KEY] ?? null),
@@ -261,6 +303,14 @@ function _readFeaturesSession() {
             // session storage unavailable in this runtime: memory-only cache.
             resolve(null)
         }
+    })
+    return withDeadline(
+        read,
+        FEATURES_SESSION_READ_MS,
+        'features session read',
+    ).catch(err => {
+        logError('featuresSessionRead', err)
+        return null
     })
 }
 
@@ -305,7 +355,30 @@ async function _fetchFeatures() {
         ts: Date.now(),
     }
     _writeFeaturesSession(_featuresMemo)
+    _rememberFinderFlag(_featuresMemo)
     return _featuresMemo
+}
+
+// The finder flag a content script falls back on when this worker does not
+// answer it (finder-flag-memory.js). A failed write is recorded; the answer
+// in hand is still good.
+function _rememberFinderFlag(entry) {
+    try {
+        currentBrowser.storage.local.set(
+            {
+                [FINDER_FLAG_MEMORY_KEY]: finderFlagMemoryEntry(
+                    entry.couponBoxDiscovery,
+                    entry.ts,
+                ),
+            },
+            () => {
+                const err = currentBrowser.runtime.lastError
+                if (err) logError('finderFlagRemember', err.message || err)
+            },
+        )
+    } catch (err) {
+        logError('finderFlagRemember', err)
+    }
 }
 
 /* The cached features entry. Lifetime (see _featuresFresh): 6 hours only while
@@ -316,14 +389,27 @@ function _features() {
     // One fetch for however many callers arrive while it is running; cleared
     // when it settles so a failure is retried by the next caller.
     if (!_featuresInflight) {
-        _featuresInflight = (async () => {
+        const read = (async () => {
             const stored = await _readFeaturesSession()
             if (_featuresFresh(stored)) {
                 _featuresMemo = stored
                 return stored
             }
             return _fetchFeatures()
-        })().finally(() => {
+        })()
+        // A read cut off by the deadline may still fail later. Its callers
+        // were answered by the deadline's own rejection, so that later
+        // failure is recorded here, or nobody would see why.
+        const started = Date.now()
+        read.catch(err => {
+            if (Date.now() - started >= FEATURES_READ_DEADLINE_MS)
+                logError('featuresLateFailure', err)
+        })
+        _featuresInflight = withDeadline(
+            read,
+            FEATURES_READ_DEADLINE_MS,
+            'features read',
+        ).finally(() => {
             _featuresInflight = null
         })
     }
@@ -334,16 +420,63 @@ function _shopperCaptureEnabled() {
     return _features().then(e => e.shopperCodeCapture)
 }
 
-// Answers the content script's couponBoxDiscoveryEnabled message. Any failure
-// to read the flag is answered as off: the finder is an addition, never a
-// requirement.
+/* Answers the content script's couponBoxDiscoveryEnabled message. A failed or
+ * late features read (FEATURES_READ_DEADLINE_MS included) is answered with the
+ * last flag the server gave, under its 30-minute rule (finder-flag-memory.js),
+ * and as off when there is none: the finder is an addition, never a
+ * requirement. Answering a hard "off" here instead was T-10668's symptom
+ * again: the page got a reply, so its own fallback never ran.
+ *
+ * The remembered flag is read from storage.local only. The in-memory cache
+ * holds the same flag and timestamp (_fetchFeatures writes both), and while
+ * the finder is on that cache is fresh for exactly the 30 minutes the memory
+ * is, so whenever the memory would answer, _features() already has.
+ *
+ * The memory is read alongside the features, not after them: under load a
+ * storage.local read alone took over 2s (measured 2026-10-30), and waiting
+ * for it only after the 8s deadline pushed the answer past what the page
+ * still waits for. It is read only when the cache is not fresh, so the usual
+ * answer costs no storage read, and it may run 1s past the deadline. */
+const FINDER_FLAG_MEMORY_READ_MS = FEATURES_READ_DEADLINE_MS + 1000
 async function couponBoxDiscoveryEnabled() {
+    const remembered = _featuresFresh(_featuresMemo)
+        ? null
+        : _rememberedFinderFlag()
     try {
         return (await _features()).couponBoxDiscovery === true
     } catch (err) {
         logError('features', err)
-        return false
+        const { on, error } = await (remembered ?? _rememberedFinderFlag())
+        if (error) logError('finderFlagMemoryRead', error)
+        return on === true
     }
+}
+
+// { on } with the remembered finder flag (null for none or stale), or
+// { error } when it could not be read in time. Never rejects: an answer
+// that did not need it simply ignores it.
+function _rememberedFinderFlag() {
+    const read = new Promise((resolve, reject) => {
+        currentBrowser.storage.local.get([FINDER_FLAG_MEMORY_KEY], res => {
+            const err = currentBrowser.runtime.lastError
+            if (err) reject(new Error(err.message || String(err)))
+            else
+                resolve(
+                    finderFlagFromMemory(
+                        res?.[FINDER_FLAG_MEMORY_KEY],
+                        Date.now(),
+                    ),
+                )
+        })
+    })
+    return withDeadline(
+        read,
+        FINDER_FLAG_MEMORY_READ_MS,
+        'finder flag memory read',
+    ).then(
+        on => ({ on }),
+        error => ({ error }),
+    )
 }
 
 // Answers the content script's couponBoxLlmEnabled message, the same way.
@@ -373,6 +506,30 @@ async function couponBoxLlmEnabled() {
  * whole ask 24s, so the request can outwait the server's own limit; the page
  * waits PICK_WAIT_MS, 29s (coupon-box-discovery.js), so an answer sent inside
  * this deadline always reaches it. Raise one, raise the ones after it. */
+/* The cart signals classify-cart may see: the rows go through the server's
+ * own cart scrub (discount lines dropped, code-shaped tokens redacted). */
+export function scrubCartSignals(signals) {
+    const s = signals && typeof signals === 'object' ? signals : {}
+    if (!Array.isArray(s.cart_items)) return s
+    return {
+        ...s,
+        cart_items: scrubCartItems(
+            s.cart_items.filter(item => typeof item === 'string'),
+        ),
+    }
+}
+
+/* A store's refusal as the report may carry it: redacted with the server's
+ * rule (the catalog code being reported stays readable), then cut to the
+ * route's 200 characters, which refuses the WHOLE report above that. */
+const STORE_REASON_MAX = 200
+export function scrubStoreReason(reason, code) {
+    if (typeof reason !== 'string') return reason
+    return redactStoreReason(reason, typeof code === 'string' ? code : null)
+        .trim()
+        .slice(0, STORE_REASON_MAX)
+}
+
 export const COUPON_BOX_PICK_DEADLINE_MS = 24000
 const COUPON_BOX_PICK_TIMEOUT_MS = 23000
 const COUPON_BOX_PICK_MIN_MS = 3000
@@ -388,7 +545,13 @@ async function couponBoxPick({ domain, outline }) {
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ domain, outline }),
+                body: JSON.stringify({
+                    domain,
+                    outline:
+                        typeof outline === 'string'
+                            ? scrubOutline(outline)
+                            : outline,
+                }),
             },
             token,
         ),
@@ -948,7 +1111,7 @@ export function initBackground() {
                 fetchCaramelApi(caramelUrl('api/classify-cart'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(message.signals || {}),
+                    body: JSON.stringify(scrubCartSignals(message.signals)),
                 })
                     .then(async r => {
                         if (!r.ok) return { error: `HTTP ${r.status}` }
@@ -1028,13 +1191,16 @@ export function initBackground() {
                 // Trust-loop signal from the apply flow (coupon-runner). Fire-and-forget:
                 // errors are logged, never surfaced — a report must not break checkout.
                 // A "worked" outcome also bumps the public usage counter.
-                const { id, outcome, storeReason, awaitResult } = message
+                const { id, outcome, storeReason, code, awaitResult } = message
                 const report = fetchCaramelApi(
                     caramelUrl(`api/coupons/${id}/report`),
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ outcome, storeReason }),
+                        body: JSON.stringify({
+                            outcome,
+                            storeReason: scrubStoreReason(storeReason, code),
+                        }),
                     },
                 )
                 if (awaitResult) {

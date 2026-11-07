@@ -197,7 +197,11 @@ A non-gated `200` returns:
         "skippedReferral": 0,
         "skippedIdMismatch": 0
     },
-    "storeConfigs": { "upserted": 0 },
+    "storeConfigs": {
+        "upserted": 0,
+        "skippedOlder": 0,
+        "skippedOlderStoreNames": []
+    },
     "sources": { "upserted": 0 }
 }
 ```
@@ -224,6 +228,12 @@ applied push also logs one `[ingest/catalog] coupons inserted=... skippedIdMisma
 summary line. For
 `storeConfigs`/`sources`, `upserted` is the number of rows offered after dedupe
 (an idempotent re-affirmation of unchanged rows is not a failure).
+`storeConfigs.skippedOlder` counts the offered store configs that were NOT
+written because the stored row's `updated_at` is newer than the pushed one, and
+`storeConfigs.skippedOlderStoreNames` names them (at most 20; `skippedOlder` is
+the full count). The push still answers `200`: resend those stores with a fresh
+`updated_at` to apply them. The same skip is logged once per push as
+`[ingest/catalog] storeConfigsSkippedOlder=N: ...` with the store names.
 
 ## Bridge sync (migration-period feed)
 

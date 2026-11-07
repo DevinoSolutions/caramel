@@ -247,7 +247,7 @@ describe('/api/coupons — the sort that makes paging sound', () => {
         // (coupons-failing.test.ts pins those); the total order underneath is
         // unchanged.
         expect(listQuery().sql).toContain(
-            ') DESC, rating DESC, created_at DESC, id DESC',
+            'DESC NULLS LAST, rating DESC, created_at DESC, id DESC',
         )
     })
 })

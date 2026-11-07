@@ -148,11 +148,12 @@ describe('coupon-runner.js — a claimed saving must fit inside the cart', () =>
         // banner as well as the order total, and getPrice(returnLargest) reads
         // 500. Measuring off that would headline $462.20.
         setTotalText('Save up to $500 today! Order total: $42.00')
-        applyCouponImpl = async () => ({
-            success: true,
-            newTotal: 37.8,
-            committed: true,
-        })
+        // The store draws the new total, as a real one does: the run reads it
+        // again before crediting the code (T-11366).
+        applyCouponImpl = async () => {
+            setTotalText('Save up to $500 today! Order total: $37.80')
+            return { success: true, newTotal: 37.8, committed: true }
+        }
 
         await startApplyingCoupons(REC)
 
@@ -186,11 +187,10 @@ describe('coupon-runner.js — a claimed saving must fit inside the cart', () =>
 
     it('still reports a normal, believable saving (happy path intact)', async () => {
         setTotalText('Order total: $42.00')
-        applyCouponImpl = async () => ({
-            success: true,
-            newTotal: 37.8,
-            committed: true,
-        })
+        applyCouponImpl = async () => {
+            setTotalText('Order total: $37.80')
+            return { success: true, newTotal: 37.8, committed: true }
+        }
 
         await startApplyingCoupons(REC)
 
@@ -222,13 +222,20 @@ describe('coupon-runner.js — a claimed saving must fit inside the cart', () =>
 
     it('allows a full 100%-off saving (equal to the total) — the boundary is inclusive', async () => {
         setTotalText('Order total: $42.00')
-        applyCouponImpl = async () => ({
-            success: true,
-            newTotal: 0,
-            committed: true,
-        })
+        applyCouponImpl = async () => {
+            setTotalText('Order total: $0.00')
+            return { success: true, newTotal: 0, committed: true }
+        }
 
-        await startApplyingCoupons(REC)
+        // A $0.00 order is held for the full settle window (T-11366).
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+        try {
+            const run = startApplyingCoupons(REC)
+            await vi.advanceTimersByTimeAsync(20000)
+            await run
+        } finally {
+            vi.useRealTimers()
+        }
 
         expect(finalModalCalls[0][0]).toBeCloseTo(42, 2)
         expect(recordedSavings).toHaveLength(1)

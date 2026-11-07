@@ -292,6 +292,9 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/giftshop/basket.html',
             '/photoshop/checkout.html',
             '/bishop/cart.html',
+            // Under web, only a cart file counts: a page about carts is not one.
+            '/web/products/shoppingcart',
+            '/web/cart-organizer.html',
             '/restore/cart.php',
             // Past the three-segment limit.
             '/en/us/shop/cart.php',
@@ -321,6 +324,10 @@ describe('isCheckout — cart intent the path does not spell out', () => {
             '/webshop/cart.html',
             '/eshop/basket.aspx',
             '/onlinestore/shoppingcart.asp',
+            // The server's own folder for the shop's pages
+            // (halloweenexpress.com).
+            '/web/shoppingcart',
+            '/web/cart.aspx',
             // A server session parameter is not part of the page name.
             '/shop/cart.do;jsessionid=AB12CD',
             // A cart action as one whole segment near the top (a hosted order
