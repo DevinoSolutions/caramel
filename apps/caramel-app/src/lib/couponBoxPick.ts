@@ -23,6 +23,7 @@ import { createCouponBoxAnswerCache } from '@/lib/couponBoxPickAnswerCache'
 import { env } from '@/lib/env'
 import { firstJsonObject } from '@/lib/llmJson'
 import { chat } from '@/lib/openrouter'
+import { scrubOutline } from '@/lib/outlineScrub'
 import { proxyFallbackHeaders } from '@/lib/proxy-fallback-env'
 import * as Sentry from '@sentry/nextjs'
 import { z } from 'zod'
@@ -129,40 +130,6 @@ export class CouponBoxOutlineTooLargeError extends Error {
  * only when explicitly enabled AND a model is configured. */
 export function couponBoxLlmEnabled(): boolean {
     return env.COUPON_BOX_LLM_ENABLED && Boolean(env.COUPON_BOX_PICK_MODEL)
-}
-
-// Bounded runs: with open-ended ones, a long word with no "@" (an outline is
-// guest-written) makes every start scan to the end of the line, and a 40 KiB
-// line took seconds. An address's local part is at most 64 characters, a
-// domain at most 253.
-const EMAIL_SHAPED = /[\w.+-]{1,64}@[\w-]{1,253}\.[\w.]{1,253}/g
-// A node line's leading `- [n] role` head. Its index is the only number the
-// outline may keep, and only when a role word follows it: a line of page text
-// that happens to start like an index is scrubbed like any other text.
-const NODE_HEAD = /^\s*- \[(\d{1,6})\] (?=[a-z]+\b)/
-// Every line break a browser can put in an accessible name, not only \n.
-const LINE_BREAK = /\r\n|[\n\r\u2028\u2029]/
-
-// Any Unicode number (\p{N}), not just 0-9: a phone number in Arabic-Indic,
-// Persian or fullwidth digits is still a phone number. Built with the
-// constructor because this project's compile target rejects the literal `u`
-// flag; every runtime we run on supports it.
-const ANY_DIGIT = new RegExp('\\p{N}', 'gu')
-function scrubText(text: string): string {
-    return text.replace(EMAIL_SHAPED, '[email]').replace(ANY_DIGIT, '#')
-}
-
-/** Every digit becomes `#` and anything email-shaped becomes `[email]`,
- * except the `[n]` index at the start of a node line (the extension maps the
- * pick back through it). */
-export function scrubOutline(outline: string): string {
-    return outline
-        .split(LINE_BREAK)
-        .map(line => {
-            const head = NODE_HEAD.exec(line)?.[0] ?? ''
-            return head + scrubText(line.slice(head.length))
-        })
-        .join('\n')
 }
 
 interface OutlineLine {

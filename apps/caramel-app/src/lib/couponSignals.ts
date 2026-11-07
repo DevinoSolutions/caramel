@@ -29,18 +29,22 @@
 // (or mutate) the externally-owned catalog. Signals are keyed by the catalog
 // coupon id as a string, matching the app's Coupon.id: string.
 import { Prisma, type PrismaClient } from '@/generated/prisma/client'
+import { authSecret } from '@/lib/authSecret'
+import { hasCodeShapedToken, redactStoreReason } from '@/lib/codeShapedTokens'
 import type { ReportReporter } from '@/lib/couponReportDedupe'
 import {
     FAILING_WINDOW_MS,
     MAX_LOW_TRUST_FAIL_WEIGHT,
+    isRecentlyFailing,
+    isRecentlyRefused,
     keepsFailing,
 } from '@/lib/coupons'
 import {
+    readCatalogCode,
     writeFailedSignal,
     writeUsageSignal,
     writeWorkedSignal,
 } from '@/lib/couponsRepo'
-import { env } from '@/lib/env'
 import prisma from '@/lib/prisma'
 import * as Sentry from '@sentry/nextjs'
 import { createHmac } from 'node:crypto'
@@ -87,12 +91,7 @@ const REPORTER_KEY_DOMAIN = 'caramel:coupon-reporter:v1'
  * acceptable.
  */
 export function reporterHash(reporter: ReportReporter): string {
-    const secret = env.BETTER_AUTH_SECRET ?? env.JWT_SECRET
-    if (!secret) {
-        // env.ts's refine() makes this unreachable; a loud throw beats hashing
-        // under an empty key if that ever changes.
-        throw new Error('reporterHash: no BETTER_AUTH_SECRET or JWT_SECRET')
-    }
+    const secret = authSecret()
     const identity =
         reporter.kind === 'user' ? `u:${reporter.userId}` : `i:${reporter.ip}`
     const key = createHmac('sha256', secret)
@@ -338,13 +337,21 @@ async function recordFailedIn(
     const hash = reporterHash(reporter)
     const weight = reporterWeight(reporter)
     // `reason` is already length-bounded by the report route's zod body schema
-    // (trim().max(200)); passed straight through — no second-guessing a value
-    // the boundary already validated.
+    // (trim().max(200)). It is the STORE's own error text, reported without
+    // consent, and a store can echo the shopper's own code back in it ("X cannot
+    // be combined with MYCODE5"), so it is redacted BEFORE it is stored
+    // (T-9959): every code-shaped token goes except the catalog code being
+    // reported. The catalog lookup only runs when something in the text looks
+    // like a code, so a plain-English reason costs no extra query.
+    const storedReason =
+        reason !== null && hasCodeShapedToken(reason, { contextualCaps: true })
+            ? redactStoreReason(reason, await readCatalogCode(couponId, tx))
+            : reason
     // The aggregate upsert comes FIRST: its row lock serialises concurrent
     // reports of this coupon before the quorum is recomputed. It is also the
     // catalog existence gate: an unknown id writes nothing (reporter row
     // included) and the whole report is refused.
-    if (!(await writeFailedSignal(couponId, reason, tx))) return false
+    if (!(await writeFailedSignal(couponId, storedReason, tx))) return false
     await tx.couponSignalReporter.upsert({
         where: {
             couponId_outcome_reporterHash: {
@@ -683,6 +690,10 @@ export type CouponSignalOverlay = {
     failWeight: number
     /** coupons.ts keepsFailing(), decided server-side so the popup and the web agree. */
     keepsFailing: boolean
+    /** coupons.ts isRecentlyFailing(): the app sank this code below the rest of the list. */
+    recentlyFailing: boolean
+    /** coupons.ts isRecentlyRefused(): the app ordered this code after the unrefused codes of its proof tier (T-13810). The extension keeps that boundary when it ranks by value. */
+    recentlyRefused: boolean
 }
 
 const NO_SIGNAL: CouponSignalOverlay = {
@@ -691,6 +702,8 @@ const NO_SIGNAL: CouponSignalOverlay = {
     failCount: 0,
     failWeight: 0,
     keepsFailing: false,
+    recentlyFailing: false,
+    recentlyRefused: false,
 }
 
 /**
@@ -743,6 +756,8 @@ export async function attachSignals<T extends { id: string }>(
                 failCount: signal?.failCount ?? 0,
                 failWeight: signal?.failWeight ?? 0,
                 keepsFailing: signal ? keepsFailing(signal) : false,
+                recentlyFailing: signal ? isRecentlyFailing(signal) : false,
+                recentlyRefused: signal ? isRecentlyRefused(signal) : false,
             }
         })
     } catch (error) {

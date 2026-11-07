@@ -1,3 +1,4 @@
+import { authSecret } from '@/lib/authSecret'
 import { SERVER_ENV_KEYS, parseServerEnv } from '@/lib/env'
 import { BASE_URL, CLIENT_ENV_KEYS, parseClientEnv } from '@/lib/env.client'
 import fs from 'node:fs'
@@ -49,6 +50,44 @@ describe('parseServerEnv', () => {
         const { BETTER_AUTH_SECRET: _omit, ...rest } = validServerFixture
         expect(() => parseServerEnv(rest)).toThrow(/BETTER_AUTH_SECRET/)
         expect(() => parseServerEnv(rest)).toThrow(/JWT_SECRET/)
+    })
+
+    it('(q) EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES (T-9436): unset is 60, a period that tiles the UTC day parses, any other fails boot naming the variable, the value and the allowed set', () => {
+        expect(
+            parseServerEnv(validServerFixture)
+                .EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES,
+        ).toBe(60)
+        for (const good of ['5', '15', '60', '360', '1440']) {
+            expect(
+                parseServerEnv({
+                    ...validServerFixture,
+                    EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: good,
+                }).EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES,
+                good,
+            ).toBe(Number(good))
+        }
+        for (const bad of ['45', '90', '4', '1', '7']) {
+            const attempt = () =>
+                parseServerEnv({
+                    ...validServerFixture,
+                    EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: bad,
+                })
+            expect(attempt, bad).toThrow(
+                /EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: got \d+; allowed: a divisor of 60/,
+            )
+            expect(attempt, bad).toThrow(`got ${bad};`)
+            // The name appears once: parseServerEnv adds it, the message does not.
+            let message = ''
+            try {
+                attempt()
+            } catch (error) {
+                message = (error as Error).message
+            }
+            expect(
+                message.split('EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES').length,
+                bad,
+            ).toBe(2)
+        }
     })
 
     it('(p) DEV_PROOF_SESSION_SECRET (T-9413): unset is fine, a short or whitespace-only value fails boot, a 32+ character value parses trimmed', () => {
@@ -264,16 +303,16 @@ describe('parseServerEnv', () => {
         ).toThrow(/COUPON_BOX_DISCOVERY_ENABLED/)
     })
 
-    it('COUPON_BOX_SAVE_ENABLED is a strict boolean (default off) and a typo fails boot', () => {
+    it('COUPON_BOX_SAVE_ENABLED is a strict boolean (default on, false is the kill switch) and a typo fails boot', () => {
         expect(parseServerEnv(validServerFixture).COUPON_BOX_SAVE_ENABLED).toBe(
-            false,
+            true,
         )
         expect(
             parseServerEnv({
                 ...validServerFixture,
-                COUPON_BOX_SAVE_ENABLED: 'true',
+                COUPON_BOX_SAVE_ENABLED: 'false',
             }).COUPON_BOX_SAVE_ENABLED,
-        ).toBe(true)
+        ).toBe(false)
         expect(() =>
             parseServerEnv({
                 ...validServerFixture,
@@ -282,9 +321,9 @@ describe('parseServerEnv', () => {
         ).toThrow(/COUPON_BOX_SAVE_ENABLED/)
     })
 
-    it('the coupon-box-save quorum and daily caps default to 5 / 10 / 20 / 500, read blank as unset, and refuse garbage or a quorum of 1', () => {
+    it('the coupon-box-save quorum and daily caps default to 2 / 10 / 20 / 500, read blank as unset, and refuse garbage or a quorum of 1', () => {
         const env = parseServerEnv(validServerFixture)
-        expect(env.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS).toBe(5)
+        expect(env.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS).toBe(2)
         expect(env.COUPON_BOX_SAVE_USER_DAILY_CAP).toBe(10)
         expect(env.COUPON_BOX_SAVE_STORE_DAILY_CAP).toBe(20)
         expect(env.COUPON_BOX_SAVE_GLOBAL_DAILY_CAP).toBe(500)
@@ -293,7 +332,7 @@ describe('parseServerEnv', () => {
             COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS: ' ',
             COUPON_BOX_SAVE_USER_DAILY_CAP: '',
         })
-        expect(blank.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS).toBe(5)
+        expect(blank.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS).toBe(2)
         expect(blank.COUPON_BOX_SAVE_USER_DAILY_CAP).toBe(10)
         expect(
             parseServerEnv({
@@ -494,5 +533,27 @@ describe('.env.example drift', () => {
                 ),
             ),
         ).not.toThrow()
+    })
+})
+
+describe('authSecret (T-9424)', () => {
+    it('is BETTER_AUTH_SECRET when it is set', () => {
+        expect(
+            authSecret({ BETTER_AUTH_SECRET: 'better', JWT_SECRET: 'jwt' }),
+        ).toBe('better')
+    })
+
+    it('falls back to JWT_SECRET', () => {
+        expect(authSecret({ JWT_SECRET: 'jwt' })).toBe('jwt')
+    })
+
+    it('throws instead of signing with an empty key', () => {
+        expect(() => authSecret({})).toThrow(/no auth secret/i)
+    })
+
+    it('matches the env the server booted with', () => {
+        expect(authSecret()).toBe(
+            parseServerEnv().BETTER_AUTH_SECRET ?? parseServerEnv().JWT_SECRET,
+        )
     })
 })

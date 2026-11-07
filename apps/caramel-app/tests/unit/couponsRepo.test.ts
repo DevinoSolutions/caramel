@@ -3,9 +3,11 @@ import {
     VISIBLE_COUPON_STATUSES,
 } from '@/lib/coupons'
 import {
+    countCodesSubmittedByUser,
     expireCoupons,
     getCouponStats,
     isKnownStore,
+    listCodesSubmittedByUser,
     listCoupons,
     listNeighbourStoreRows,
     listRecentlyWorkedCoupons,
@@ -14,10 +16,13 @@ import {
     MAX_REQUESTED_SOURCES,
     requestSource,
     submitShopperCoupon,
+    unlinkCodesSubmittedByUser,
     writeFailedSignal,
     writeUsageSignal,
     writeWorkedSignal,
 } from '@/lib/couponsRepo'
+import { isPrunedFromSitemap } from '@/lib/seo/sitemapStorePrune'
+import { collapseStoreRows } from '@/lib/seo/sitemapStores'
 import {
     SHOPPER_COUPON_DESCRIPTION,
     SHOPPER_DAILY_SUBMISSION_CAP,
@@ -252,6 +257,34 @@ describe('listCoupons', () => {
         }
     })
 
+    it('both listing reads serve an HTML-escaped title and description as plain text', async () => {
+        const rows = [
+            {
+                ...couponFixture,
+                id: 1,
+                title: 'Books, music &amp; video games',
+                description:
+                    'Prices are shown with discounts applied.&lt;br&gt; &lt;br&gt; *Free Bypass Kit',
+            },
+        ]
+        mockRows(
+            sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
+            rows.map(withSupplierFlag),
+        )
+        mockRows(sql => sql.includes('COUNT(*)'), [storeAggregateRow(1)])
+
+        for (const read of [
+            () => listCoupons({ limit: 10, skip: 0 }),
+            () => listStoreCoupons('example.com', 10),
+        ]) {
+            const { coupons } = await read()
+            expect(coupons[0]?.title).toBe('Books, music & video games')
+            expect(coupons[0]?.description).toBe(
+                'Prices are shown with discounts applied. *Free Bypass Kit',
+            )
+        }
+    })
+
     it('an empty total row falls back to 0 (no coupons is legitimate, not drift)', async () => {
         mockRows(
             sql => sql.includes('FROM coupons') && sql.includes('LIMIT'),
@@ -410,7 +443,7 @@ describe('requestSource (write, app sources INSERT via prisma.source.create)', (
 })
 
 describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
-    it('groups VISIBLE sited coupons per raw site with an ::int count and MAX(updated_at), ordered by site, LIMIT-bound', async () => {
+    it('groups VISIBLE sited coupons per raw site with an ::int count, MAX(updated_at) and MIN(created_at), ordered by site, LIMIT-bound', async () => {
         mockRows(
             sql => sql.includes('MAX(updated_at)'),
             [
@@ -418,6 +451,7 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
                     site: 'athleta.gap.com',
                     coupon_count: 7,
                     last_updated: new Date('2026-09-01T00:00:00.000Z'),
+                    first_created: new Date('2026-05-13T01:40:42.656Z'),
                 },
                 {
                     site: 'gap.com',
@@ -425,6 +459,7 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
                     // A driver handing the timestamp back as a string is
                     // normalized, not treated as drift (z.coerce.date).
                     last_updated: '2026-08-15T00:00:00.000Z',
+                    first_created: '2026-06-02T00:00:00.000Z',
                 },
             ],
         )
@@ -436,11 +471,13 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
                 site: 'athleta.gap.com',
                 coupon_count: 7,
                 last_updated: new Date('2026-09-01T00:00:00.000Z'),
+                first_created: new Date('2026-05-13T01:40:42.656Z'),
             },
             {
                 site: 'gap.com',
                 coupon_count: 30,
                 last_updated: new Date('2026-08-15T00:00:00.000Z'),
+                first_created: new Date('2026-06-02T00:00:00.000Z'),
             },
         ])
 
@@ -450,6 +487,8 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
         const q = capturedQueries[0]!
         expect(q).toContain('COUNT(*)::int AS coupon_count')
         expect(q).toContain('MAX(updated_at) AS last_updated')
+        // The sitemap prune's "too new to judge" age signal (T-15493).
+        expect(q).toContain('MIN(created_at) AS first_created')
         expect(q).toContain('expired = FALSE')
         expect(q).toContain('status IN (')
         expect(q).toContain('site IS NOT NULL')
@@ -459,10 +498,47 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
         expect(capturedValues[0]).toContain(5000)
     })
 
+    it('a NULL first_created parses to null (age unknown), never the epoch, so the prune keeps the store', async () => {
+        mockRows(
+            sql => sql.includes('MAX(updated_at)'),
+            [
+                {
+                    site: 'gap.com',
+                    coupon_count: 3,
+                    last_updated: new Date('2026-09-01T00:00:00.000Z'),
+                    first_created: null,
+                },
+            ],
+        )
+
+        const rows = await listStoreSitemapEntries(10)
+
+        expect(rows[0]!.first_created).toBeNull()
+        const [entry] = collapseStoreRows(rows)
+        expect(entry!.firstCreatedAt).toBeNull()
+        expect(isPrunedFromSitemap(entry!)).toBe(false)
+    })
+
+    it('a row missing first_created fails the zod boundary loudly (an unaged row must not silently become the epoch)', async () => {
+        mockRows(
+            sql => sql.includes('MAX(updated_at)'),
+            [{ site: 'gap.com', coupon_count: 3, last_updated: new Date() }],
+        )
+        await expect(listStoreSitemapEntries(10)).rejects.toThrow(
+            /coupons-db schema drift \[sitemap\.stores\]/,
+        )
+    })
+
     it('a row missing coupon_count fails the zod boundary loudly (drift, not silent zeros)', async () => {
         mockRows(
             sql => sql.includes('MAX(updated_at)'),
-            [{ site: 'gap.com', last_updated: new Date() }],
+            [
+                {
+                    site: 'gap.com',
+                    last_updated: new Date(),
+                    first_created: new Date(),
+                },
+            ],
         )
         await expect(listStoreSitemapEntries(10)).rejects.toThrow(
             /coupons-db schema drift \[sitemap\.stores\]/,
@@ -739,6 +815,120 @@ describe('listRecentlyWorkedCoupons (landing "Codes that just worked" read)', ()
         await expect(listRecentlyWorkedCoupons(8)).rejects.toThrow(
             /coupons-db schema drift \[coupons\.recently-worked\]/,
         )
+    })
+})
+
+describe('listCodesSubmittedByUser ("Download your data" submitted codes, T-12391)', () => {
+    it('reads only the caller’s own rows, EVERY status, newest first, and never selects the id', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons'),
+            [
+                {
+                    site: 'peepers.com',
+                    code: 'MINE15',
+                    status: 'pending',
+                    expired: false,
+                    submissionSource: 'manual',
+                    submittedAt: new Date('2026-07-01T09:00:00.000Z'),
+                },
+                {
+                    site: 'gap.com',
+                    code: 'OLD10',
+                    status: 'invalid',
+                    expired: true,
+                    submissionSource: 'checkout',
+                    // Driver tolerance: an ISO string normalizes to a Date.
+                    submittedAt: '2026-06-01T09:00:00.000Z',
+                },
+            ],
+        )
+
+        const rows = await listCodesSubmittedByUser('user-under-test')
+
+        expect(rows).toEqual([
+            {
+                site: 'peepers.com',
+                code: 'MINE15',
+                status: 'pending',
+                expired: false,
+                submissionSource: 'manual',
+                submittedAt: new Date('2026-07-01T09:00:00.000Z'),
+            },
+            {
+                site: 'gap.com',
+                code: 'OLD10',
+                status: 'invalid',
+                expired: true,
+                submissionSource: 'checkout',
+                submittedAt: new Date('2026-06-01T09:00:00.000Z'),
+            },
+        ])
+
+        expect(capturedQueries).toHaveLength(1)
+        const q = capturedQueries[0]!
+        expect(q.trim().startsWith('SELECT')).toBe(true)
+        expect(q).not.toMatch(/\b(UPDATE|INSERT|DELETE)\b/)
+        // Scoped to the caller alone, the user id BOUND, never inlined.
+        expect(q).toContain('WHERE submitted_by_user_id = ?')
+        expect(capturedValues[0]).toEqual(['user-under-test'])
+        // No visibility predicate: an export lists a code the catalog has
+        // since marked invalid or expired too, with its current status.
+        expect(q).not.toMatch(/status IN \(/)
+        expect(q).not.toMatch(/expired = FALSE/)
+        // The export never hands out catalog keys.
+        expect(q).not.toMatch(/SELECT\s+id\b|,\s*id\s*,/)
+        expect(q).toContain('ORDER BY created_at DESC, id DESC')
+    })
+
+    it('a row missing submittedAt fails the zod boundary loudly', async () => {
+        mockRows(
+            sql => sql.includes('FROM coupons'),
+            [
+                {
+                    site: 'peepers.com',
+                    code: 'MINE15',
+                    status: 'pending',
+                    expired: false,
+                    submissionSource: 'manual',
+                },
+            ],
+        )
+        await expect(listCodesSubmittedByUser('u')).rejects.toThrow(
+            /coupons-db schema drift \[account\.submitted-codes\]/,
+        )
+    })
+})
+
+describe('countCodesSubmittedByUser + unlinkCodesSubmittedByUser ("Delete my data", T-12392)', () => {
+    it('counts only the caller’s own rows, every status, with the user id bound', async () => {
+        mockRows(sql => sql.includes('FROM coupons'), [{ total: 3 }])
+
+        await expect(
+            countCodesSubmittedByUser('user-under-test'),
+        ).resolves.toBe(3)
+        expect(capturedQueries).toHaveLength(1)
+        const q = capturedQueries[0]!
+        expect(q.trim().startsWith('SELECT')).toBe(true)
+        expect(q).toContain('WHERE submitted_by_user_id = ?')
+        expect(capturedValues[0]).toEqual(['user-under-test'])
+        // Every status: the unlink below has no visibility predicate either,
+        // so the count the button reads is exactly what the delete touches.
+        expect(q).not.toMatch(/status IN \(/)
+        expect(q).not.toMatch(/expired = FALSE/)
+    })
+
+    it('the unlink nulls ONE column on the caller’s rows and never deletes a code', async () => {
+        executeRawResult = 3
+
+        await expect(
+            unlinkCodesSubmittedByUser('user-under-test'),
+        ).resolves.toBe(3)
+        expect(capturedQueries).toHaveLength(1)
+        const q = capturedQueries[0]!.replace(/\s+/g, ' ').trim()
+        expect(q).toBe(
+            'UPDATE coupons SET submitted_by_user_id = NULL WHERE submitted_by_user_id = ?',
+        )
+        expect(capturedValues[0]).toEqual(['user-under-test'])
     })
 })
 

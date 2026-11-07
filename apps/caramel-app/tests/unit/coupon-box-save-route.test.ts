@@ -37,6 +37,7 @@ const {
     sentry,
     proposals,
     users,
+    worked,
 } = vi.hoisted(() => ({
     envMock: {} as Record<string, unknown>,
     knownMock: vi.fn(
@@ -75,6 +76,10 @@ const {
         }
     >,
     users: new Map<string, { createdAt: Date }>(),
+    // Users with a `worked` report at the store from the minutes before their
+    // proposal (couponBoxCorroboration.ts). `post` adds its user unless told
+    // the user has no report.
+    worked: new Set<string>(),
 }))
 vi.mock('@/lib/env', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/env')>()
@@ -88,6 +93,35 @@ vi.mock('@/lib/couponsRepo', () => ({
 vi.mock('@/lib/catalog/applyCatalogRows', () => ({
     AUTO_DETECT_CONFIG_MAX_AGE_DAYS: 30,
     insertAutoDetectedStoreConfig: insertMock,
+}))
+// FAKE (announced): the corroboration query, answered over the in-memory
+// proposals the way its SQL does (store, box, window, established account,
+// and a `worked` report of the user's own). The SQL itself runs on real
+// Postgres in tests/integration/coupon-box-save.itest.ts.
+vi.mock('@/lib/couponBoxCorroboration', () => ({
+    corroboratedAgreement: async (args: {
+        storeName: string
+        boxHash: string
+        userId: string
+        proposedAfter: Date
+        establishedBy: Date
+    }) => {
+        const mine = proposals.filter(
+            r => r.storeName === args.storeName && r.boxHash === args.boxHash,
+        )
+        return {
+            agreeing: mine.filter(
+                r =>
+                    r.createdAt > args.proposedAfter &&
+                    (users.get(r.userId)?.createdAt ?? new Date()) <=
+                        args.establishedBy &&
+                    worked.has(r.userId),
+            ).length,
+            ownCorroborated: mine.some(
+                r => r.userId === args.userId && worked.has(r.userId),
+            ),
+        }
+    },
 }))
 vi.mock('@/lib/supportedStoresCache', () => ({
     resetSupportedStoresCache: resetCacheMock,
@@ -201,8 +235,14 @@ function post(
     {
         origin = EXT_ORIGIN,
         user = 'user-1',
-    }: { origin?: string | null; user?: string | null } = {},
+        reported = true,
+    }: {
+        origin?: string | null
+        user?: string | null
+        reported?: boolean
+    } = {},
 ) {
+    if (user && reported) worked.add(user)
     const headers: Record<string, string> = {
         'content-type': 'application/json',
     }
@@ -236,6 +276,7 @@ beforeEach(() => {
     envMock.COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS = 7
     proposals.length = 0
     users.clear()
+    worked.clear()
     knownMock.mockReset()
     knownMock.mockImplementation(async () => ['shop-example.com'])
     servedMock.mockReset()
@@ -248,7 +289,7 @@ beforeEach(() => {
 })
 
 describe('POST /api/extension/coupon-box-save', () => {
-    it('the quorum-th distinct user publishes the box under the catalog store, mapped to the store_configs columns, and leaves the supported-stores cache alone', async () => {
+    it('the quorum-th distinct user publishes the box under the catalog store, mapped to the store_configs columns, and drops the supported-stores cache once', async () => {
         const res = await postFromQuorum(goodBody())
 
         expect(res.status).toBe(200)
@@ -266,7 +307,7 @@ describe('POST /api/extension/coupon-box-save', () => {
             priceContainerXpath: '.order-total',
         })
         expect(servedMock).toHaveBeenCalledWith('www.shop-example.com')
-        expect(resetCacheMock).not.toHaveBeenCalled()
+        expect(resetCacheMock).toHaveBeenCalledTimes(1)
         expect(res.headers.get('cache-control')).toBe('private, no-store')
     })
 
@@ -324,6 +365,54 @@ describe('POST /api/extension/coupon-box-save', () => {
         expect(insertMock).toHaveBeenCalledWith(
             expect.objectContaining({ couponInputXpath: '#promo' }),
         )
+    })
+
+    it('CORROBORATION: a proposal with no `worked` report of its user is recorded, answered uncorroborated, and never counts', async () => {
+        for (let i = 1; i < QUORUM; i++) {
+            await post(goodBody(), { user: `backed-${i}` })
+        }
+        const res = await post(goodBody(), {
+            user: 'unbacked',
+            reported: false,
+        })
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({
+            saved: true,
+            store: 'shop-example.com',
+            status: 'uncorroborated',
+        })
+        expect(proposals).toHaveLength(QUORUM)
+        expect(insertMock).not.toHaveBeenCalled()
+        expect(resetCacheMock).not.toHaveBeenCalled()
+
+        // The same user once their win is reported: now it counts.
+        const backed = await post(goodBody(), { user: 'unbacked' })
+        expect(await backed.json()).toMatchObject({ status: 'published' })
+        expect(insertMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('CORROBORATION: with the default quorum of 2, two established accounts with a win each publish the box', async () => {
+        envMock.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS = 2
+
+        expect(
+            await (await post(goodBody(), { user: 'a' })).json(),
+        ).toMatchObject({ status: 'pending' })
+        expect(
+            await (await post(goodBody(), { user: 'b' })).json(),
+        ).toMatchObject({ status: 'published' })
+        expect(resetCacheMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('CORROBORATION: a 3-day-old account does not count, even with a win', async () => {
+        envMock.COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS = 2
+        users.set('young', { createdAt: new Date(Date.now() - 3 * 86_400_000) })
+
+        await post(goodBody(), { user: 'aged' })
+        const res = await post(goodBody(), { user: 'young' })
+
+        expect(await res.json()).toMatchObject({ status: 'pending' })
+        expect(insertMock).not.toHaveBeenCalled()
     })
 
     it('QUARANTINE: fresh accounts do not count toward the quorum (Sybil resistance)', async () => {

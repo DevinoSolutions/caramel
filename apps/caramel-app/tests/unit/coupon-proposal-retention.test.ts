@@ -22,9 +22,9 @@ describe('sweepExpiredProposals', () => {
     it('deletes proposals older than the 30-day promotion window', async () => {
         deleteMany.mockResolvedValueOnce({ count: 42 })
         const { sweepExpiredProposals } = await import('@/lib/couponBoxSave')
-        const deleted = await sweepExpiredProposals()
+        const result = await sweepExpiredProposals()
 
-        expect(deleted).toBe(42)
+        expect(result).toEqual({ outcome: 'ok', deleted: 42 })
         expect(deleteMany).toHaveBeenCalledOnce()
 
         const where = deleteMany.mock.calls[0][0].where
@@ -34,32 +34,14 @@ describe('sweepExpiredProposals', () => {
         expect(cutoffMs).toBe(nowMs - thirtyDaysMs)
     })
 
-    it('returns 0 and reports to Sentry on failure', async () => {
+    it('returns a failed outcome (not 0 deleted) and reports to Sentry on failure', async () => {
         deleteMany.mockRejectedValueOnce(new Error('db down'))
         const { sweepExpiredProposals } = await import('@/lib/couponBoxSave')
         const { captureException } = await import('@sentry/nextjs')
 
-        const deleted = await sweepExpiredProposals()
+        const result = await sweepExpiredProposals()
 
-        expect(deleted).toBe(0)
+        expect(result).toEqual({ outcome: 'failed' })
         expect(captureException).toHaveBeenCalledOnce()
-    })
-})
-
-describe('startCouponProposalRetentionSweep', () => {
-    beforeEach(() => {
-        vi.useFakeTimers()
-    })
-    afterEach(() => {
-        vi.useRealTimers()
-        vi.restoreAllMocks()
-    })
-
-    it('is disabled in non-production', async () => {
-        vi.stubEnv('NODE_ENV', 'test')
-        const { startCouponProposalRetentionSweep } =
-            await import('@/lib/couponProposalRetention')
-        const decision = startCouponProposalRetentionSweep()
-        expect(decision.enabled).toBe(false)
     })
 })

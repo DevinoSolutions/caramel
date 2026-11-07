@@ -7,7 +7,7 @@
 # ──────────────────────────────────────────────────────────────────────────
 
 # ---- base: pinned node + the EXACT pnpm from package.json packageManager ----
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 RUN apk add --no-cache libc6-compat
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -15,7 +15,9 @@ ENV PATH=$PNPM_HOME:$PATH
 # fail or bloat the image in a network-restricted layer).
 ENV HUSKY=0
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+# Node 25+ images no longer bundle corepack, so install a PINNED one first.
+RUN npm install -g corepack@0.36.0 \
+  && corepack enable && corepack prepare pnpm@9.0.0 --activate
 
 # ---- pruner: reduce the monorepo to the caramel-app subgraph ----
 FROM base AS pruner
@@ -109,7 +111,7 @@ RUN PRISMA_VERSION=$(node -p "require('./apps/caramel-app/package.json').depende
   && npm install --prefix /prisma-cli "prisma@${PRISMA_VERSION}" --no-save --no-audit --no-fund
 
 # ---- runner: minimal standalone server; migrate then serve ----
-FROM node:24-alpine AS runner
+FROM node:26-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000

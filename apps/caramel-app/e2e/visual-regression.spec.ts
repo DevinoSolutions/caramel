@@ -1,5 +1,6 @@
 import { argosScreenshot } from '@argos-ci/playwright'
-import { Page, test } from '@playwright/test'
+import { Page } from '@playwright/test'
+import { test } from './support/test'
 
 test.describe.configure({ timeout: 60000 })
 
@@ -57,6 +58,10 @@ async function prepareVisualPage(
     // makes React report attribute mismatches ("won't be patched up") into the
     // dev-server log. data-hydrated is set from the Providers mount effect,
     // i.e. strictly after the hydrated tree commits — see src/app/providers.tsx.
+    // A page that never hydrates (T-9427: a prod deploy swapped containers
+    // mid-run, so its HTML and JS chunks came from different builds) can only
+    // time out here; e2e-push reruns the suite when the served sha changed
+    // during the run (run-e2e-push.sh), so this wait stays strict.
     await page.locator('html[data-hydrated="true"]').waitFor()
 
     if (readySelector) {

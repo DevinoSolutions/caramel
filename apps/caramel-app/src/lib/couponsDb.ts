@@ -162,10 +162,31 @@ export const ShopperDedupeRowSchema = CouponIdRowSchema.extend({
     submittedByUserId: z.string().nullable(),
 })
 
+/** couponsRepo.listCodesSubmittedByUser — "Download your data"'s submitted
+ *  codes. No `id` on purpose: the export names a code by its store and text,
+ *  never by the catalog key. `site` is nullable at the column level (always set
+ *  on a shopper row, but this is the table's shape, not a query guarantee);
+ *  `submittedAt` is `created_at`, `z.coerce.date()` for the same driver
+ *  tolerance RecentStoreRowSchema documents. */
+export const SubmittedCodeRowSchema = z.object({
+    site: z.string().nullable(),
+    code: z.string(),
+    status: z.string(),
+    expired: z.boolean(),
+    submissionSource: z.string().nullable(),
+    submittedAt: z.coerce.date(),
+})
+export type SubmittedCodeRow = z.infer<typeof SubmittedCodeRowSchema>
+
 /** `... RETURNING fail_weight AS "failWeight"` — couponsRepo's coupon_signals
  *  writers (writeWorkedSignal / writeFailedSignal / writeUsageSignal). */
 export const CouponSignalWriteRowSchema = z.object({
     failWeight: z.number().int(),
+})
+
+/** `SELECT code FROM coupons` — couponsRepo.readCatalogCode. */
+export const CatalogCodeRowSchema = z.object({
+    code: z.string(),
 })
 
 /** `SELECT (EXISTS(...) OR EXISTS(...)) AS known` — couponsRepo.isKnownStore. */
@@ -242,6 +263,24 @@ export const SiteAggregateRowSchema = z.object({
     last_updated: z.coerce.date(),
 })
 export type SiteAggregateRow = z.infer<typeof SiteAggregateRowSchema>
+
+/**
+ * app/sitemap.ts's own read: SiteAggregateRow plus `first_created`, the
+ * `MIN(created_at)` of the site's visible coupons — how long the store page has
+ * had content (sitemapStorePrune.ts's "too new to judge" guard). Its own schema
+ * so the neighbour-window reads that share SiteAggregateRowSchema do not pay
+ * for a column they never use. `created_at` is NOT NULL, so a real group always
+ * has one; `.nullable()` keeps a null as null — "age unknown", which the prune
+ * keeps in the sitemap — instead of letting `z.coerce.date()` turn it into the
+ * epoch (1970), which would read as "older than the window" and PRUNE the store.
+ * A MISSING column is still a loud drift error (undefined coerces to an
+ * Invalid Date and fails). `z.coerce.date()` for the same driver-tolerance
+ * reason as `last_updated`.
+ */
+export const SiteSitemapRowSchema = SiteAggregateRowSchema.extend({
+    first_created: z.coerce.date().nullable(),
+})
+export type SiteSitemapRow = z.infer<typeof SiteSitemapRowSchema>
 
 /**
  * supported-stores/page.tsx's "Recently added" strip — one row per store that

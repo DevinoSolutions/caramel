@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './support/test'
 
 // The /supported-stores search box's placeholder is a URL, so shoppers paste
 // URLs into it. Before the search reduced its query to a store domain

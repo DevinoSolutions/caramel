@@ -1,3 +1,16 @@
+# Stop before any gate runs when this checkout cannot run them, and name the fix (T-12805). Under the
+# wrong pnpm the first command reinstalls and rewrites pnpm-lock.yaml on its way to failing.
+stop() {
+    echo "pre-commit: $1" >&2
+    exit 1
+}
+pinned=$(sed -n 's/.*"packageManager": "pnpm@\([0-9.]*\)".*/\1/p' package.json)
+actual=$(pnpm --version 2>/dev/null) || stop "pnpm is not on PATH. This repo pins pnpm $pinned."
+[ "${actual%%.*}" = "${pinned%%.*}" ] || stop "pnpm $actual is first on PATH, but this repo pins pnpm $pinned. Put a script named pnpm first on PATH that runs: exec corepack pnpm \"\$@\""
+[ -d node_modules/.bin ] || stop "this checkout has no install. Run: pnpm install --frozen-lockfile"
+[ -d apps/caramel-app/src/generated/prisma ] || stop "this checkout has no Prisma client. Run: pnpm --filter caramel-app generate"
+[ -n "$DATABASE_URL" ] || [ -f apps/caramel-app/.env ] || stop "prisma validate needs a DATABASE_URL and this checkout has no apps/caramel-app/.env. Commit with DATABASE_URL='postgresql://placeholder@localhost:5432/placeholder' set."
+
 pnpm lint-staged
 pnpm -r run type-check
 pnpm --filter caramel-app knip

@@ -165,7 +165,129 @@ module.exports = [
         // were never weighed. 104.43 kB per file is 91.9 kB bundled; the
         // production build's content.js is 94.48 kB, the difference being
         // WXT's own runtime wrapper. The limit is measured + ~3.1 kB.
-        limit: '95 KB',
+        // 2026-10-28 (T-9569), raised 95 -> 96 kB: #592 (a store's "NOT
+        // APPLIED" row is its answer) and #595 (the cart's "remove this
+        // coupon?" dialog is confirmed after its fade-in, so a refused code
+        // really comes off) used up the headroom. Measured 95.56 kB.
+        // 2026-10-30 (T-10533), raised 96 -> 96.5 kB: a finder-picked box
+        // keeps waiting after its total re-draws with the same number, so a
+        // Shopify discount that lands 2-4 s later is read as a saving.
+        // Measured 96.05 kB.
+        // 2026-10-30 (T-10681), raised 96.5 -> 97 kB: the supported-store
+        // cache is written packed (each selector once) so Safari's
+        // storage.local quota accepts it, and a refused write is reported.
+        // Measured 96.74 kB.
+        // 2026-10-30 (T-10668), raised 97 -> 97.5 kB: a finder flag question
+        // the background leaves unanswered is asked once more, then answered
+        // from the last flag the server gave (under 30 minutes old,
+        // finder-flag-memory.js), instead of turning the finder off for the
+        // page. Measured 97.34 kB.
+        // 2026-10-30 (T-10544), raised 97.5 -> 99.5 kB: a code refused
+        // for the discount already on the order credits the earlier code that
+        // landed late, read off the order's applied-code tags, with the
+        // refusal matched in six languages. Measured 99.45 kB.
+        // 2026-10-30 (T-10544), raised 99.5 -> 99.8 kB: those tags are also
+        // read on Shopify's current checkout (a tag group whose button removes
+        // a discount code), which has no #reduction-tags. Measured 99.61 kB.
+        // 2026-10-30, raised 99.8 -> 101 kB: a cart with no promo box says
+        // the codes go in at checkout and the finder asks once more there,
+        // and on the discount-link path a total that falls because the cart
+        // emptied is not credited as a saving. Measured 100.7 kB.
+        // 2026-10-31 (T-11366), raised 101 -> 102.5 kB: a credited code is
+        // held until the store settles, and its total and named code are read
+        // again before the card, the "worked" report or the box save (the DOM
+        // loop, the late-code credit, the discount-link path and the page a
+        // submit reloads to). Measured 102.35 kB.
+        // 2026-10-31 (T-11368), raised 102.5 -> 104 kB: a refusal a found or
+        // saved box's store gave an earlier code and draws again after this
+        // submit (node replaced, text set again, shown after hidden; watched
+        // by a MutationObserver) is its answer to this code, so a refusal
+        // that stays on the page no longer costs each later code the full
+        // 10 s wait. Measured 103.9 kB.
+        // 2026-10-31 (T-11368), raised 104 -> 104.2 kB: no watch until the
+        // page has refused a code, and a refusal brought back by a re-drawn
+        // promo box gives the total the re-draw wait (kipling-usa.com).
+        // Measured 104.04 kB.
+        // 2026-10-31 (T-11368), raised 104.2 -> 104.5 kB: the page-wide part
+        // of that watch sees nodes and text only; style and class are watched
+        // on the nodes saying an earlier refusal (a successful kipling-usa.com
+        // code was 1-3.5 s slower with them watched page-wide). Measured
+        // 104.49 kB.
+        // 2026-11-02 (T-11601), raised 104.5 -> 107.5 kB: a run that
+        // found nothing looks at the order once more before saying so, and
+        // credits a code that landed after it was judged; the order's
+        // applied code is read on any checkout (a row with its own remove
+        // control, or a discount row with a negative amount), not only
+        // Shopify's tags. Measured 107.37 kB.
+        // 2026-11-02 (T-12408), raised 107.5 -> 107.8 kB: when the
+        // discount-link path read the cart total after every code it tried
+        // and none fell, the no-win card says so ("We tried N codes on your
+        // cart and none lowered your total") instead of blaming auto-apply.
+        // Measured 107.70 kB.
+        // 2026-11-02 (T-12600), raised 107.8 -> 108.5 kB: every store request
+        // on the discount-link path now has a deadline, so a store that never
+        // answers ends that request instead of the whole run, and a drop is
+        // credited to the code the cart shows as live. Measured 108.47 kB.
+        // 2026-11-02 (T-12490), raised 108.5 -> 108.9 kB: a config's
+        // priceContainer list is read in list order (the store's own total
+        // first), not page order, which read store.franklinplanner.com's
+        // Subtotal above its grand total; a part whose match shows no amount
+        // gives way to the next. Measured 108.89 kB (+0.43 kB).
+        // 2026-11-03 (1.4.33 neweracap hang), raised 108.9 -> 109.6 kB: the
+        // discount-link run always ends with a card. The settle window ends
+        // by the clock as well as by turns, a strike it cannot confirm cannot
+        // hold it open, each try and the winner's re-apply have a hard cap,
+        // and every /discount/ page body is stopped before the next code.
+        // Measured 109.57 kB (+0.68 kB).
+        // 2026-11-03 (T-13010), raised 109.6 -> 109.8 kB: a code the served
+        // list holds twice is tried once, and "Coupon does not apply"
+        // (BigCommerce) reads as the store refusing the code, so the run no
+        // longer stops after two tries on store.franklinplanner.com.
+        // Measured 109.71 kB (+0.14 kB).
+        // 2026-11-03 (T-11238), raised 109.8 -> 110.0 kB: the codes of one
+        // store are fetched once at a time, shared by the prompt check and the
+        // run, and a failed fetch is never cached, so a slow failure can no
+        // longer leave a store with codes showing "No codes for this store".
+        // Measured 109.96 kB (+0.25 kB).
+        // 2026-11-03 (T-13322), raised 110.0 -> 112.1 kB: a discount-link
+        // run the store's own page reloads under carries on, on the next page,
+        // from the code it was on (the run keeps its state with the
+        // background before each try; the next page takes it, checks it and
+        // resumes once). neweracap.com's Revy Bundles app reloads the cart
+        // page on any /cart/ change and cost the shopper the card in 1 of 3
+        // Firefox runs. Measured 112.08 kB (+2.08 kB).
+        // 2026-11-03 (T-13791), raised 112.1 -> 112.2 kB: a run with no win
+        // reports every code the store refused in its own words, each with
+        // its own reason, not only the last one (funko.com: 8 refused, 1
+        // reported, so the other 7 kept leading the list). Measured 112.12 kB
+        // (+0.02 kB).
+        // 2026-11-04 (T-13100), raised 112.2 -> 112.5 kB: a refusal read
+        // beside a configured box ends the wait, and the waiters stop reading
+        // the page once one has answered (store.franklinplanner.com: each
+        // refused code 10-12 s -> a few s; a working code the store answers
+        // with a gift-card refusal first still gets 4 s for its total).
+        // Measured 112.39 kB locally, 112.44 kB in CI (+0.26 kB).
+        // 2026-11-04 (T-13810), raised 112.5 -> 112.7 kB: ranking by value
+        // keeps the app's refused and sunk groups as run boundaries, so a code
+        // the stores refused is not lifted back over its tier peers. Measured
+        // 112.52 kB locally (+0.13 kB).
+        // 2026-11-05 (T-11267), raised 112.7 -> 116 kB: a store alert that
+        // opened during a code attempt and answers it is read, closed through
+        // its own control or Escape, and its refusal kept as that code's
+        // answer, while any dialog already open is left alone. The overlay
+        // helpers moved here from the finder (about 1.4 kB of this, see the
+        // finder's budget below); the rest is the new apply step. Measured
+        // 115.83 kB (+3.31 kB).
+        // 2026-11-05 (T-11235), raised 116 -> 116.4 kB: a "no promo box on
+        // this page" card notes its page, and a later URL takes it down so the
+        // next checkout step is offered a run (Full Source's #shipping step
+        // went unoffered behind the info step's card). Measured 116.10 kB.
+        // 2026-11-06 (T-8654), raised 116.4 -> 116.7 kB: a page a submit
+        // reloads to waits for a total the store draws after load (Magento,
+        // 4inkjets.com), and a config run whose total read before the submit
+        // but not after stops instead of chaining over a possible win.
+        // Measured 116.45 kB.
+        limit: '116.7 KB',
         brotli: false,
     },
     {
@@ -301,7 +423,17 @@ module.exports = [
         // Measured 20.44 kB bundled (16.91 kB was background.js by itself);
         // the production build's background.js is 21.1 kB with WXT's
         // wrapper. The limit is measured + ~1.06 kB.
-        limit: '21.5 KB',
+        // 2026-10-30 (T-10668), raised 21.5 -> 21.8 kB: one features read is
+        // bounded (8s, session cache 3s), the fetched finder flag is
+        // remembered in storage.local, and a failed or late read answers that
+        // remembered flag (read alongside the features) instead of a hard
+        // "off". Measured 21.54 kB.
+        // 2026-11-06 (T-10427), raised 21.8 -> 25.6 kB: the server's own
+        // redaction rules (codeShapedTokens.ts, cartItemScrub.ts and
+        // outlineScrub.ts, imported from the app, never copied) run here on
+        // the cart rows, the box-pick outline and a store's refusal before
+        // they leave the browser. Measured 25.34 kB.
+        limit: '25.6 KB',
         brotli: false,
     },
     {
@@ -338,9 +470,24 @@ module.exports = [
         // subtotal rows in 17 more languages (Danish to Arabic), partial
         // totals refused ("Totale parziale"), and the won, yuan, rupiah,
         // hryvnia and koruna amounts. Measured 38.31 kB.
+        // 2026-10-30 (T-10535), raised 38.8 -> 41.3 kB: a toggle click from
+        // which no box is used is undone (the popup it opened closed by its
+        // own close control, Escape, or the toggle again), and the server's
+        // pick never clicks the toggle the rules already tried. Measured
+        // 38.36 -> 40.59 kB.
+        // 2026-10-31 (T-11710), raised 41.3 -> 42.3 kB: a bag total drawn
+        // before sales tax is read as its subtotal, and a row's screen-reader
+        // copy of its amount is not counted (ikea.com/us). Measured 41.69 kB.
+        // 2026-11-05 (T-11267), lowered 42.3 -> 40.8 kB: the overlay helpers
+        // moved to dom-utils.js, shared with the apply flow's close of a store
+        // alert. Measured 41.69 -> 40.29 kB.
+        // 2026-11-06 (T-14872), raised 40.8 -> 43 kB: a sales tax the store
+        // first shows as a code lands is set aside, and the code is judged by
+        // the deduction line or shipping drop it drew (johnstonmurphy.com).
+        // Measured 40.29 -> 42.42 kB.
         // It is written only here: tests/finder-module-build.test.mjs reads
         // it.
-        limit: '38.8 KB',
+        limit: '43 KB',
         brotli: false,
     },
     {

@@ -49,7 +49,7 @@
 //        newest-first, cursor-paginated. Row fields used: id, createdAt,
 //        status, from, complainedAt.
 // It needs a key with the `emails:read` scope (sending uses `emails:send`).
-import { Sendly } from 'sendly-sdk'
+import { Sendly, SendlyConnectionError } from 'sendly-sdk'
 
 /** One Sendly email-list row, stripped to the fields that carry no PII. */
 export interface EmailLogEntry {
@@ -99,6 +99,15 @@ export const DEFAULT_STUCK_AFTER_MINUTES = 30
 export const MAX_PAGE_SIZE = 50
 /** Hard ceiling so a pathological log can never turn this into a crawl. */
 export const DEFAULT_MAX_PAGES = 10
+/**
+ * Per-request ceiling for every Sendly HTTP call in the check, passed to the
+ * SDK's own `timeout` option (it aborts each request with
+ * AbortSignal.timeout). Without an explicit bound a hung call would pin the
+ * monitor's overlap guard for the SDK default (30 s) per page; 15 s x
+ * DEFAULT_MAX_PAGES stays inside the cron monitor's maxRuntime and far below
+ * the run interval.
+ */
+export const SENDLY_REQUEST_TIMEOUT_MS = 15_000
 
 /**
  * ok         every row in the window was read and none is bad.
@@ -150,6 +159,8 @@ export interface EmailDeliveryHealthConfig {
     maxPages?: number
     now?: Date
     fetchImpl?: typeof fetch
+    /** Per-request timeout in ms; undefined -> SENDLY_REQUEST_TIMEOUT_MS. */
+    requestTimeoutMs?: number
 }
 
 /** `"Caramel <no_reply@grabcaramel.com>"` / `"no_reply@x"` -> the bare address. */
@@ -215,6 +226,7 @@ function createSendlyClient(config: EmailDeliveryHealthConfig): Sendly {
         apiKey: config.apiKey,
         ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
         ...(config.fetchImpl ? { fetch: config.fetchImpl } : {}),
+        timeout: config.requestTimeoutMs ?? SENDLY_REQUEST_TIMEOUT_MS,
     })
 }
 
@@ -330,6 +342,7 @@ export async function checkEmailDeliveryHealth(
     const windowMinutes = config.windowMinutes ?? DEFAULT_WINDOW_MINUTES
     const stuckAfterMs =
         (config.stuckAfterMinutes ?? DEFAULT_STUCK_AFTER_MINUTES) * 60_000
+    const timeoutMs = config.requestTimeoutMs ?? SENDLY_REQUEST_TIMEOUT_MS
     const windowEnd = now
     const windowStart = new Date(now.getTime() - windowMinutes * 60_000)
     // The Sendly project is shared with other Devino apps, so the check is
@@ -380,12 +393,15 @@ export async function checkEmailDeliveryHealth(
     }
 
     try {
-        const collected = await collectEmailLogWindow(config, {
-            windowStart,
-            windowEnd,
-            senderAddress: sender.address,
-            senderDomain: sender.domain,
-        })
+        const collected = await collectEmailLogWindow(
+            { ...config, requestTimeoutMs: timeoutMs },
+            {
+                windowStart,
+                windowEnd,
+                senderAddress: sender.address,
+                senderDomain: sender.domain,
+            },
+        )
         const summary = summariseEmailDeliveryWindow(collected.entries, {
             now,
             stuckAfterMs,
@@ -419,9 +435,24 @@ export async function checkEmailDeliveryHealth(
             status: 'error',
             // Status/code only (SendlyError.message is the API's own text and
             // never echoes our request body); no credential is ever in it.
-            reason: error instanceof Error ? error.message : String(error),
+            reason: describeCheckFailure(error, timeoutMs),
         }
     }
+}
+
+/**
+ * An aborted request (AbortSignal.timeout -> TimeoutError) is named as a
+ * timeout so the Sentry reason says what happened and how long we waited. It
+ * arrives two ways: wrapped as SendlyConnectionError (original error in
+ * `body`) when fetch itself rejects, or raw when the body read stalls after
+ * the headers (the SDK's `response.text()` sits outside its try/catch).
+ */
+function describeCheckFailure(error: unknown, timeoutMs: number): string {
+    const aborted = error instanceof SendlyConnectionError ? error.body : error
+    if (aborted instanceof Error && aborted.name === 'TimeoutError') {
+        return `Sendly request timed out after ${timeoutMs} ms`
+    }
+    return error instanceof Error ? error.message : String(error)
 }
 
 /** One-line, PII-free ops summary — what lands in the container log. */

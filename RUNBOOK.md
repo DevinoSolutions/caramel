@@ -174,11 +174,16 @@ Merge-to-main checklist (whoever merges does all of it):
    when it runs) and never re-queue.
 2. When the deploy is done, check that `https://grabcaramel.com/api/version`
    reports the merged sha (or a descendant) and capture it.
-3. Re-run the failed job of the merge commit's `main` CI run once. On `main`
-   the push-mode E2E job checks once that prod already serves the commit
-   (`DEPLOY_WAIT_TIMEOUT_SECONDS` is `0` there) and fails immediately when it
-   does not, which is every merge, because no deploy has run yet. Re-run it
-   after step 2 passes.
+3. Re-run the failed E2E job of the newest merge commit on `main` that the
+   deploy carries, once. Never re-run several at once: a re-run in the same
+   concurrency group cancels any other in-flight one. On `main` the push-mode
+   E2E job checks once that prod already serves the commit or a descendant of
+   it (`DEPLOY_WAIT_TIMEOUT_SECONDS` is `0` there; ancestry is decided by
+   GitHub's compare API) and fails immediately when it does not, which is
+   every merge, because no deploy has run yet. Re-run it after step 2 passes.
+   One deploy usually carries several merges: older merge commits' E2E runs
+   stay red on the commit list by design (they would pass on a re-run, since
+   prod serves a descendant of them, but the newest one is enough).
 
 Since F-016 the root `docker-compose.yml` (`Dockerfile` +
 `docker-entrypoint.sh`) is the INTENDED deployment unit — local and CI build
@@ -502,29 +507,41 @@ reads Sendly's OWN email list (`GET /api/emails`, newest first, cursor-paged via
 classifies the window, and raises **exactly
 one** Sentry event per bad clock hour:
 
-| Window contains                | Sentry                                                 |
-| ------------------------------ | ------------------------------------------------------ |
-| only `DELIVERED`/`SENT`/…      | nothing (one `[email-health] ok …` log line)           |
-| any failure status             | `Transactional email delivery degraded`, level `error` |
-| only stuck/delayed sends       | same message, level `warning`                          |
-| page budget ran out (gap)      | `…health check incomplete`, level `warning`            |
-| provider unreachable / refused | `…health check failed`, level `error`                  |
+| Window contains                 | Sentry                                                 |
+| ------------------------------- | ------------------------------------------------------ |
+| only `DELIVERED`/`SENT`/…       | nothing (one `[email-health] ok …` log line)           |
+| one `BOUNCED`, nothing else bad | `Transactional email bounced`, level `warning`         |
+| any other failure status        | `Transactional email delivery degraded`, level `error` |
+| only stuck/delayed sends        | same message, level `warning`                          |
+| page budget ran out (gap)       | `…health check incomplete`, level `warning`            |
+| provider unreachable / refused  | `…health check failed`, level `error`                  |
 
 The event carries counts, statuses, the window and the sender domain — **never** a
 recipient, subject or body. The list rows' PII fields are dropped at the parse
 boundary (`toEmailLogEntry`).
 
 **Schedule.** Caramel has no cron and no worker, so this is an `unref`'d
-interval started from `instrumentation.ts`'s `register()` — one process, one
-schedule. The first run happens one interval AFTER boot (a crash-looping
-container must not be able to machine-gun Sentry), and the Sentry throttle is
-one event per clock hour per process. If the web service ever scales past one
-replica, move this to a real scheduler rather than adding a lock.
+wall-clock timer (`src/lib/wallClockSchedule.ts`, shared with the two retention
+sweeps) started from `instrumentation.ts`'s `register()` — one process, one
+schedule. Runs sit at minute 23 UTC of every hour (for the default period), never
+at boot and never boot + interval: a boot-relative interval was starved whenever
+deploys landed closer together than the interval (T-9436, the same bug as
+CARAMEL-39), and a boot within 2 minutes before a slot waits for the next one so
+a crash-looping container cannot machine-gun Sentry. Every run checks in to the
+Sentry cron monitor `caramel-email-delivery-health` (crontab built from the same
+schedule): `ok` means the check RAN, even when it found delivery problems (that
+is the separate Sentry event above); `error` means it could not run (provider
+unreachable or refused, unusable sender, Sendly unconfigured, an overlapping
+cycle), and two consecutive misses or errors raise a monitor issue. The Sentry
+event throttle is one per clock hour per process. If the web service ever scales
+past one replica, move this to a real scheduler rather than adding a lock.
 
 **Config.** `EMAIL_DELIVERY_HEALTH_ENABLED` is unset by default, which means ON
 in production whenever `SENDLY_API_KEY` is set and OFF everywhere else; `false`
 opts a prod deploy out, `true` forces it on locally. The window length equals
-`EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES` (default 60). Boot logs the decision
+`EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES` (default 60; it must tile the UTC day, a
+divisor of 60 that is at least 5 below an hour, otherwise whole hours dividing 24,
+or the boot fails). Boot logs the decision
 either way:
 
 ```

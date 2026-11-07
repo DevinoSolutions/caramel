@@ -306,9 +306,16 @@ describe('a rejection caused by the shopper’s own discount is not a coupon ver
         // loop must keep learning, or the fix costs more signal than the bug.
         await startApplyingCoupons(REC)
 
+        // Both codes produced real rejection text, so both are reported
+        // (T-13791: reporting only the last left the other one ranked first).
         expect(reportedOutcomes).toEqual([
             {
-                id: 'c2', // the last code to produce real rejection text
+                id: 'c1',
+                outcome: 'failed',
+                storeReason: 'Not valid for these items',
+            },
+            {
+                id: 'c2',
                 outcome: 'failed',
                 storeReason: 'Not valid for these items',
             },

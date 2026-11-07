@@ -71,6 +71,11 @@ const SAVINGS_BATCH_MAX = 100
 // for a price parser that read "1.299,00" as 129900 or a currency as cents.
 // A saving above this is a bug report, not a saving, and banking it would
 // corrupt a lifetime total the user is asked to trust.
+// Known limit (T-4381, accepted): the extension reads the total from the
+// store's own page, so a store that draws a fake lower total can make its own
+// code's saving look real here (and in that code's "worked" report). No cap
+// relative to the cart helps: the cart total would be read from the same page.
+// Only that store's page can do it, for its own code, and no money moves.
 const AMOUNT_CENTS_MAX = 10_000_000
 
 // occurredAt is client-reported wall-clock, so it is checked against a window

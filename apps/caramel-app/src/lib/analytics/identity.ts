@@ -16,6 +16,10 @@ import {
     onFirstActivity,
 } from '@/lib/afterPageLoad'
 import { APP_VERSION, clientEnv } from '@/lib/env.client'
+import {
+    appShellSuperProperties,
+    detectAppShell,
+} from '@/lib/surface/detectSurface'
 import * as Sentry from '@sentry/nextjs'
 import type { PostHog } from 'posthog-js'
 import { captureFirstTouch } from './firstTouch'
@@ -189,6 +193,27 @@ export function initPosthogBrowser(): boolean {
     return true
 }
 
+/**
+ * Every super property this app puts on its events: the base ones (app id,
+ * version, environment, platform) and, inside the native app shell (T-10055),
+ * the shell's platform, version and build. Registered at init (withPosthog
+ * drops tasks made before startPosthogLoad(), so an effect elsewhere can run
+ * first and lose the registration) and again right after posthog.reset(),
+ * which clears every super property and does not rerun init.
+ */
+function registerSuperProperties(posthog: PostHog, environment: string): void {
+    posthog.register({
+        app_id: APP_ID,
+        app_version: APP_VERSION,
+        environment,
+        platform: 'web',
+    })
+    const appShell = detectAppShell(
+        typeof navigator === 'undefined' ? '' : String(navigator.userAgent),
+    )
+    if (appShell) posthog.register(appShellSuperProperties(appShell))
+}
+
 export function initPosthogInstance(
     posthog: PostHog,
     target: PosthogTarget,
@@ -204,6 +229,15 @@ export function initPosthogInstance(
         // ui_host stays the real host for toolbar links. e2e: direct, as before.
         api_host: hosts.apiHost,
         ...(hosts.uiHost ? { ui_host: hosts.uiHost } : {}),
+        // posthog-js defaults to 'fallback': it first asks for the versioned
+        // /static/<version>/<kind>.js and only then the legacy
+        // /static/<kind>.js?v=<version>. Our self-hosted PostHog has no
+        // versioned paths: it answers them with a 302 to /login, which the
+        // browser follows to OUR /login page (a server render per recorder
+        // load, plus a MIME-type error in the console) before the legacy
+        // retry loads the script. Ask for the legacy URL straight away.
+        // TODO: drop this once the self-hosted PostHog serves /static/<version>/.
+        strict_script_versioning: false,
         capture_pageview: 'history_change',
         capture_pageleave: true,
         // Session recording ON, masked to match the Sentry Replay privacy
@@ -247,12 +281,7 @@ export function initPosthogInstance(
         person_profiles: 'identified_only',
     })
 
-    posthog.register({
-        app_id: APP_ID,
-        app_version: APP_VERSION,
-        environment: target.environment,
-        platform: 'web',
-    })
+    registerSuperProperties(posthog, target.environment)
 
     if (isE2E) {
         const handshake = window.__CARAMEL_E2E__
@@ -363,6 +392,13 @@ export function resetPosthogIdentity(): void {
     withPosthog(posthog => {
         try {
             posthog.reset()
+            // initPosthogBrowser records it before PostHog can be active.
+            if (activeEnvironment === undefined) {
+                throw new Error(
+                    'PostHog is active but no environment was recorded; the super properties cannot be re-registered after reset',
+                )
+            }
+            registerSuperProperties(posthog, activeEnvironment)
             syncSentryPosthogContext(posthog)
         } catch (error) {
             reportIdentityFailure('posthog_reset', error)

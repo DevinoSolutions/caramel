@@ -230,6 +230,9 @@ describe('listStoreSitemapEntries — per-site visible aggregates for the sitema
         expect(codecademy!.coupon_count).toBeGreaterThan(0)
         expect(codecademy!.last_updated).toBeInstanceOf(Date)
         expect(Number.isNaN(codecademy!.last_updated.getTime())).toBe(false)
+        // MIN(created_at): the sitemap prune's page-age signal (T-15493).
+        expect(codecademy!.first_created).toBeInstanceOf(Date)
+        expect(Number.isNaN(codecademy!.first_created!.getTime())).toBe(false)
         const { total } = await listCoupons({
             baseSite: 'codecademy.com',
             limit: 1,

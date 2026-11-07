@@ -229,6 +229,8 @@ describe('couponSignals (real prisma, live pg :28005)', () => {
                 failCount: 0,
                 failWeight: 0,
                 keepsFailing: false,
+                recentlyFailing: false,
+                recentlyRefused: false,
             },
             {
                 id: UNSEEDED_ID,
@@ -237,6 +239,8 @@ describe('couponSignals (real prisma, live pg :28005)', () => {
                 failCount: 0,
                 failWeight: 0,
                 keepsFailing: false,
+                recentlyFailing: false,
+                recentlyRefused: false,
             },
         ])
         // Sanity: the seeded id really resolved to a non-null ISO string, not

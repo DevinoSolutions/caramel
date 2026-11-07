@@ -1,6 +1,7 @@
 import { defersAnalytics, onFirstActivity } from '@/lib/afterPageLoad'
 import { browserSignalsTrackingOptOut } from '@/lib/analytics/trackingOptOut'
 import { SENTRY_RELEASE } from '@/lib/buildInfo'
+import { tagExtensionVersion } from '@/lib/sentryExtensionVersion'
 import { INJECTED_SCRIPT_DENY_URLS } from '@/lib/sentryInjectedScriptNoise'
 import {
     SENTRY_DATA_COLLECTION,
@@ -103,7 +104,8 @@ if (process.env.NODE_ENV === 'production' && dsn) {
         // Off, as on the server (see sentry.common.config.ts): SDK v11's
         // default groups every captureMessage by a minified frame per build.
         attachStacktrace: false,
-        beforeSend: scrubSentryEvent,
+        // The extension build in the tab rides on every error (T-10681).
+        beforeSend: event => scrubSentryEvent(tagExtensionVersion(event)),
         beforeSendTransaction: scrubSentryEvent,
         beforeBreadcrumb: scrubSentryBreadcrumb,
         debug: false,

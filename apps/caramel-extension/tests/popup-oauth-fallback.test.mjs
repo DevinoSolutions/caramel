@@ -108,6 +108,25 @@ describe('popup-core — OAuth fallback without the identity API (Firefox)', () 
         expect(popupOAuthSupported()).toBe(false)
     })
 
+    it('popupOAuthSupported() answers false when the redirect URI is not a chromiumapp.org host (ungoogled-chromium rewrites it to ch40m1umapp.qjz9zk, which the server and Google refuse)', () => {
+        chromeShape(async () => undefined)
+        globalThis.currentBrowser.identity.getRedirectURL = () =>
+            'https://gaimofgglbackoimfjopicmbmnlccfoe.ch40m1umapp.qjz9zk/'
+        expect(popupOAuthSupported()).toBe(false)
+
+        // No getRedirectURL at all: no redirect URI to send, so no popup OAuth.
+        globalThis.currentBrowser.identity = { launchWebAuthFlow: () => {} }
+        expect(popupOAuthSupported()).toBe(false)
+
+        // A lookalike host that only CONTAINS the suffix stays refused.
+        globalThis.currentBrowser.identity = {
+            launchWebAuthFlow: () => {},
+            getRedirectURL: () =>
+                'https://ext-id.chromiumapp.org.evil.example/',
+        }
+        expect(popupOAuthSupported()).toBe(false)
+    })
+
     it('openWebsiteSignIn() opens the website /login page in a tab, closes the popup, and never touches the OAuth endpoints', () => {
         firefoxShape()
         globalThis.fetch = vi.fn()

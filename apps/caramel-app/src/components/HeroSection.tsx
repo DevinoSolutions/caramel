@@ -382,6 +382,8 @@ export default function HeroSection() {
     const [webglOK, setWebglOK] = useState(false)
     const [active, setActive] = useState(true)
     const [canvasReady, setCanvasReady] = useState(false)
+    // The browser dropped the GL context: the poster is the hero from then on.
+    const [glLost, setGlLost] = useState(false)
     // Flips true after first paint so the stat coupons count up on load.
     const [statsStarted, setStatsStarted] = useState(false)
 
@@ -429,7 +431,7 @@ export default function HeroSection() {
         return () => observer.disconnect()
     }, [])
 
-    const showCanvas = !reduceMotion && webglOK && desktop && idle
+    const showCanvas = !reduceMotion && webglOK && desktop && idle && !glLost
 
     return (
         <section
@@ -735,6 +737,10 @@ export default function HeroSection() {
                                     active={active}
                                     isDark={isDarkMode}
                                     onReady={() => setCanvasReady(true)}
+                                    onContextLost={() => {
+                                        setGlLost(true)
+                                        setCanvasReady(false)
+                                    }}
                                 />
                             </div>
                         )}

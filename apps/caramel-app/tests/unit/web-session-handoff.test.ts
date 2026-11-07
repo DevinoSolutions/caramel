@@ -5,37 +5,8 @@
 // tests/unit/web-session-routes.test.ts.
 // The full mint → redeem → working-cookie round trip on real Postgres is
 // tests/integration/web-session-handoff.itest.ts (T-9213).
+import { HandoffBody } from '@/lib/webSessionHandoff'
 import { describe, expect, it } from 'vitest'
-import { z } from 'zod'
-
-// Mirror the handoff route's validation exactly so we test the same rules.
-// The route's own HandoffBody is not exported, so we replicate the schema
-// (a change to one that does not change the other is caught by the
-// integration tests' real HTTP round trips).
-const ALLOWED_NEXT_PREFIXES = ['/coupons', '/profile', '/welcome']
-
-const HandoffBody = z.object({
-    next: z
-        .string()
-        .max(512)
-        .refine(
-            s => {
-                if (s === '/') return true
-                for (let i = 0; i < s.length; i++) {
-                    const c = s.charCodeAt(i)
-                    if (c <= 0x1f || c === 0x7f) return false
-                }
-                if (/\s/.test(s) || s.includes('\\')) return false
-                if (s.startsWith('//')) return false
-                if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) return false
-                if (/%0[dDaA]/i.test(s)) return false
-                if (!ALLOWED_NEXT_PREFIXES.some(p => s.startsWith(p)))
-                    return false
-                return /^\/(?!\/)[^\s\\]*$/.test(s)
-            },
-            { message: 'invalid next' },
-        ),
-})
 
 const valid = (s: string) => HandoffBody.safeParse({ next: s }).success
 const invalid = (s: string) => !valid(s)

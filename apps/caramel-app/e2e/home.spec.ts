@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test'
+import { Page } from '@playwright/test'
+import { expect, test } from './support/test'
 
 async function gotoHomePage(page: Page) {
     await page.goto('/', { waitUntil: 'domcontentloaded' })

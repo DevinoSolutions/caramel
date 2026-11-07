@@ -23,7 +23,9 @@
     position: fixed;
     top: max(20px, env(safe-area-inset-top));
     right: max(20px, env(safe-area-inset-right));
-    z-index: 2147483646;
+    /* The page's maximum, as CARAMEL_HOST_CSS explains (knix.com's cart
+       drawer sits at 2147483647 and covered the prompt at one below). */
+    z-index: 2147483647;
     width: min(88vw, 300px);
     cursor: pointer;
     /* The keyboard focus ring is painted on the pill INSIDE the shadow root

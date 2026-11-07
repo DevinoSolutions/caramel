@@ -1,4 +1,4 @@
-// owns: DOM visibility/wait helpers, price parsing, CSS/XPath query helpers, the mid-attempt navigation handoff (_isVisible, waitForVisible, pickBestMatch, waitForElement, waitForTotalChange, waitUntilReady, getPrice, _isXPath, qOne, qAll, caramel{Mark,Clear,Take}PendingSubmit, caramel{Hold,Take}AppliedWin)
+// owns: DOM visibility/wait helpers, a store's own overlays, price parsing, CSS/XPath query helpers, the mid-attempt navigation handoff (_isVisible, caramelVisible, caramelShownOverlays, caramelOverlayCloseControl, caramelPressEscape, waitForVisible, pickBestMatch, waitForElement, waitForTotalChange, waitUntilReady, getPrice, _isXPath, qOne, qAll, caramel{Mark,Clear,Take}PendingSubmit, caramel{Hold,Take}AppliedWin)
 // load after: caramel-base.js
 //
 // ES module since the WXT P1 port (2026-08-12). Module scope replaces the
@@ -7,7 +7,7 @@
 // content-script call are gone, because `export` is now that statement. The
 // file has NO top-level side effects — no listeners, no DOM reads, no chrome
 // API calls, no window publication — so it exports no init function.
-import { caramelTabHandoff, log } from './caramel-base.js'
+import { caramelTabHandoff, log, sleep } from './caramel-base.js'
 
 /* ---------- DOM waiters ---------- */
 /* ---------- visibility helpers ---------- */
@@ -26,6 +26,127 @@ export function _isVisible(el) {
     }
     return el.offsetParent !== null
 }
+
+const _caramelStyleOf = el => el.ownerDocument.defaultView.getComputedStyle(el)
+
+// Rendered AND given a box. An ancestor collapsed to zero height hides us
+// without a style of our own, so that is checked too.
+export function caramelVisible(el) {
+    if (!el || !el.isConnected || !_isVisible(el)) return false
+    const r = el.getBoundingClientRect()
+    if (r.width < 2 || r.height < 2) return false
+    let p = el.parentElement
+    for (let i = 0; i < 8 && p; i++, p = p.parentElement) {
+        const ps = _caramelStyleOf(p)
+        if (ps.overflow === 'hidden' && p.getBoundingClientRect().height < 2)
+            return false
+    }
+    return true
+}
+
+/* ---------- a store's own overlays ---------- */
+// Noted before something the extension does, and closed afterwards the way a
+// shopper would when that something opened one: the finder's undo of a reveal
+// click (coupon-box-discovery.js) and the apply flow's close of a store alert
+// that answered a code (coupon-apply.js).
+const DIALOG_SEL =
+    'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
+const OVERLAY_NAME_RE = /modal|popup|dialog|overlay|lightbox|drawer/i
+const CLOSE_NAME_RE = /\b(close|dismiss)\b/i
+const CLOSE_CLASS_RE = /(^|[\s_-])close($|[\s_-])/i
+const CLOSE_TEXT_RE = /^(close|dismiss|[×✕✖✗x])$/i
+
+const _caramelClassOf = el =>
+    typeof el.className === 'string'
+        ? el.className
+        : el.getAttribute('class') || ''
+
+// Marked or named as a popup, unlike a header pinned to the top of the page.
+export const caramelOverlayIsModal = el =>
+    el.matches(DIALOG_SEL) ||
+    OVERLAY_NAME_RE.test(_caramelClassOf(el) + ' ' + el.id)
+
+// A dialog, or anything pinned over the page (position: fixed), in view. Our
+// own prompt and cards are never the store's overlay.
+export function caramelOverlayShown(el) {
+    if (el.closest('[id^="caramel"]') || !caramelVisible(el)) return false
+    return el.matches(DIALOG_SEL) || _caramelStyleOf(el).position === 'fixed'
+}
+
+// Where a popup lives: an element the page marks as a dialog, a direct child
+// of <body> (where most popup scripts put theirs), or one named like one.
+// Only these are styled, so a long page is not read element by element.
+export function caramelShownOverlays(doc) {
+    const out = new Set()
+    if (!doc.body) return out
+    const candidates = new Set(doc.querySelectorAll(DIALOG_SEL))
+    for (const el of doc.body.children) candidates.add(el)
+    for (const el of doc.body.getElementsByTagName('*'))
+        if (OVERLAY_NAME_RE.test(_caramelClassOf(el) + ' ' + el.id))
+            candidates.add(el)
+    for (const el of candidates) if (caramelOverlayShown(el)) out.add(el)
+    return out
+}
+
+// The overlay's own close control: a control named close or dismiss (aria
+// label, title, class), or one whose whole text is "×". `refused` is what the
+// caller will not click on top of an order-completing control.
+export function caramelOverlayCloseControl(overlay, refused) {
+    const controls = overlay.querySelectorAll(
+        'button, [role="button"], a, input[type="button"], [class*="close"], [class*="Close"]',
+    )
+    for (const el of controls) {
+        const text = (el.innerText || el.textContent || el.value || '')
+            .toString()
+            .trim()
+            .toLowerCase()
+        const named =
+            CLOSE_NAME_RE.test(el.getAttribute('aria-label') || '') ||
+            CLOSE_NAME_RE.test(el.title || '') ||
+            CLOSE_CLASS_RE.test(_caramelClassOf(el)) ||
+            CLOSE_TEXT_RE.test(text)
+        if (
+            named &&
+            caramelVisible(el) &&
+            !caramelIsForbiddenControl(el) &&
+            !refused(el)
+        )
+            return el
+    }
+    return null
+}
+
+// Escape, as the key a shopper presses: popup scripts listen for it on the
+// page (keydown or keyup). A native <dialog> closes on the browser's own
+// Escape only, which a script's key event never reaches, so it is closed.
+export function caramelPressEscape(doc, overlays) {
+    const target = doc.activeElement || doc.body
+    const Key = doc.defaultView.KeyboardEvent
+    for (const type of ['keydown', 'keyup'])
+        target.dispatchEvent(
+            new Key(type, {
+                key: 'Escape',
+                code: 'Escape',
+                keyCode: 27,
+                which: 27,
+                bubbles: true,
+                cancelable: true,
+            }),
+        )
+    for (const o of overlays)
+        if (o.tagName === 'DIALOG' && o.open && typeof o.close === 'function')
+            o.close()
+}
+
+// Wait (briefly: a popup may fade out) until done() holds. true when it does.
+export async function caramelSettles(done) {
+    for (let waited = 0; waited < 1000; waited += 100) {
+        if (done()) return true
+        await sleep(100)
+    }
+    return done()
+}
+
 // Wait until the selector matches a VISIBLE element. waitForElement only waits
 // for presence — useless for reveal-toggles that unhide pre-rendered markup
 // (the input already "exists" while still display:none). Checks ALL matches,
@@ -437,7 +558,7 @@ export function caramelFindMoney(text) {
 // Called from other split content-script files (cross-file content-script
 // call — oxlint's per-file analysis can't see it).
 export function getPrice(selector, { returnLargest } = {}) {
-    let el = qOne(selector)
+    let el = caramelPriceElement(selector)
     if (!el && typeof selector === 'string' && selector.includes('[id=')) {
         const id = selector.match(/\[id=['"]([^'"]+)['"]\]/)?.[1]
         if (id) el = document.getElementById(id)
@@ -631,7 +752,9 @@ export function caramelSetCurrencySymbol(sym) {
  * visible, must not already be expanded, and must pass the order-button guard.
  * When nothing matches it returns null and behaviour is exactly as before.
  */
-const CARAMEL_MAX_DISCLOSURE_DEPTH = 6
+// Eight, as pickBestMatch: lindtusa.com's collapsed panel is the seventh
+// ancestor of its input.
+const CARAMEL_MAX_DISCLOSURE_DEPTH = 8
 // Consumed by store-detect.js and coupon-runner.js (cross-file calls).
 export function caramelDisclosureFor(el) {
     // Only ever for a box the shopper CAN'T see. A visible box needs no reveal.
@@ -669,8 +792,56 @@ export function caramelDisclosureFor(el) {
             const toggle = controllers.find(usable)
             if (toggle) return toggle
         }
+        // Magento's collapsible widget (mage/collapsible: the Luma cart's
+        // "Apply Discount Code", and themes that wrap the whole discount
+        // block in one): the closed panel is a [data-role="content"] whose
+        // header, the element just before it, is the [data-role="title"]
+        // the widget gives role="tab" and aria-expanded, but no
+        // aria-controls. lindtusa.com (2026-10-27): the box sits in such a
+        // panel, seven levels above the input, and the config's toggle
+        // selectors no longer match it.
+        if (
+            node.getAttribute('data-role') === 'content' ||
+            node.getAttribute('role') === 'tabpanel'
+        ) {
+            const header = node.previousElementSibling
+            if (
+                header &&
+                (header.getAttribute('data-role') === 'title' ||
+                    header.getAttribute('role') === 'tab') &&
+                usable(header)
+            )
+                return header
+        }
     }
     return null
+}
+
+/* The apply button of the box a config names, when the config's own apply
+ * selector matches nothing on the page. lindtusa.com (2026-10-27): its Amasty
+ * multi-coupon form ships Luma's box with the button renamed from
+ * `button.action.apply` to `button.amcoupons-apply`, so the config found the
+ * input and no button, and every code failed before it was typed.
+ *
+ * Found from the input itself and deliberately narrow: the input's own form,
+ * only when that form is the coupon box (the input is its one field a shopper
+ * types into) and has exactly one visible submit control. A form with a choice
+ * is not ours to guess in. The caller still runs every order-button guard. */
+const CARAMEL_TYPED_FIELD_SEL =
+    'input:not([type]), input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="search"], textarea'
+export function caramelSubmitBesideInput(input) {
+    const form = input?.form
+    if (!form) return null
+    const fields = Array.from(
+        form.querySelectorAll(CARAMEL_TYPED_FIELD_SEL),
+    ).filter(_isVisible)
+    if (fields.length !== 1 || fields[0] !== input) return null
+    const submits = Array.from(
+        form.querySelectorAll(
+            'button:not([type]), button[type="submit"], input[type="submit"]',
+        ),
+    ).filter(_isVisible)
+    return submits.length === 1 ? submits[0] : null
 }
 
 /* --------------------------------------------------  navigation handoff
@@ -836,6 +1007,72 @@ export async function caramelTakeAppliedWin(maxAgeMs = 120000) {
             typeof st.currency === 'string' && /^[A-Z]{3}$/.test(st.currency)
                 ? st.currency
                 : null,
+    }
+}
+
+/* A discount-link run the store's own page reloads under (T-13322).
+ *
+ * The link path measures every code on one page and reloads only once, on
+ * purpose, after its win. A store theme can reload the cart page by itself
+ * when the cart changes under it: neweracap.com, Firefox, 1.4.34 gate
+ * (2026-11-03), reloaded at try 5 of 8 with FREE (-$55.99) already on the
+ * cart. The run died with the document, and the shopper got the best code
+ * with no card and the "Try Caramel" pill back, as if nothing had run.
+ *
+ * So the run keeps what it knows here while it probes, and the page the reload
+ * puts up picks it up (store-detect.js _caramelResumeLinkRun). Nothing in it is
+ * reported as a saving: the next page reads its own cart, as the run does.
+ * Cleared on every way the run ends on its own page, so our own reload after a
+ * win (which hands over through 'applied' instead) never resumes it. A record
+ * that was already resumed once is not resumed again: a theme that reloads on
+ * every cart change cannot keep a run going. */
+// Consumed by coupon-runner.js (cross-file content-script call).
+export async function caramelHoldLinkRun(state) {
+    _caramelHint('link_run', true)
+    await caramelTabHandoff('set', 'link_run', { ...state, t: Date.now() })
+}
+// Consumed by coupon-runner.js (cross-file content-script call).
+export async function caramelClearLinkRun() {
+    if (!caramelHandoffMayExist('link_run')) return
+    await caramelTabHandoff('clear', 'link_run')
+    _caramelHint('link_run', false)
+}
+const _caramelIsCode = v => typeof v === 'string' && v.length > 0
+const _caramelIsMinor = v => Number.isInteger(v) && v >= 0
+// Consumed by store-detect.js (cross-file content-script call).
+export async function caramelTakeLinkRun(maxAgeMs = 120000) {
+    const st = await _caramelTakeHandoff('link_run')
+    if (!st || typeof st !== 'object') return null
+    if (!(Date.now() - (st.t || 0) < maxAgeMs)) return null
+    // The shopper pressed × before the reload: the run is over.
+    if (_caramelRunStopped()) return null
+    // The run's own list, in its own order: { code, id } for each code.
+    const planned = Array.isArray(st.planned)
+        ? st.planned
+              .filter(c => c && _caramelIsCode(c.code))
+              .map(c => ({ code: c.code, id: c.id ?? null }))
+        : []
+    if (!planned.length || !_caramelIsMinor(st.base)) return null
+    if (!_caramelIsMinor(st.items) || st.items < 1) return null
+    if (!_caramelIsMinor(st.next) || st.next > planned.length) return null
+    const best = _caramelIsCode(st.bestCode) && _caramelIsMinor(st.bestTotal)
+    const arrived =
+        st.arrivedWith && _caramelIsCode(st.arrivedWith.code)
+            ? st.arrivedWith
+            : null
+    return {
+        base: st.base,
+        items: st.items,
+        planned,
+        next: st.next,
+        bestCode: best ? st.bestCode : null,
+        bestId: best ? (st.bestId ?? null) : null,
+        bestTotal: best ? st.bestTotal : st.base,
+        currency: typeof st.currency === 'string' ? st.currency : null,
+        arrivedWith: arrived,
+        measured: _caramelIsMinor(st.measured) ? st.measured : 0,
+        sawHollowDrop: st.sawHollowDrop === true,
+        resumed: st.resumed === true,
     }
 }
 
@@ -1067,4 +1304,47 @@ export function qAll(sel, root) {
     } catch {
         return []
     }
+}
+
+/* The first element a config's selector LIST matches, trying each selector in
+ * the list's order (T-12490). A config lists the store's own total first and a
+ * broad fallback after it; querySelector(list) instead returns the first match
+ * in the PAGE, and BigCommerce draws the Subtotal's [data-test="cart-price-value"]
+ * above [data-test="cart-total"]: store.franklinplanner.com read $17.95 while
+ * FPBDAY took the grand total to $14.36. Splits on top-level commas only, never
+ * inside (), [] or quotes, so :is(a, b), [x="a,b"] and an XPath part stay whole. */
+// An XPath part is evaluated as XPath (qOne), so a list mixing CSS and XPath,
+// which querySelector threw on, reads its parts too. `accept` skips a match.
+export function qFirstOfList(sel, root, accept = Boolean) {
+    let depth = 0
+    let quote = ''
+    let from = 0
+    for (let i = 0; sel && i <= sel.length; i++) {
+        const ch = sel[i]
+        if (ch === '\\') i++
+        else if (quote) quote = ch === quote ? '' : quote
+        else if (ch === '"' || ch === "'") quote = ch
+        else if (ch === '(' || ch === '[') depth++
+        else if (ch === ')' || ch === ']') depth--
+        else if (!depth && (ch === ',' || i === sel.length)) {
+            const el = qOne(sel.slice(from, i).trim(), root)
+            if (accept(el)) return el
+            from = i + 1
+        }
+    }
+    return null
+}
+
+// The element a priceContainer is read from (getPrice, and the element the
+// apply wait watches): the first part in list order whose match is shown and
+// holds an amount, else one that holds an amount, else the first match. A
+// first part that matches an empty skeleton or a hidden twin must not hide a
+// later part's total (page order used to reach it).
+const _caramelHasMoney = el => !!el && caramelFindMoney(el.innerText).length > 0
+export function caramelPriceElement(sel) {
+    return (
+        qFirstOfList(sel, null, el => _caramelHasMoney(el) && _isVisible(el)) ||
+        qFirstOfList(sel, null, _caramelHasMoney) ||
+        qFirstOfList(sel)
+    )
 }

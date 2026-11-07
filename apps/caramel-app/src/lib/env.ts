@@ -17,6 +17,7 @@ import {
     isValidFallbackKey,
     isValidFallbackModel,
 } from '@/lib/proxy-fallback-headers'
+import { isValidWallClockPeriodMinutes } from '@/lib/wallClockSchedule'
 import 'server-only'
 import { z } from 'zod'
 
@@ -117,12 +118,22 @@ const serverObjectSchema = z.object({
     // "it was never running" is exactly the failure this monitor exists to end.
     EMAIL_DELIVERY_HEALTH_ENABLED: z.enum(['true', 'false']).optional(),
     // How often the monitor runs AND how far back each run looks (one window
-    // per interval, no gaps, no overlap). Minutes, because an ops knob should
-    // be set in the unit a human reaches for.
+    // per slot; a missed slot, such as a restart across it, leaves that window
+    // unread). Minutes, because an ops knob should be set in the unit a human
+    // reaches for. Runs sit on the UTC wall clock
+    // (wallClockSchedule.ts), so the period must tile the day: a divisor of 60
+    // below an hour (5 minutes at the least), otherwise a whole number of hours
+    // dividing 24 (60, 120, 180, 240, 360, 480, 720, 1440). A bad value fails
+    // the boot.
     EMAIL_DELIVERY_HEALTH_INTERVAL_MINUTES: z.coerce
         .number()
         .int()
         .positive()
+        .refine(isValidWallClockPeriodMinutes, {
+            // parseServerEnv prefixes the variable name, so it is not repeated here.
+            error: issue =>
+                `got ${String(issue.input)}; allowed: a divisor of 60 that is at least 5 (5, 6, 10, 12, 15, 20, 30), or whole hours dividing 24 (60, 120, 180, 240, 360, 480, 720, 1440)`,
+        })
         .default(60),
     // Destination inbox(es) for the user support/feedback flow (POST
     // /api/support). Accepts a COMMA-SEPARATED list ("a@x.com,b@y.com" — split
@@ -182,20 +193,24 @@ const serverObjectSchema = z.object({
     // Served to the extension as `couponBoxSave` by GET
     // /api/extension/features. On, a promo box the extension found and proved
     // on a store with no config may be saved as that store's config through
-    // POST /api/extension/coupon-box-save (couponBoxSave.ts). Off, the route
-    // answers 404 and the extension never calls it. Same strict two-value
-    // enum as SHOPPER_CODE_CAPTURE_ENABLED.
+    // POST /api/extension/coupon-box-save (couponBoxSave.ts). On by default:
+    // a saved box only becomes a served config once established accounts
+    // agree on it (see the quorum below). 'false' is the kill switch: the
+    // route answers 404 and the extension never calls it. Same strict
+    // two-value enum as SHOPPER_CODE_CAPTURE_ENABLED.
     COUPON_BOX_SAVE_ENABLED: z
         .enum(['true', 'false'])
-        .default('false')
+        .default('true')
         .transform(value => value === 'true'),
     // Quarantine + write budget of the same route (T-6221). A saved box is a
     // PROPOSAL until MIN_AGREEING_INSTALLS distinct signed-in users proposed
     // the same box for the same store (couponBoxSave.recordBoxProposal); only
     // then does it become a served store_configs row. Minimum 2 on purpose:
     // 1 would put a single account back in control of what other installs
-    // click. Default 5, not 3: this counts ESTABLISHED accounts (older than
-    // COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS), so an attacker needs aged signups.
+    // click. Default 2 (T-10535): this counts ESTABLISHED accounts (older than
+    // COUPON_TRUST_MIN_ACCOUNT_AGE_DAYS), and each one's proposal counts only
+    // when the same user reported a code at that store as `worked` in the
+    // minutes before (couponBoxCorroboration.ts).
     // The three caps count NEW proposals in the last 24 hours: per
     // user, per store, and across all callers; over a cap the route answers
     // 429 and nothing is written. Non-negative integers; 0 = refuse every
@@ -203,7 +218,7 @@ const serverObjectSchema = z.object({
     // into 0 and silently switch saving off); garbage fails boot.
     COUPON_BOX_SAVE_MIN_AGREEING_INSTALLS: z.preprocess(
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
-        z.coerce.number().int().min(2).default(5),
+        z.coerce.number().int().min(2).default(2),
     ),
     COUPON_BOX_SAVE_USER_DAILY_CAP: z.preprocess(
         v => (typeof v === 'string' && v.trim() === '' ? undefined : v),

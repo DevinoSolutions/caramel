@@ -50,6 +50,11 @@ export interface Coupon {
     // website and the extension popup collapse the same codes. false/absent when
     // there is no signal. Presentation only: never a status or a deletion.
     keepsFailing?: boolean
+    // coupons.ts isRecentlyFailing() / isRecentlyRefused(), computed by
+    // attachSignals: the groups the store's list order puts this code in, so
+    // the extension keeps the app's order when it ranks by value (T-13810).
+    recentlyFailing?: boolean
+    recentlyRefused?: boolean
 }
 
 export interface CouponFilters {

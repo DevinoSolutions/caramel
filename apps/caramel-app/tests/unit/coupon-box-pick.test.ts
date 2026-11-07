@@ -59,12 +59,12 @@ import {
     CouponBoxOutlineTooLargeError,
     MAX_OUTLINE_BYTES,
     pickCouponBox,
-    scrubOutline,
 } from '@/lib/couponBoxPick'
 import {
     COUPON_BOX_PICK_BUDGET,
     resetCouponBoxPickBudgetForTests,
 } from '@/lib/couponBoxPickBudget'
+import { scrubOutline } from '@/lib/outlineScrub'
 import { MIN_PAID_PATH_DEADLINE_SECONDS } from '@/lib/proxy-fallback-headers'
 import { couponBoxCases } from '../../evals/fixtures/coupon-box-cases'
 
@@ -346,6 +346,57 @@ describe('the pick', () => {
     it('scrubs digits in any script, not only 0-9', () => {
         expect(scrubOutline('- [3] button "to ۰۹۱۲ ٠١٢ ０３１ ①𝟏Ⅷ"')).toBe(
             '- [3] button "to #### ### ### ###"',
+        )
+    })
+
+    it('redacts a token that mixes letters and digits before masking digits (T-9959)', async () => {
+        const scrubbed = scrubOutline(
+            '- [12] button "Remove SAVE10"\n- [13] button "Apply"',
+        )
+        expect(scrubbed).toBe(
+            '- [12] button "Remove [code]"\n- [13] button "Apply"',
+        )
+        expect(scrubbed).not.toContain('SAVE10')
+        expect(scrubbed).not.toContain('SAVE#')
+
+        await pickCouponBox({
+            domain: freshDomain(),
+            outline: '- [12] button "Remove SAVE10"\n- [7] textbox "Promo"',
+        })
+        const [messages] = chatMock.mock.calls[0] as unknown as [
+            { content: string }[],
+        ]
+        expect(messages[1]!.content).not.toMatch(/SAVE10|SAVE#/)
+        expect(messages[1]!.content).toContain('[12] button "Remove [code]"')
+    })
+
+    it('keeps masked page text the pick needs: pack sizes, durations, capitalized words', () => {
+        const outline = [
+            '- [3] button "#-in-# Pack"',
+            '- [4] button "##-Day Return"',
+            '- text "Total## Cart# A## ##in first purchase#"',
+        ].join('\n')
+        expect(scrubOutline(outline)).toBe(outline)
+        expect(scrubOutline('- [5] button "Remove SAVE# save##"')).toBe(
+            '- [5] button "Remove [code] [code]"',
+        )
+    })
+
+    it('redacts an already-masked code chip (the extension sends "SAVE##") and zero-width splits', () => {
+        expect(scrubOutline('- [12] button "Remove SAVE##"')).toBe(
+            '- [12] button "Remove [code]"',
+        )
+        expect(scrubOutline('- [12] button "Remove save​10"')).toBe(
+            '- [12] button "Remove [code]"',
+        )
+        expect(scrubOutline('- text "Order Summary ## total"')).toBe(
+            '- text "Order Summary ## total"',
+        )
+    })
+
+    it('masks an email whose local part carries digits as an email, not as a code', () => {
+        expect(scrubOutline('- text "jane2@mail.example.com"')).toBe(
+            '- text "[email]"',
         )
     })
 

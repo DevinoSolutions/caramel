@@ -180,6 +180,76 @@ describe('typing into a framework-controlled box', () => {
 
 describe('reading the verdict off the total', () => {
     it(
+        'a total area that re-renders first and only later shows the discount is a saving (T-10533)',
+        async () => {
+            // kipling-usa.com Shopify checkout, 2026-10-30: right after Apply
+            // the summary re-drew the total row with the same number, and the
+            // discounted total landed about 2.5s later. The redraw ended the
+            // wait, the unchanged number ruled the code out, and the shopper
+            // was told nothing worked while the order carried -$11.24.
+            document.body.innerHTML = PROMO_BOX + TOTAL
+            const btn = document.getElementById('ap')
+            btn.addEventListener('click', () => {
+                setTimeout(() => setTotal('USD $100.00'), 100)
+                setTimeout(() => setTotal('USD $80.00'), 2500)
+            })
+
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
+            const res = await applyCoupon('SAVE20', rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(80)
+        },
+        SLOW,
+    )
+
+    it(
+        'a placeholder total mid re-draw does not end the wait either (T-10533)',
+        async () => {
+            document.body.innerHTML = PROMO_BOX + TOTAL
+            const btn = document.getElementById('ap')
+            btn.addEventListener('click', () => {
+                setTimeout(() => setTotal('$0.00'), 100)
+                setTimeout(() => setTotal('$100.00'), 400)
+                setTimeout(() => setTotal('$80.00'), 2500)
+            })
+
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
+            const res = await applyCoupon('SAVE20', rec)
+
+            expect(res.success).toBe(true)
+            expect(res.newTotal).toBe(80)
+        },
+        SLOW,
+    )
+
+    it(
+        'a refusal drawn after a same-number re-draw still ends the wait quickly (T-10533)',
+        async () => {
+            // The extra wait after a re-draw must not cost a refused code the
+            // whole window: the store's own refusal of this code ends it.
+            document.body.innerHTML = PROMO_BOX + TOTAL
+            const btn = document.getElementById('ap')
+            btn.addEventListener('click', () => {
+                setTimeout(() => setTotal('USD $100.00'), 100)
+                setTimeout(() => {
+                    const msg = document.createElement('p')
+                    msg.textContent = 'Enter a valid discount code'
+                    btn.parentElement.appendChild(msg)
+                }, 400)
+            })
+
+            const rec = await caramelDiscoveredRecord(NO_CONFIG)
+            const startedAt = performance.now()
+            const res = await applyCoupon('NOPE', rec)
+
+            expect(res.success).toBe(false)
+            expect(performance.now() - startedAt).toBeLessThan(4000)
+        },
+        SLOW,
+    )
+
+    it(
         'a total that dipped and came back within a second is not a saving',
         async () => {
             // A cart that re-prices after the apply call: the summary

@@ -271,7 +271,9 @@ const idx = (outline, re) => {
 
 // The store's answer to a code typed into `inputId` and submitted with
 // `buttonId`: 'drop' takes $20 off for SAVE20, 'says-yes' prints an accepted
-// message but the total never moves, 'refuse' prints a rejection.
+// message but the total never moves, 'refuse' prints a rejection,
+// 'not-recognised' refuses every code in johnvarvatos.com's words, the same
+// sentence each time.
 function wireStore(inputId, buttonId, behaviour) {
     const btn = document.getElementById(buttonId)
     btn?.addEventListener('click', () => {
@@ -285,6 +287,9 @@ function wireStore(inputId, buttonId, behaviour) {
                 msg.textContent = 'Discount applied'
             } else if (behaviour === 'says-yes') {
                 msg.textContent = `Coupon ${code} applied!`
+            } else if (behaviour === 'not-recognised') {
+                msg.textContent =
+                    'Promo code is not recognised. Please try another.'
             } else {
                 msg.textContent = `Sorry, ${code} is not a valid code.`
             }
@@ -547,6 +552,19 @@ describe('flags on, no config: the money rule holds whatever box was used', () =
         })
     }
 
+    // johnvarvatos.com (T-14842, 2026-11-06): the store refused each code with
+    // "Promo code is not recognised. Please try another.", the card marked
+    // every one, and not one 'failed' reached the catalog: the report gate did
+    // not count those words as a refusal, so each verdict was withheld.
+    it('a box the rules found: each code the store did not recognise is reported failed', async () => {
+        freshPage(RULES_BOX + TOTAL)
+        wireStore('dc', 'ap', 'not-recognised')
+        await run()
+        expect(t.savings).toEqual([])
+        expect(reported('worked')).toEqual([])
+        expect(reported('failed')).toHaveLength(2)
+    })
+
     // Wrong picks: each ends in the codes to copy, with nothing clicked that
     // could leave the cart and nothing typed where it should not be.
     const WRONG = {
@@ -614,7 +632,7 @@ describe('flags on, no config: the money rule holds whatever box was used', () =
             expect(t.page.filter(e => e.startsWith('submit:'))).toEqual([])
             if (c.untouched)
                 expect(document.getElementById(c.untouched).value).toBe('')
-            expect(lastModal().message).toMatch(/couldn't find the promo box/)
+            expect(lastModal().message).toMatch(/takes promo codes at checkout/)
             handedOver()
             expect(t.overlay).toBe(false)
             expect(location.pathname).toBe('/cart')

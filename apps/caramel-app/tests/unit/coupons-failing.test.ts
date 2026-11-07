@@ -2,8 +2,13 @@ import {
     FAILING_MIN_FAIL_WEIGHT,
     FAILING_WINDOW_DAYS,
     isRecentlyFailing,
+    isRecentlyRefused,
     KEEPS_FAILING_MIN_FAIL_WEIGHT,
     keepsFailing,
+    MAX_LOW_TRUST_FAIL_WEIGHT,
+    PROVEN_COUPON_STATUSES,
+    REFUSED_MIN_FAIL_WEIGHT,
+    RESTRICTED_COUPON_STATUSES,
 } from '@/lib/coupons'
 import { listCoupons, listStoreCoupons } from '@/lib/couponsRepo'
 import { formatFailedAgo } from '@/lib/relativeTime'
@@ -331,9 +336,9 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
         // A success is NOT compared here: it clears failures through the worked
         // quorum folded into fail_weight, so one forged success cannot un-sink.
         expect(order).not.toContain('last_worked_at')
-        // false (not failing) sorts first; the ranking order breaks ties.
+        // false (not failing) sorts first; proof, then the ranking order, break ties.
         expect(order).toMatch(
-            /\)\) ASC, rating DESC, created_at DESC, id DESC\s+LIMIT/,
+            /\)\) ASC, \(status IN \(\?\)\) DESC, \(status IN \(\?(,\s*\?)*\)\) DESC, \(id IN \(\s*SELECT s\.coupon_id[\s\S]*?\)\) ASC, CASE WHEN status IN \(\?\) THEN updated_at END DESC NULLS LAST, rating DESC, created_at DESC, id DESC\s+LIMIT/,
         )
         // The thresholds are the coupons.ts constants, bound as parameters.
         expect(values).toContain(FAILING_MIN_FAIL_WEIGHT)
@@ -345,10 +350,11 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
 
         const { sql, values } = listQuery()
         const order = orderBy(sql)
-        // Two coupon_signals subqueries (sink, then collapse), both ASC, then ranking.
-        expect(order.match(/FROM coupon_signals s/g)).toHaveLength(2)
+        // Three coupon_signals subqueries (sink, then collapse, then refused
+        // inside the proof tier, T-13810), all ASC, then ranking.
+        expect(order.match(/FROM coupon_signals s/g)).toHaveLength(3)
         expect(order).toMatch(
-            /\)\) ASC,\s*\(id IN \(\s*SELECT s\.coupon_id[\s\S]*\)\) ASC, rating DESC, created_at DESC, id DESC\s+LIMIT/,
+            /\)\) ASC,\s*\(id IN \(\s*SELECT s\.coupon_id[\s\S]*\)\) ASC, \(status IN [\s\S]* DESC NULLS LAST, rating DESC, created_at DESC, id DESC\s+LIMIT/,
         )
         // Each subquery binds its own fail_weight threshold, in sink-then-collapse order.
         expect(values.indexOf(FAILING_MIN_FAIL_WEIGHT)).toBeGreaterThanOrEqual(
@@ -356,6 +362,45 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
         )
         expect(values.indexOf(KEEPS_FAILING_MIN_FAIL_WEIGHT)).toBeGreaterThan(
             values.indexOf(FAILING_MIN_FAIL_WEIGHT),
+        )
+    })
+
+    it('proven codes lead each group, freshest proof first, then restricted ones, BEFORE rating (shopmicas.com, 2026-10-29: codes proven that day ranked below 20 older or unverified ones)', async () => {
+        await listStoreCoupons('example.com', 20)
+
+        const { sql, values } = listQuery()
+        const order = orderBy(sql)
+        // After both failing sinks, before the rating order.
+        expect(order).toMatch(
+            /\)\) ASC, \(status IN \(\?\)\) DESC, \(status IN \(\?(,\s*\?)*\)\) DESC, \(id IN \(\s*SELECT s\.coupon_id[\s\S]*?\)\) ASC, CASE WHEN status IN \(\?\) THEN updated_at END DESC NULLS LAST, rating DESC, created_at DESC, id DESC\s+LIMIT/,
+        )
+        // Among proven codes, the most recently proven lead (updated_at is
+        // the pipeline row's own timestamp, moved by each verdict).
+        // The statuses come from coupons.ts, bound as parameters, proven first.
+        const proven = values.indexOf(PROVEN_COUPON_STATUSES[0])
+        expect(PROVEN_COUPON_STATUSES).toEqual(['valid'])
+        expect(proven).toBeGreaterThanOrEqual(0)
+        for (const status of RESTRICTED_COUPON_STATUSES) {
+            expect(values.lastIndexOf(status)).toBeGreaterThan(proven)
+        }
+        // Proof only ORDERS: the WHERE (and so the count) is unchanged.
+        expect(beforeOrderBy(sql)).not.toMatch(/\) DESC/)
+    })
+
+    it('a code a store refused goes after the unrefused codes of its OWN proof tier, never across one (T-13810)', async () => {
+        await listStoreCoupons('example.com', 20)
+
+        const { sql, values } = listQuery()
+        const order = orderBy(sql)
+        // proven DESC, restricted DESC (together: the tier), then refused ASC,
+        // then freshness of proof: the refused key sits strictly inside a tier.
+        expect(order).toMatch(
+            /\(status IN \(\?\)\) DESC, \(status IN \(\?(,\s*\?)*\)\) DESC, \(id IN \(\s*SELECT s\.coupon_id\s+FROM coupon_signals s\s+WHERE s\.fail_weight >= \?/,
+        )
+        // Its threshold is coupons.ts's, bound after the sink and collapse ones.
+        expect(REFUSED_MIN_FAIL_WEIGHT).toBe(1)
+        expect(values.lastIndexOf(REFUSED_MIN_FAIL_WEIGHT)).toBeGreaterThan(
+            values.indexOf(KEEPS_FAILING_MIN_FAIL_WEIGHT),
         )
     })
 
@@ -367,7 +412,7 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
             /^ORDER BY \(id IN \(\s*SELECT s\.coupon_id/,
         )
         expect(orderBy(sql)).toContain(
-            ') ASC, rating DESC, created_at DESC, id DESC',
+            'DESC NULLS LAST, rating DESC, created_at DESC, id DESC',
         )
     })
 
@@ -393,5 +438,45 @@ describe('failing codes sink in SQL on store-scoped reads (sink, never hide)', (
         for (const q of counts) {
             expect(q.sql).not.toContain('coupon_signals')
         }
+    })
+})
+
+describe('isRecentlyRefused: one step inside the tier, never more (T-13810)', () => {
+    const now = Date.parse('2026-11-04T12:00:00Z')
+    const hourAgo = new Date(now - 60 * 60 * 1000).toISOString()
+
+    it('one distinct reporter of any trust is enough to order a code after its unrefused peers', () => {
+        expect(
+            isRecentlyRefused({ failWeight: 1, lastFailedAt: hourAgo }, now),
+        ).toBe(true)
+        // The whole low-trust pool weighs exactly this much, so no swarm of
+        // anonymous reports reaches the sink: refused is all it can do.
+        expect(MAX_LOW_TRUST_FAIL_WEIGHT).toBe(REFUSED_MIN_FAIL_WEIGHT)
+        expect(MAX_LOW_TRUST_FAIL_WEIGHT).toBeLessThan(FAILING_MIN_FAIL_WEIGHT)
+        expect(
+            isRecentlyFailing({ failWeight: 1, lastFailedAt: hourAgo }, now),
+        ).toBe(false)
+    })
+
+    it('a cleared quorum, a stale failure or no timestamp is not refused', () => {
+        expect(
+            isRecentlyRefused({ failWeight: 0, lastFailedAt: hourAgo }, now),
+        ).toBe(false)
+        const stale = new Date(
+            now - (FAILING_WINDOW_DAYS + 1) * 24 * 60 * 60 * 1000,
+        ).toISOString()
+        expect(
+            isRecentlyRefused({ failWeight: 3, lastFailedAt: stale }, now),
+        ).toBe(false)
+        expect(
+            isRecentlyRefused({ failWeight: 3, lastFailedAt: null }, now),
+        ).toBe(false)
+    })
+
+    it('every sunk code is also refused, so the tier order never contradicts the sink', () => {
+        for (const failWeight of [4, 6, 12])
+            expect(
+                isRecentlyRefused({ failWeight, lastFailedAt: hourAgo }, now),
+            ).toBe(true)
     })
 })

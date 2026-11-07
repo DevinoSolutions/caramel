@@ -41,6 +41,15 @@ name: Release – Extension
 #
 # Edge developer registration and publishing are free; registering the item once
 # in Partner Center to obtain the Product ID is the only human step.
+#
+# Chrome HOLD (2026-11-02): a tag does not upload to the Chrome Web Store while
+# a newer draft than the published version is already in flight. Uploading
+# replaces that draft and restarts Google's review: 1.4.29, 1.4.30 and 1.4.32
+# were each submitted, and Chrome kept serving 1.4.28 for five days because
+# every next tag swapped out the draft under review. A held tag's Chrome
+# package is uploaded later, once the earlier version is live, with
+#   gh workflow run release-extension.yml --ref vX.Y.Z -f only_chrome=true
+# (`replace_chrome_draft=true` overrides the hold on purpose).
 
 on:
   push:
@@ -49,6 +58,14 @@ on:
     inputs:
       dry_run:
         description: 'Run the guards, build and package, but skip every store upload and the GitHub Release'
+        type: boolean
+        default: false
+      only_chrome:
+        description: 'Upload to the Chrome Web Store only (skip AMO, Edge, Apple and the GitHub Release). For a tag whose Chrome upload was held while an earlier version was in review.'
+        type: boolean
+        default: false
+      replace_chrome_draft:
+        description: 'Upload to Chrome even when a newer draft is already in flight. This REPLACES that draft and restarts its review.'
         type: boolean
         default: false
 
@@ -442,7 +459,87 @@ jobs:
           name: extension-chrome
           path: .
 
+      # HOLD — never replace a draft that is already in flight (see the header).
+      # The DRAFT version comes from v1.1 items.get?projection=DRAFT, the live
+      # one from Chrome's update service, the same two reads the guard makes.
+      # A draft newer than the live version is a submission in review, or one
+      # nobody has submitted yet; uploading over it would restart its review,
+      # so this release's Chrome package waits. A hold is deliberate, so the job
+      # stays green; any read that fails is a hard failure, never a silent pass.
+      - name: Decide whether to upload (hold while a draft is in flight)
+        id: hold
+        env:
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+          REPLACE_DRAFT: ${{ inputs.replace_chrome_draft }}
+        run: |
+          set -euo pipefail
+          http=$(curl -sS -o /tmp/cws-token.json -w '%{http_code}' \
+            -X POST https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=${CHROME_CLIENT_ID}" \
+            --data-urlencode "client_secret=${CHROME_CLIENT_SECRET}" \
+            --data-urlencode "refresh_token=${CHROME_REFRESH_TOKEN}" \
+            --data-urlencode "grant_type=refresh_token")
+          if [ "$http" != "200" ]; then
+            echo "::error::Google OAuth token exchange returned HTTP $http; cannot read the Chrome draft."
+            exit 1
+          fi
+          access_token=$(jq -er '.access_token' /tmp/cws-token.json)
+
+          http=$(curl -sS -o /tmp/cws-item.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${access_token}" \
+            -H "x-goog-api-version: 2" \
+            "https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_EXTENSION_ID}?projection=DRAFT")
+          if [ "$http" != "200" ]; then
+            echo "::error::Chrome Web Store items.get returned HTTP $http; cannot read the draft version."
+            exit 1
+          fi
+          draft=$(jq -r '.crxVersion // empty' /tmp/cws-item.json)
+          if [ -z "$draft" ]; then
+            echo "::error::items.get returned no crxVersion; cannot tell what the draft is."
+            exit 1
+          fi
+
+          curl -sS --fail-with-body -o /tmp/cws-updatecheck.xml \
+            "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=999.0&acceptformat=crx3&x=id%3D${CHROME_EXTENSION_ID}%26uc"
+          if grep -q -e '<!DOCTYPE' -e '<!ENTITY' /tmp/cws-updatecheck.xml; then
+            echo "::error::Chrome update service response carried a doctype/entity declaration; refusing to parse it."
+            exit 1
+          fi
+          live=$(grep -o '<updatecheck [^>]*' /tmp/cws-updatecheck.xml | grep -o ' version="[0-9.]*"' | head -1 | cut -d'"' -f2)
+          if [ -z "$live" ]; then
+            echo "::error::Chrome update service response carried no published version."
+            exit 1
+          fi
+
+          # "a is greater than b" for dotted numeric versions.
+          newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
+
+          echo "Chrome: live $live, draft $draft, this release $RELEASE_VERSION"
+          upload=true
+          reason=""
+          if [ "$draft" = "$RELEASE_VERSION" ]; then
+            upload=false
+            reason="Draft \`$draft\` is already this release's package; nothing to upload."
+          elif newer "$draft" "$live" && [ "${REPLACE_DRAFT:-false}" != "true" ]; then
+            upload=false
+            reason="Draft \`$draft\` is newer than the live \`$live\`, so it is in review or waiting to be submitted. Uploading \`$RELEASE_VERSION\` would replace it and restart its review. Once \`$draft\` is live, run \`gh workflow run release-extension.yml --ref v$RELEASE_VERSION -f only_chrome=true\` (add \`-f replace_chrome_draft=true\` to replace the draft on purpose)."
+          fi
+          echo "upload=$upload" >> "$GITHUB_OUTPUT"
+          if [ "$upload" = "false" ]; then
+            echo "::warning::Chrome upload held: $reason"
+            {
+              echo "### Chrome Web Store: upload HELD"
+              echo ""
+              echo "$reason"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload to Chrome Web Store (upload-only)
+        if: steps.hold.outputs.upload == 'true'
         # Held at v5: v7 moves to the Chrome Web Store API v2, which needs a
         # `publisher-id` we hold no secret for (see the guard comment above).
         # dependabot.yml ignores its majors until CHROME_PUBLISHER_ID exists.
@@ -456,6 +553,7 @@ jobs:
           publish: false
 
       - name: Note that the upload is a draft
+        if: steps.hold.outputs.upload == 'true'
         run: |
           {
             echo "### Chrome Web Store"
@@ -468,7 +566,7 @@ jobs:
   publish_firefox:
     name: '🚀 Publish to Firefox Add-ons (AMO)'
     needs: [guard, package]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.only_chrome }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # DevinoSolutions/artifact/download@v1 authenticates to the self-hosted store with a
@@ -773,7 +871,7 @@ jobs:
   publish_edge:
     name: '🚀 Publish to Microsoft Edge Add-ons'
     needs: [guard, package]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.only_chrome }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # DevinoSolutions/artifact/download@v1 authenticates to the self-hosted store with a
@@ -894,7 +992,7 @@ jobs:
   publish_safari:
     name: '🚀 Publish to Apple App Store (Safari & iOS)'
     needs: [guard, package]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.only_chrome }}
     runs-on: macos-latest
     # DevinoSolutions/artifact/download@v1 authenticates to the self-hosted store with a
     # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
@@ -1001,13 +1099,21 @@ jobs:
           export APPSTORE_CONNECT_ISSUER_ID="$ASC_ISSUER_ID"
           export APPSTORE_CONNECT_API_KEY="$(cat private_keys/AuthKey_${ASC_KEY_ID}.p8)"
 
-          # --limit 50 is the max the ASC API allows for sub-resources
-          asc testflight builds list \
-            --filter-bundle-ids "$SAFARI_BUNDLE_ID" \
-            --include-expired --limit 50 \
-            --api-key-id "$ASC_KEY_ID" \
-            --api-issuer "$ASC_ISSUER_ID" \
-            --json > builds.json || true
+          # --limit 50 is the max the ASC API allows for sub-resources.
+          # App Store Connect answers this with a 500 now and then (v1.4.24
+          # run 40584019100): the error body is not a list, so ask again, up
+          # to 4 times, until it is one.
+          for attempt in 1 2 3 4; do
+            asc testflight builds list \
+              --filter-bundle-ids "$SAFARI_BUNDLE_ID" \
+              --include-expired --limit 50 \
+              --api-key-id "$ASC_KEY_ID" \
+              --api-issuer "$ASC_ISSUER_ID" \
+              --json > builds.json || true
+            if jq -e 'type == "array"' builds.json > /dev/null 2>&1; then break; fi
+            echo "TestFlight build list attempt $attempt did not return a list; retrying in 20s"
+            sleep 20
+          done
 
           echo "=== RAW builds.json ==="
           cat builds.json
@@ -1034,25 +1140,20 @@ jobs:
           echo "macOS current build: $MACOS_CURRENT_BUILD"
           echo "iOS   current build: $IOS_CURRENT_BUILD"
 
+          # The null check above passes on an EMPTY entry (jq prints nothing
+          # for an unreadable builds.json), and $((""+1)) is 1: v1.4.24 went
+          # out stamped CFBundleVersion 1 and Apple refused it. Only digits pass.
+          case "$MACOS_CURRENT_BUILD" in ''|*[!0-9]*)
+            echo "ERROR: macOS build number '$MACOS_CURRENT_BUILD' is not a number. Aborting."
+            exit 1 ;;
+          esac
+          case "$IOS_CURRENT_BUILD" in ''|*[!0-9]*)
+            echo "ERROR: iOS build number '$IOS_CURRENT_BUILD' is not a number. Aborting."
+            exit 1 ;;
+          esac
+
           echo "IOS_BUILD_NUM=$((IOS_CURRENT_BUILD+1))"     >> $GITHUB_ENV
           echo "MACOS_BUILD_NUM=$((MACOS_CURRENT_BUILD+1))" >> $GITHUB_ENV
-
-      - name: Import distribution cert
-        uses: apple-actions/import-codesign-certs@v7
-        with:
-          p12-file-base64: ${{ secrets.APPLE_CERT_P12 }}
-          p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
-          keychain: signing_temp
-          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
-
-      - name: Import development cert
-        uses: apple-actions/import-codesign-certs@v7
-        with:
-          create-keychain: false
-          keychain: signing_temp
-          p12-file-base64: ${{ secrets.APPLE_DEV_CERT_P12 }}
-          p12-password: ${{ secrets.APPLE_DEV_CERT_PASSWORD }}
-          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
 
       - name: Convert to Safari app (macOS & iOS)
         run: |
@@ -1321,7 +1422,7 @@ jobs:
 
       # The archive steps' -allowProvisioningUpdates mints a fresh "Apple
       # Development: Created via API" certificate whenever the keychain holds
-      # no valid one (the imported APPLE_DEV_CERT_P12 dates from 2025-05), and
+      # no valid one (none is imported), and
       # its private key dies with this runner. Ten of them piled up (v1.2.0 to
       # v1.4.12, one per run) until Apple's development-certificate cap made
       # every Safari release from v1.4.13 fail at archive with "Your account has
@@ -1345,7 +1446,7 @@ jobs:
         publish_safari,
         publish_edge,
       ]
-    if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}
+    if: ${{ !inputs.dry_run && !inputs.only_chrome && github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # DevinoSolutions/artifact/download@v1 authenticates to the self-hosted store with a

@@ -44,6 +44,8 @@ function overview(): ProfileOverview {
         },
         favorites: [],
         siteSuggestions: { identifyingCount: 0 },
+        couponBoxProposals: { count: 0 },
+        submittedCodes: { linkedCount: 0 },
         reports: { reportCount: 0, confirmedCount: null, shoppersHelped: null },
     }
 }

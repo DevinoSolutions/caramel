@@ -1,11 +1,16 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initBackground } from '../background.js'
-import { initCaramelBase } from '../caramel-base.js'
+import {
+    caramelMarkOwnHost,
+    caramelOwnHost,
+    initCaramelBase,
+} from '../caramel-base.js'
 import {
     _caramelEvaluatedUrls,
     caramelHandleUrlChanged,
     initCouponRunner,
 } from '../coupon-runner.js'
+import { caramelNoteNoBoxCard } from '../final-modal.js'
 
 // startCheckoutDetection is what a re-run COSTS, so it is replaced where
 // coupon-runner reads it (module import, not a global).
@@ -208,6 +213,58 @@ describe('content: re-answering the question when the URL moves', () => {
         expect(caramelHandleUrlChanged('')).toBe(false)
 
         expect(runs).toEqual([])
+    })
+
+    // T-11235, measured live on Full Source 2026-11-05: a one-page checkout
+    // moves from its guest-info step to #shipping by hash. A shopper who ran
+    // Caramel on the info step got "We couldn't find the promo box on this
+    // page", and that card stayed up on #shipping, where the box is. Every
+    // re-detection skips while a card is up, so the run that would have saved
+    // $11.81 was never offered.
+    describe('a card that said this page has no promo box', () => {
+        const card = noBoxAt => {
+            const host = caramelMarkOwnHost(document.createElement('div'))
+            host.id = 'caramel-final-overlay'
+            if (noBoxAt) host.setAttribute('data-caramel-no-box-at', noBoxAt)
+            document.body.append(host)
+            return host
+        }
+        const cardUp = () => !!caramelOwnHost('caramel-final-overlay')
+
+        beforeEach(() => {
+            document.body.innerHTML = ''
+        })
+
+        it('gives way when the page moves on, and detection runs', () => {
+            card('https://store.example/checkout#info')
+            caramelHandleUrlChanged('https://store.example/checkout#shipping')
+
+            expect(cardUp()).toBe(false)
+            expect(runs).toHaveLength(1)
+        })
+
+        it('is never a card with a saving or a code on it', () => {
+            card(null)
+            caramelHandleUrlChanged('https://store.example/checkout#shipping')
+
+            expect(cardUp()).toBe(true)
+        })
+
+        it('is kept when the page reports the URL it was shown on', () => {
+            card('https://store.example/checkout#info')
+            caramelHandleUrlChanged('https://store.example/checkout#info')
+
+            expect(cardUp()).toBe(true)
+        })
+
+        it('is noted with the page the run looked at', () => {
+            const host = card(null)
+            caramelNoteNoBoxCard('https://store.example/checkout#info')
+
+            expect(host.getAttribute('data-caramel-no-box-at')).toBe(
+                'https://store.example/checkout#info',
+            )
+        })
     })
 
     it('is reached from the background message, and answers it', () => {

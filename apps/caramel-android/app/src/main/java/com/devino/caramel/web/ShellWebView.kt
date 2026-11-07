@@ -28,6 +28,12 @@ interface ShellHost {
      */
     fun interceptSignInRoute(url: String): Boolean
 
+    /**
+     * True while the sign-in loop cap (SignInLoopGuard, T-10055) has parked the shell on "sign in": no
+     * main-frame navigation and no load the shell would post on its own may run. Main thread only.
+     */
+    fun isParkedOnSignIn(): Boolean
+
     /** A page tried to navigate to the handoff redeem route, which only the shell may load; it was cancelled. Main thread. */
     fun onRefusedRedeemNavigation()
 
@@ -61,6 +67,11 @@ class ShellWebViewClient(private val host: ShellHost) : WebViewClient() {
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         // Iframes are the page's own embeds; only top-level navigation changes what the shopper is looking at.
         if (!request.isForMainFrame) return false
+        if (host.isParkedOnSignIn()) {
+            // The sign-in screen covers the page, so nothing here is a tap. No URL in the log.
+            Log.w(TAG, "Cancelled a main-frame navigation: the shell is parked on sign-in until the shopper taps")
+            return true
+        }
         val url = request.url.toString()
         val hadGesture = navigationHadGesture
         navigationHadGesture = NavigationPolicy.nextGestureState(request.hasGesture(), request.isRedirect, hadGesture)
@@ -89,7 +100,7 @@ class ShellWebViewClient(private val host: ShellHost) : WebViewClient() {
         // Runs on a WebView background thread: the shopper-facing work goes back to the main thread.
         view.post {
             host.onBlockedNavigation()
-            view.loadGuarded(ShellRoutes.homeUrl())
+            if (!host.isParkedOnSignIn()) view.loadGuarded(ShellRoutes.homeUrl())
         }
         return WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
     }
@@ -109,7 +120,9 @@ class ShellWebViewClient(private val host: ShellHost) : WebViewClient() {
         if (url == null) return
         val allowed = AppLinkGuard.allowedTarget(url)
         if (allowed != null && host.interceptSignInRoute(allowed)) {
-            view.post { view.loadGuarded(ShellRoutes.homeUrl()) }
+            // Checked when the load runs: a page that keeps routing itself to /login would otherwise get a
+            // home load per lap, forever. Parked, the shell loads nothing until the shopper taps (T-10055).
+            view.post { if (!host.isParkedOnSignIn()) view.loadGuarded(ShellRoutes.homeUrl()) }
             return
         }
         host.onPageVisited(url, view.canGoBack())
@@ -174,7 +187,7 @@ fun createShellWebView(context: Context, host: ShellHost): WebView {
     settings.javaScriptCanOpenWindowsAutomatically = false
     settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
     settings.setSafeBrowsingEnabled(true) // needs Google Play services: a no-op on Fire
-    settings.userAgentString = ShellUserAgent.append(settings.userAgentString, BuildConfig.VERSION_NAME, Build.MANUFACTURER)
+    settings.userAgentString = ShellUserAgent.append(settings.userAgentString, BuildConfig.VERSION_NAME, Build.MANUFACTURER, BuildConfig.VERSION_CODE)
     webView.webViewClient = ShellWebViewClient(host)
     return webView
 }

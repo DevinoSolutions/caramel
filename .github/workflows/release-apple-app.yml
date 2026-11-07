@@ -22,10 +22,10 @@ name: Release – Apple App (iOS container + Safari extension)
 #     or uploads, so CI proves the build before anything can ship.
 #
 # Secrets reused from release-extension.yml (names only): ASC_KEY_ID,
-# ASC_ISSUER_ID, ASC_API_KEY_BASE64, APPLE_TEAM_ID, APPLE_CERT_P12,
-# APPLE_CERT_PASSWORD, APPLE_DEV_CERT_P12, APPLE_DEV_CERT_PASSWORD,
-# KEYCHAIN_PASSWORD, APPLE_ID, APPLE_APP_PASSWORD. Repository variable:
-# SAFARI_BUNDLE_ID (com.devino.Caramel).
+# ASC_ISSUER_ID, ASC_API_KEY_BASE64, APPLE_TEAM_ID, APPLE_ID,
+# APPLE_APP_PASSWORD. Repository variable: SAFARI_BUNDLE_ID
+# (com.devino.Caramel). No certificate is imported: xcodebuild mints its own
+# through the App Store Connect API key (see the revoke step below).
 #
 # Build number (CFBundleVersion): highest iOS build already on the app + 1,
 # read from the App Store Connect API (asc-testflight.mjs next-build-number).
@@ -279,25 +279,6 @@ jobs:
           fi
           echo "number=${number}" >> "$GITHUB_OUTPUT"
           echo "CFBundleVersion for this run: ${number}" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Import distribution cert
-        if: github.event_name != 'pull_request'
-        uses: apple-actions/import-codesign-certs@v7
-        with:
-          p12-file-base64: ${{ secrets.APPLE_CERT_P12 }}
-          p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
-          keychain: signing_temp
-          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
-
-      - name: Import development cert
-        if: github.event_name != 'pull_request'
-        uses: apple-actions/import-codesign-certs@v7
-        with:
-          create-keychain: false
-          keychain: signing_temp
-          p12-file-base64: ${{ secrets.APPLE_DEV_CERT_P12 }}
-          p12-password: ${{ secrets.APPLE_DEV_CERT_PASSWORD }}
-          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
 
       - name: Archive (unsigned, pull request)
         if: github.event_name == 'pull_request'

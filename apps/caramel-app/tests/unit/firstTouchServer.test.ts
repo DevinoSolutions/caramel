@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const sentry = vi.hoisted(() => ({
     captureMessage: vi.fn(),
     captureException: vi.fn(),
+    addBreadcrumb: vi.fn(),
 }))
 vi.mock('@sentry/nextjs', () => sentry)
 
@@ -37,6 +38,7 @@ function headersWithCookie(cookie: string | null): Headers {
 beforeEach(() => {
     sentry.captureMessage.mockClear()
     sentry.captureException.mockClear()
+    sentry.addBreadcrumb.mockClear()
 })
 
 describe('readFirstTouchFromHeaders', () => {
@@ -99,42 +101,246 @@ describe('readFirstTouchFromHeaders', () => {
 
 describe('readPosthogDistinctId', () => {
     const token = 'phc_test_token'
+    const cookieName = `ph_${token}_posthog`
+    // SYNTHETIC cookie builder (not captured from a real visitor): posthog-js
+    // 1.438.x writes `encodeURIComponent(JSON.stringify(props))` for the keys
+    // in its COOKIE_PERSISTED_PROPERTIES (storage.js cookieStore._set).
     const phCookie = (value: unknown) =>
-        `ph_${token}_posthog=${encodeURIComponent(JSON.stringify(value))}`
+        `${cookieName}=${encodeURIComponent(JSON.stringify(value))}`
+    // SYNTHETIC full-fidelity anonymous snapshot in the real key layout.
+    const syntheticAnonymousSnapshot = {
+        $device_id: '00000000-0000-7000-8000-000000000001',
+        distinct_id: '00000000-0000-7000-8000-000000000001',
+        $sesid: [
+            1798000000000,
+            '00000000-0000-7000-8000-000000000002',
+            1798000000000,
+        ],
+        $epp: true,
+        $initial_person_info: {
+            r: '$direct',
+            u: 'https://example.test/welcome?utm_source=a%20b&x=1',
+        },
+        $user_state: 'anonymous',
+    }
 
-    it('reads distinct_id out of the posthog-js persistence cookie', () => {
-        const cookie = `a=1; ${phCookie({ distinct_id: 'anon-123', $sesid: [1, 'x', 2] })}`
-        expect(readPosthogDistinctId(headersWithCookie(cookie), token)).toBe(
-            'anon-123',
-        )
+    function lastReport(): { extra: Record<string, unknown> } {
+        const calls = sentry.captureMessage.mock.calls
+        const call = calls[calls.length - 1]
+        if (!call) throw new Error('expected a Sentry captureMessage call')
+        return call[1] as { extra: Record<string, unknown> }
+    }
+
+    describe('accepted shapes', () => {
+        it('reads an anonymous snapshot in the real posthog-js key layout', () => {
+            expect(
+                readPosthogDistinctId(
+                    headersWithCookie(
+                        `a=1; ${phCookie(syntheticAnonymousSnapshot)}`,
+                    ),
+                    token,
+                ),
+            ).toBe('00000000-0000-7000-8000-000000000001')
+            expect(sentry.captureMessage).not.toHaveBeenCalled()
+        })
+
+        it('reads an identified snapshot (distinct_id is the user id)', () => {
+            const cookie = phCookie({
+                ...syntheticAnonymousSnapshot,
+                distinct_id: 'user-uuid-1',
+                $user_state: 'identified',
+            })
+            expect(
+                readPosthogDistinctId(headersWithCookie(cookie), token),
+            ).toBe('user-uuid-1')
+            expect(sentry.captureMessage).not.toHaveBeenCalled()
+        })
+
+        it('accepts a distinct id of exactly the 200-character cap', () => {
+            const id = 'x'.repeat(200)
+            expect(
+                readPosthogDistinctId(
+                    headersWithCookie(phCookie({ distinct_id: id })),
+                    token,
+                ),
+            ).toBe(id)
+        })
+
+        it('reads the minimal legacy shape with only distinct_id', () => {
+            expect(
+                readPosthogDistinctId(
+                    headersWithCookie(phCookie({ distinct_id: 'anon-123' })),
+                    token,
+                ),
+            ).toBe('anon-123')
+        })
+
+        it('survives percent-escapes and non-ASCII inside nested values', () => {
+            const cookie = phCookie({
+                distinct_id: 'anon-123',
+                $initial_person_info: {
+                    r: 'https://x.test/?q=100%25 café',
+                },
+            })
+            expect(
+                readPosthogDistinctId(headersWithCookie(cookie), token),
+            ).toBe('anon-123')
+        })
+
+        it('uses a readable duplicate when an earlier cookie of the same name is unreadable (and reports the bad one)', () => {
+            const cookie = `${cookieName}=%7Bnope; ${phCookie({ distinct_id: 'anon-123' })}`
+            expect(
+                readPosthogDistinctId(headersWithCookie(cookie), token),
+            ).toBe('anon-123')
+            expect(sentry.captureMessage).toHaveBeenCalledTimes(1)
+        })
+
+        it('ignores the _cpm metadata sidecar cookie and other tokens', () => {
+            const sidecar = `${cookieName}_cpm=${encodeURIComponent(JSON.stringify({ p: [], f: 'x' }))}`
+            expect(
+                readPosthogDistinctId(headersWithCookie(sidecar), token),
+            ).toBeNull()
+            expect(
+                readPosthogDistinctId(
+                    headersWithCookie(phCookie({ distinct_id: 'anon-123' })),
+                    'phc_other',
+                ),
+            ).toBeNull()
+            expect(sentry.captureMessage).not.toHaveBeenCalled()
+        })
+
+        it('is null with no cookie header or no headers (and says nothing)', () => {
+            expect(
+                readPosthogDistinctId(headersWithCookie(null), token),
+            ).toBeNull()
+            expect(readPosthogDistinctId(null, token)).toBeNull()
+            expect(sentry.captureMessage).not.toHaveBeenCalled()
+        })
     })
 
-    it('is null when the cookie belongs to another project token', () => {
-        expect(
-            readPosthogDistinctId(
-                headersWithCookie(phCookie({ distinct_id: 'anon-123' })),
-                'phc_other',
-            ),
-        ).toBeNull()
-        expect(sentry.captureMessage).not.toHaveBeenCalled()
+    describe('documented no-id states (null, no Sentry warning)', () => {
+        it('treats an empty snapshot as absent', () => {
+            expect(
+                readPosthogDistinctId(headersWithCookie(phCookie({})), token),
+            ).toBeNull()
+            expect(sentry.captureMessage).not.toHaveBeenCalled()
+            expect(sentry.addBreadcrumb).toHaveBeenCalledTimes(1)
+            expect(sentry.addBreadcrumb.mock.calls[0]![0]).toMatchObject({
+                category: 'analytics',
+                message: expect.stringContaining('absent_empty_object'),
+            })
+        })
+
+        it('treats the cookieless-mode sentinel as absent (it is shared by every visitor)', () => {
+            expect(
+                readPosthogDistinctId(
+                    headersWithCookie(
+                        phCookie({ distinct_id: '$posthog_cookieless' }),
+                    ),
+                    token,
+                ),
+            ).toBeNull()
+            expect(sentry.captureMessage).not.toHaveBeenCalled()
+            expect(sentry.addBreadcrumb).toHaveBeenCalledTimes(1)
+            expect(sentry.addBreadcrumb.mock.calls[0]![0]).toMatchObject({
+                category: 'analytics',
+                message: expect.stringContaining('absent_cookieless_sentinel'),
+            })
+        })
     })
 
-    it('reports an unreadable persistence cookie and makes no alias', () => {
-        expect(
+    describe('unreadable cookies (null + Sentry warning carrying a reason)', () => {
+        it.each<[string, string, string]>([
+            ['decode_error', `${cookieName}=%E0%A4%A`, 'decode_error'],
+            ['json_error', `${cookieName}=%7Bnope`, 'json_error'],
+            [
+                'not_object (double-encoded value decodes to a JSON string)',
+                phCookie(
+                    encodeURIComponent(
+                        JSON.stringify({ distinct_id: 'anon-123' }),
+                    ),
+                ),
+                'not_object',
+            ],
+            [
+                'distinct_id_missing',
+                phCookie({ $device_id: 'd', $user_state: 'anonymous' }),
+                'distinct_id_missing',
+            ],
+            [
+                'distinct_id_not_string',
+                phCookie({ distinct_id: 12345 }),
+                'distinct_id_not_string',
+            ],
+            [
+                'distinct_id_empty',
+                phCookie({ distinct_id: '' }),
+                'distinct_id_empty',
+            ],
+            [
+                'distinct_id_too_long',
+                phCookie({ distinct_id: 'x'.repeat(201) }),
+                'distinct_id_too_long',
+            ],
+        ])('%s', (_label, cookie, reason) => {
+            expect(
+                readPosthogDistinctId(headersWithCookie(cookie), token),
+            ).toBeNull()
+            expect(sentry.captureMessage).toHaveBeenCalledTimes(1)
+            expect(sentry.captureMessage.mock.calls[0]![1]).toMatchObject({
+                level: 'warning',
+                tags: { operation: 'posthog_distinct_id_cookie_parse' },
+                extra: { reason },
+            })
+        })
+
+        it('reports key NAMES and the JSON type, never values or the id', () => {
             readPosthogDistinctId(
-                headersWithCookie(`ph_${token}_posthog=%7Bnope`),
+                headersWithCookie(
+                    phCookie({
+                        distinct_id: 12345,
+                        $device_id: 'SECRET-DEVICE-VALUE',
+                    }),
+                ),
                 token,
-            ),
-        ).toBeNull()
-        expect(
+            )
+            const { extra } = lastReport()
+            expect(extra.topLevelKeys).toEqual(['distinct_id', '$device_id'])
+            expect(JSON.stringify(extra)).not.toMatch(
+                /SECRET-DEVICE-VALUE|12345/,
+            )
+
             readPosthogDistinctId(
-                headersWithCookie(phCookie({ no_distinct_id: true })),
+                headersWithCookie(phCookie(['SECRET-ARRAY-VALUE'])),
                 token,
-            ),
-        ).toBeNull()
-        expect(sentry.captureMessage).toHaveBeenCalledTimes(2)
-        expect(sentry.captureMessage.mock.calls[0]![1]).toMatchObject({
-            tags: { operation: 'posthog_distinct_id_cookie_parse' },
+            )
+            const second = lastReport().extra
+            expect(second).toMatchObject({
+                reason: 'not_object',
+                valueType: 'array',
+            })
+            expect(JSON.stringify(second)).not.toMatch(/SECRET-ARRAY-VALUE/)
+        })
+
+        it('caps the number and length of reported key names', () => {
+            const many = Object.fromEntries(
+                Array.from({ length: 50 }, (_, i) => [
+                    `${'k'.repeat(100)}${i}`,
+                    i,
+                ]),
+            )
+            readPosthogDistinctId(headersWithCookie(phCookie(many)), token)
+            const keys = lastReport().extra.topLevelKeys as string[]
+            expect(keys).toHaveLength(20)
+            expect(keys.every(key => key.length <= 40)).toBe(true)
+        })
+
+        it('records the raw cookie length', () => {
+            const cookie = phCookie({ $device_id: 'd' })
+            readPosthogDistinctId(headersWithCookie(cookie), token)
+            expect(lastReport().extra.length).toBe(
+                cookie.length - `${cookieName}=`.length,
+            )
         })
     })
 })

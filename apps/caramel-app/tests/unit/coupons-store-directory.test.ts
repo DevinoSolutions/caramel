@@ -46,6 +46,7 @@ const aggregateRow = (site: string, coupon_count = 3) => ({
     site,
     coupon_count,
     last_updated: '2026-09-01T00:00:00.000Z',
+    first_created: '2026-05-13T01:40:42.656Z',
 })
 
 // Real prod shapes: a subdomain slug that folds into gap.com, a mixed-case

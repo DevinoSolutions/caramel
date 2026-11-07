@@ -19,6 +19,7 @@ import {
     getDomainRecord,
     tryInitialize,
 } from '../store-detect.js'
+import { STORE_NOT_SET_UP_STATUS } from '../UI-helpers.js'
 import { EXT_ROOT } from './_entry-modules.mjs'
 import { finderOnlyGetURL } from './_finder-asset.mjs'
 import { tabHandoffBackground } from './_tab-handoff-background.mjs'
@@ -45,6 +46,8 @@ let flagReadThrows
 let logCalls
 // The couponBoxLlm flag: may the finder ask the server for a box it missed.
 let llmOn
+// What the testing card's status line was set to during the run (T-10535).
+let statuses = []
 
 const COUPONS = [
     {
@@ -60,7 +63,7 @@ vi.mock('../coupon-apply.js', async importOriginal => {
     return {
         ...actual,
         applyCoupon: async (code, rec) => {
-            appliedWith.push({ code, rec })
+            appliedWith.push({ code, rec, statusesBefore: statuses.length })
             return { success: false, applied: false }
         },
         // Not a platform cart: the discount-link path stays out of the way.
@@ -73,6 +76,7 @@ vi.mock('../UI-helpers.js', async importOriginal => ({
     showTestingModal: async () => {},
     updateTestingModal: async () => {},
     hideTestingModal: () => {},
+    setTestingModalStatus: text => statuses.push(text),
     insertCaramelPrompt: rec => promptedWith.push(rec),
 }))
 vi.mock('../caramel-base.js', async importOriginal => {
@@ -1125,6 +1129,44 @@ describe('the flag decides whether the shopper sees any of this', () => {
         expect(document.querySelector('[data-caramel-found]')).toBeNull()
     })
 
+    it('flag off: the card never says the store is not set up', async () => {
+        flagOn = false
+        statuses = []
+        document.body.innerHTML = PROMO_BOX + TOTAL
+
+        await startApplyingCoupons(caramelConfiglessRecord('shop.test'))
+
+        expect(statuses).toEqual([])
+    })
+
+    it('flag on: the card says the store is not set up BEFORE the found box is tried (T-10535)', async () => {
+        statuses = []
+        document.body.innerHTML = PROMO_BOX + TOTAL
+
+        await startApplyingCoupons(caramelConfiglessRecord('shop.test'))
+
+        expect(statuses).toEqual([STORE_NOT_SET_UP_STATUS])
+        expect(appliedWith[0].statusesBefore).toBe(1)
+    })
+
+    it('flag on, no box found: the card says so, then the codes are handed over to copy', async () => {
+        statuses = []
+        document.body.innerHTML =
+            '<div class="lines"><span>One item</span></div>' + TOTAL
+
+        await startApplyingCoupons(caramelConfiglessRecord('shop.test'))
+
+        expect(statuses).toEqual([STORE_NOT_SET_UP_STATUS])
+        expect(appliedWith).toHaveLength(0)
+        expect(finalModals.at(-1)[2]).toMatch(/takes promo codes at checkout/)
+    })
+
+    it('the not-set-up copy never mentions AI', () => {
+        expect(STORE_NOT_SET_UP_STATUS).not.toMatch(
+            /\bAI\b|artificial|intelligen|LLM|model|robot|bot\b/i,
+        )
+    })
+
     it('flag on: the apply flow drives the box the finder picked', async () => {
         document.body.innerHTML = PROMO_BOX + TOTAL
 
@@ -1257,7 +1299,7 @@ describe('the server pick needs a prompt to be reached', () => {
         // The tap: the pick is asked (and misses here), the codes are handed
         // over to copy.
         await startApplyingCoupons(promptedWith[0])
-        expect(finalModals.at(-1)[2]).toMatch(/couldn't find the promo box/)
+        expect(finalModals.at(-1)[2]).toMatch(/takes promo codes at checkout/)
 
         promptedWith = []
         await tryInitialize()

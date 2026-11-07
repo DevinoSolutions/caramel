@@ -23,7 +23,7 @@ import {
     detectSurface,
     EXTENSION_MESSAGE_TYPES,
     EXTENSION_STAMP_ATTRIBUTE,
-    type AppShellPlatform,
+    type AppShellInfo,
     type Surface,
 } from '@/lib/surface/detectSurface'
 import {
@@ -42,7 +42,7 @@ export type SurfaceState = {
     /** The stamped extension version, when the stamp is present. */
     extensionVersion: string | null
     /** Non-null when running inside the native app shell (T-7853). */
-    appShell: { version: string; platform: AppShellPlatform } | null
+    appShell: AppShellInfo | null
 }
 
 const UNRESOLVED: SurfaceState = {
@@ -120,25 +120,11 @@ export function SurfaceProvider({ children }: { children: ReactNode }) {
         }
     }, [resolved, stamp, messageSeen])
 
-    // T-7853: register PostHog super properties so every event in the
-    // app-shell carries surface='app-shell' and app_platform=<platform>.
-    useEffect(() => {
-        if (value.surface !== 'app-shell' || !value.appShell) return
-        try {
-            // posthog-js may not be loaded yet (ad blocker, dev mode) — guard.
-            const ph = (
-                window as unknown as {
-                    posthog?: { register: (p: Record<string, string>) => void }
-                }
-            ).posthog
-            ph?.register({
-                surface: 'app-shell',
-                app_platform: value.appShell.platform,
-            })
-        } catch {
-            /* PostHog not available — analytics will miss the property. */
-        }
-    }, [value.surface, value.appShell])
+    // The app-shell PostHog super properties (surface, app_platform,
+    // app_shell_version, app_build) are registered where PostHog is
+    // initialised (initPosthogInstance in analytics/identity.ts), not here: an
+    // effect in this provider can run before PostHog starts loading, and
+    // withPosthog drops work made before then.
 
     return (
         <SurfaceContext.Provider value={value}>

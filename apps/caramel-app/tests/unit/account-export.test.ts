@@ -26,9 +26,20 @@ const { prismaMock } = vi.hoisted(() => ({
         favoriteStore: { findMany: vi.fn() },
         savingsEvent: { findMany: vi.fn() },
         couponReport: { findMany: vi.fn() },
+        siteSuggestion: { findMany: vi.fn() },
+        couponBoxProposal: { findMany: vi.fn() },
     },
 }))
 vi.mock('@/lib/prisma', () => ({ default: prismaMock }))
+
+// The submitted codes are read through couponsRepo (coupon SQL lives only
+// there); its SQL shape is pinned in couponsRepo.test.ts.
+const { listCodesSubmittedByUserMock } = vi.hoisted(() => ({
+    listCodesSubmittedByUserMock: vi.fn(),
+}))
+vi.mock('@/lib/couponsRepo', () => ({
+    listCodesSubmittedByUser: listCodesSubmittedByUserMock,
+}))
 
 const { getSessionMock } = vi.hoisted(() => ({
     getSessionMock: vi.fn(
@@ -45,6 +56,7 @@ vi.mock('@/lib/rateLimit', async importOriginal => {
 })
 
 const USER_ID = 'user-under-test'
+const USER_EMAIL = 'shopper@example.com'
 const CREATED_AT = new Date('2026-03-14T10:00:00.000Z')
 
 function exportRequest() {
@@ -78,9 +90,39 @@ const ACQUISITION = {
     signup_method: 'google',
 }
 
+// What couponsRepo.listCodesSubmittedByUser returns for one shopper code.
+const SUBMITTED_CODE_ROW = {
+    site: 'peepers.com',
+    code: 'MINE15',
+    status: 'pending',
+    expired: false,
+    submissionSource: 'manual',
+    submittedAt: new Date('2026-07-01T09:00:00.000Z'),
+}
+
+// The route's select on site_suggestions: the request, never the requester.
+const SITE_SUGGESTION_ROW = {
+    domain: 'worldofbooks.com',
+    status: 'new',
+    createdAt: new Date('2026-04-02T08:00:00.000Z'),
+}
+
+// The route's select on coupon_box_proposals: everything but user_id/box_hash.
+const PROPOSAL_ROW = {
+    storeName: 'peepers.com',
+    host: 'www.peepers.com',
+    input: 'input#promo-code',
+    apply: 'button#apply-promo',
+    toggle: null,
+    total: 'span.order-total',
+    createdAt: new Date('2026-07-03T10:00:00.000Z'),
+}
+
 beforeEach(() => {
     vi.clearAllMocks()
-    getSessionMock.mockResolvedValue({ user: { id: USER_ID } })
+    getSessionMock.mockResolvedValue({
+        user: { id: USER_ID, email: USER_EMAIL },
+    })
     prismaMock.user.findUnique.mockResolvedValue(ACCOUNT_ROW)
     prismaMock.favoriteStore.findMany.mockResolvedValue([
         {
@@ -111,6 +153,9 @@ beforeEach(() => {
             coupon: { site: 'gap.com', code: 'NOPE20' },
         },
     ])
+    listCodesSubmittedByUserMock.mockResolvedValue([SUBMITTED_CODE_ROW])
+    prismaMock.siteSuggestion.findMany.mockResolvedValue([SITE_SUGGESTION_ROW])
+    prismaMock.couponBoxProposal.findMany.mockResolvedValue([PROPOSAL_ROW])
 })
 
 describe('collectForbiddenKeys — the never-include walker', () => {
@@ -151,6 +196,28 @@ describe('collectForbiddenKeys — the never-include walker', () => {
         expect(hits).toEqual(['savingsEvents[].couponId'])
     })
 
+    it('catches the internal keys and requester details the new sections must never carry (T-12391)', () => {
+        expect(
+            collectForbiddenKeys({ couponBoxProposals: [{ boxHash: 'h' }] }),
+        ).toContain('couponBoxProposals[].boxHash')
+        expect(
+            collectForbiddenKeys({
+                submittedCodes: [{ submittedByUserId: 'u' }],
+            }),
+        ).toContain('submittedCodes[].submittedByUserId')
+        expect(
+            collectForbiddenKeys({
+                storeRequests: [{ requesterEmail: 'a@b.c', userAgent: 'x' }],
+            }),
+        ).toEqual([
+            'storeRequests[].requesterEmail',
+            'storeRequests[].userAgent',
+        ])
+        expect(
+            collectForbiddenKeys({ storeRequests: [{ id: 'cuid' }] }),
+        ).toContain('storeRequests[].id')
+    })
+
     it("catches another user's identifier leaking in as userId", () => {
         expect(
             collectForbiddenKeys({ favoriteStores: [{ userId: 'someone' }] }),
@@ -186,6 +253,9 @@ describe('buildAccountExport — the shape', () => {
                         coupon: { site: 'gap.com', code: 'NOPE20' },
                     },
                 ],
+                submittedCodes: [SUBMITTED_CODE_ROW],
+                siteSuggestions: [SITE_SUGGESTION_ROW],
+                couponBoxProposals: [PROPOSAL_ROW],
             },
             new Date('2026-08-09T14:03:00.000Z'),
         )
@@ -225,7 +295,39 @@ describe('buildAccountExport — the shape', () => {
                     reportedAt: '2026-05-10T12:00:00.000Z',
                 },
             ],
+            submittedCodes: [
+                {
+                    storeDomain: 'peepers.com',
+                    code: 'MINE15',
+                    status: 'pending',
+                    expired: false,
+                    source: 'manual',
+                    submittedAt: '2026-07-01T09:00:00.000Z',
+                },
+            ],
+            storeRequests: [
+                {
+                    domain: 'worldofbooks.com',
+                    status: 'new',
+                    requestedAt: '2026-04-02T08:00:00.000Z',
+                },
+            ],
+            couponBoxProposals: [
+                {
+                    // No box_hash: a SHA-256 of the selectors below.
+                    storeDomain: 'peepers.com',
+                    host: 'www.peepers.com',
+                    selectors: {
+                        input: 'input#promo-code',
+                        apply: 'button#apply-promo',
+                        toggle: null,
+                        total: 'span.order-total',
+                    },
+                    proposedAt: '2026-07-03T10:00:00.000Z',
+                },
+            ],
         })
+        expect(() => assertExportIsSafe(payload)).not.toThrow()
     })
 
     it('a report whose coupon row is gone still exports, with nulls rather than a crash', () => {
@@ -241,6 +343,9 @@ describe('buildAccountExport — the shape', () => {
                     coupon: null,
                 },
             ],
+            submittedCodes: [],
+            siteSuggestions: [],
+            couponBoxProposals: [],
         })
         expect(payload.couponReports[0]).toMatchObject({
             storeDomain: null,
@@ -255,6 +360,9 @@ describe('buildAccountExport — the shape', () => {
             favoriteStores: [],
             savingsEvents: [],
             couponReports: [],
+            submittedCodes: [],
+            siteSuggestions: [],
+            couponBoxProposals: [],
         })
         expect(payload.acquisition).toEqual(ACQUISITION)
         // Its keys (click ids, utm_*, source) are not credential material.
@@ -295,6 +403,9 @@ describe('exportableAcquisition', () => {
             favoriteStores: [],
             savingsEvents: [],
             couponReports: [],
+            submittedCodes: [],
+            siteSuggestions: [],
+            couponBoxProposals: [],
         })
         expect(() => assertExportIsSafe(payload)).toThrow(
             /acquisition\.password/,
@@ -357,6 +468,9 @@ describe('GET /api/account/export', () => {
         expect(body.savingsEvents.length).toBeGreaterThan(0)
         expect(body.favoriteStores.length).toBeGreaterThan(0)
         expect(body.couponReports.length).toBeGreaterThan(0)
+        expect(body.submittedCodes.length).toBeGreaterThan(0)
+        expect(body.storeRequests.length).toBeGreaterThan(0)
+        expect(body.couponBoxProposals.length).toBeGreaterThan(0)
         // The account row this export is built FROM is the one carrying
         // password/token, so a populated account block is the specific proof
         // that the walker below had something dangerous to find.
@@ -404,6 +518,73 @@ describe('GET /api/account/export', () => {
         }
     })
 
+    it('scopes the three T-12391 sections to the caller and to nothing else', async () => {
+        const body = (await (
+            await GET(exportRequest())
+        ).json()) as AccountExport
+
+        // Positive first: the sections are populated from what was read.
+        expect(body.submittedCodes).toEqual([
+            {
+                storeDomain: 'peepers.com',
+                code: 'MINE15',
+                status: 'pending',
+                expired: false,
+                source: 'manual',
+                submittedAt: '2026-07-01T09:00:00.000Z',
+            },
+        ])
+        expect(body.storeRequests).toHaveLength(1)
+        expect(body.couponBoxProposals).toHaveLength(1)
+
+        expect(listCodesSubmittedByUserMock).toHaveBeenCalledTimes(1)
+        expect(listCodesSubmittedByUserMock).toHaveBeenCalledWith(USER_ID)
+        // Store requests through siteSuggestionIdentityWhere, the predicate
+        // the delete route scrubs with: user id, or the account's own folded
+        // email for a request made while signed out. Never a third branch.
+        expect(prismaMock.siteSuggestion.findMany).toHaveBeenCalledWith({
+            where: {
+                OR: [{ userId: USER_ID }, { requesterEmail: USER_EMAIL }],
+            },
+            orderBy: { createdAt: 'desc' },
+            select: { domain: true, status: true, createdAt: true },
+        })
+        expect(prismaMock.couponBoxProposal.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ where: { userId: USER_ID } }),
+        )
+    })
+
+    it('selects the request, never the requester, and never a proposal key', async () => {
+        await GET(exportRequest())
+
+        const suggestionSelect =
+            prismaMock.siteSuggestion.findMany.mock.calls[0]![0].select
+        expect(suggestionSelect).toMatchObject({ domain: true })
+        for (const column of [
+            'requesterEmail',
+            'userAgent',
+            'rawUrl',
+            'userId',
+        ]) {
+            expect(suggestionSelect).not.toHaveProperty(column)
+        }
+
+        const proposalSelect =
+            prismaMock.couponBoxProposal.findMany.mock.calls[0]![0].select
+        expect(proposalSelect).toMatchObject({ storeName: true, input: true })
+        expect(proposalSelect).not.toHaveProperty('boxHash')
+        expect(proposalSelect).not.toHaveProperty('userId')
+    })
+
+    it('an account with no email reads store requests by user id only — a null email branch would match every anonymous request', async () => {
+        getSessionMock.mockResolvedValue({ user: { id: USER_ID } })
+        await GET(exportRequest())
+
+        expect(prismaMock.siteSuggestion.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ where: { OR: [{ userId: USER_ID }] } }),
+        )
+    })
+
     it('the preferences block reflects the users table, not the session', async () => {
         // Same custom-column trap as the overview: a session cannot be trusted
         // to carry savingsSyncEnabled, so the export reads it from the row.
@@ -428,6 +609,8 @@ describe('GET /api/account/export', () => {
 
         expect(res.status).toBe(401)
         expect(prismaMock.savingsEvent.findMany).not.toHaveBeenCalled()
+        expect(listCodesSubmittedByUserMock).not.toHaveBeenCalled()
+        expect(prismaMock.siteSuggestion.findMany).not.toHaveBeenCalled()
     })
 
     it('a live session whose user row is gone is a 404, not a file with a null account', async () => {
@@ -440,6 +623,9 @@ describe('GET /api/account/export', () => {
         prismaMock.favoriteStore.findMany.mockResolvedValue([])
         prismaMock.savingsEvent.findMany.mockResolvedValue([])
         prismaMock.couponReport.findMany.mockResolvedValue([])
+        listCodesSubmittedByUserMock.mockResolvedValue([])
+        prismaMock.siteSuggestion.findMany.mockResolvedValue([])
+        prismaMock.couponBoxProposal.findMany.mockResolvedValue([])
 
         const body = (await (
             await GET(exportRequest())
@@ -447,6 +633,9 @@ describe('GET /api/account/export', () => {
         expect(body.favoriteStores).toEqual([])
         expect(body.savingsEvents).toEqual([])
         expect(body.couponReports).toEqual([])
+        expect(body.submittedCodes).toEqual([])
+        expect(body.storeRequests).toEqual([])
+        expect(body.couponBoxProposals).toEqual([])
         expect(body.account.id).toBe(USER_ID)
     })
 })
