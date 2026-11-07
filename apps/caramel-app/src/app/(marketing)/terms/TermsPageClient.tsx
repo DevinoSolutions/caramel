@@ -23,12 +23,21 @@ import {
 // adds only what is specific to Caramel. Each Caramel claim is checked against
 // the product, so change the code and this page together:
 // - free, no paid tier: /pricing ("free forever: no premium tier");
-// - AGPL-3.0: the repository's LICENSE;
-// - works without an account: the extension runs signed out, an account only
-//   syncs savings (/login subtitle);
-// - never places an order: dom-utils caramelIsForbiddenControl refuses
-//   order-completing controls;
+// - AGPL-3.0: the repository's LICENSE (the Claude plugin under plugins/ is
+//   MIT, hence "unless a file or folder says otherwise");
+// - works without an account: the extension runs signed out; an account holds
+//   favorite stores and, with savings sync on, savings history. Settings live
+//   in browser storage, not the account (/privacy "Where Is It Stored");
+// - sharing a code needs an account, and the extension shares only a code the
+//   shopper typed that the store accepted (/privacy "Coupon codes you choose
+//   to share"); account deletion leaves shared codes up without the name
+//   (DataPrivacySection);
+// - no affiliate code: faqItems.ts, store-listing.mjs;
+// - built never to place an order: dom-utils caramelIsForbiddenControl
+//   refuses order-completing controls;
 // - account deletion: /profile > Data & privacy (T-7505);
+// - Apple clauses: the app in apps/caramel-apple; App Store Connect has no
+//   custom EULA for it (checked 2026-11-07), so Apple's standard EULA applies;
 // - contact address: /privacy.
 // TODO(T-8425): legal wording waits for the owner's approval before this ships.
 const EFFECTIVE_DATE = 'October 26, 2026'
@@ -78,7 +87,7 @@ const sections: Section[] = [
         content: [
             {
                 subtitle: 'Optional',
-                text: 'You can use the extension without an account. An account lets you keep your savings and settings in sync across the browsers and devices you use Caramel on.',
+                text: 'You can use the extension without an account. An account keeps your favorite stores and, if you turn on savings sync, your savings history across the browsers and devices you use Caramel on. You need an account to share a code.',
             },
             {
                 subtitle: 'Eligibility',
@@ -97,15 +106,19 @@ const sections: Section[] = [
         content: [
             {
                 subtitle: 'How Caramel Works',
-                text: 'Caramel collects coupon codes from public sources and from other shoppers, and can try them in a store’s coupon box for you. It never places an order for you: you always decide whether to check out.',
+                text: 'Caramel collects coupon codes from public sources and from other shoppers, and can try them in a store’s coupon box for you after you tap to apply them, from the prompt it shows at checkout or from the extension. It is built never to place an order or make a payment for you: you always decide whether to check out.',
             },
             {
                 subtitle: 'No Guarantee a Code Works',
-                text: 'Codes are offered by stores, not by us. We cannot promise that any code is valid, that it gives a particular discount, or that a store will honour it. The price the store shows at checkout is the price you pay, so check your order before you complete it.',
+                text: 'Codes are offered by stores, not by us. We cannot promise that any code is valid, that it gives a particular discount, or that a store will honour it, and we do not promise that you will save money. Caramel may not work on every store, and a store changing its website can stop it working there until we update it. The price the store shows at checkout is the price you pay, so check your order before you complete it.',
             },
             {
                 subtitle: 'Stores Are Third Parties',
-                text: 'Stores are operated by their owners, not by us, and we are not a party to your purchase. Your purchase is governed by the store’s own terms, prices and policies. Listing a store or its codes does not mean that store endorses or partners with Caramel.',
+                text: 'Stores are operated by their owners, not by us, and we are not a party to your purchase. Your purchase, including returns and refunds, is governed by the store’s own terms, prices and policies. Store names and trademarks belong to their owners. Listing a store or its codes does not mean that store endorses or partners with Caramel.',
+            },
+            {
+                subtitle: 'No Affiliate Links',
+                text: 'Caramel contains no affiliate code. The extension never adds, replaces or removes affiliate or referral links or cookies, so whoever sent you to a store keeps the credit, and we earn no affiliate commission through Caramel on what you buy.',
             },
         ],
     },
@@ -116,11 +129,11 @@ const sections: Section[] = [
         content: [
             {
                 subtitle: 'Sharing Is Your Choice',
-                text: 'You can add a code on grabcaramel.com, or let the extension share a code that worked for you when you turn code sharing on. Shared codes are shown to other shoppers.',
+                text: 'When you are signed in, you can add a code on a store’s page on grabcaramel.com, or turn on “Share codes I enter at checkout” so the extension shares a code you typed yourself once the store accepts it. Shared codes are shown publicly to other shoppers, without your name.',
             },
             {
                 subtitle: 'The Licence You Give Us',
-                text: 'When you share a code, you let us store it, check it, and show it to other Caramel users on the website and in the extension. Only share codes you are free to share: not personal, single-use or employee codes, and nothing you were asked to keep private.',
+                text: 'When you share a code, you give us a free, worldwide, non-exclusive permission to store it, check it, and show it to anyone on the website, in the extension and the apps, and through our public API, including after you delete your account (the code then stays up without any link to you). Only share codes you are free to share: not personal, single-use or employee codes, and nothing you were asked to keep private. We may remove any code, for example one that no longer works.',
             },
         ],
     },
@@ -146,7 +159,7 @@ const sections: Section[] = [
         content: [
             {
                 subtitle: 'The Code',
-                text: 'Caramel’s source code is published under the GNU Affero General Public License v3.0, and that licence governs your use of the code. These Terms govern the Caramel service we run: the website, the published extension, the apps and the API.',
+                text: 'Caramel’s source code is published under the GNU Affero General Public License v3.0, unless a file or folder states a different licence, and that licence governs your use of the code. These Terms govern the Caramel service we run: the website, the published extension, the apps and the API.',
             },
             {
                 subtitle: 'Our Name and Logo',
@@ -161,7 +174,11 @@ const sections: Section[] = [
         content: [
             {
                 subtitle: 'Leaving Caramel',
-                text: 'You can stop using Caramel at any time by uninstalling the extension or the app. You can delete your account and the data linked to it from your profile, under Data & privacy. Deletion is permanent.',
+                text: 'You can stop using Caramel at any time by uninstalling the extension or the app. You can delete your account and the data linked to it from your profile, under Data & privacy, or by emailing us. Deletion is permanent; codes you shared stay published without your name.',
+            },
+            {
+                subtitle: 'Changes to Caramel',
+                text: 'Caramel is a free service that we keep improving, so we may add, change or remove features and supported stores, and we may stop offering Caramel altogether. You can download your data at any time from your profile, under Data & privacy.',
             },
             {
                 subtitle: 'Suspension by Us',
@@ -198,6 +215,14 @@ const sections: Section[] = [
                 text: 'These Terms and any dispute arising out of them are governed by the laws of the Province of Ontario and the federal laws of Canada that apply there, without regard to conflict-of-law rules, and the courts of Ontario have jurisdiction. Nothing here removes the protection of mandatory consumer-protection laws that apply where you live.',
             },
             {
+                subtitle: 'App and Extension Stores',
+                text: 'If you got Caramel from an app store or a browser’s extension store, that store’s own terms also apply to how you download and use it there.',
+            },
+            {
+                subtitle: 'Apple Devices',
+                text: 'If you use a Caramel app from Apple’s App Store, Apple’s standard Licensed Application End User License Agreement applies to it alongside these Terms. These Terms are between you and Devino Solutions, not Apple. Apple is not responsible for the app or its content, has no obligation to provide maintenance or support for it, and is not responsible for handling any claim about it, including product liability, legal or regulatory compliance, and intellectual property claims. You must also follow the App Store’s usage rules. Apple and its subsidiaries are third-party beneficiaries of these Terms and may enforce them against you.',
+            },
+            {
                 subtitle: 'Privacy',
                 text: 'How we handle personal data is described in our Privacy Policy, which forms part of your agreement with us. Please read it alongside these Terms.',
             },
@@ -214,7 +239,7 @@ const cardClasses =
 
 export default function TermsPageClient() {
     return (
-        <main className="relative -mt-[6.7rem] w-full overflow-x-clip dark:bg-darkBg">
+        <main className="dark:bg-darkBg relative -mt-[6.7rem] w-full overflow-x-clip">
             <Doodles />
             <div className="scroll-smooth">
                 <section className="relative mt-[5rem] flex min-h-[50vh] flex-col justify-center overflow-hidden px-6 py-16 text-gray-800 dark:text-white">
@@ -225,10 +250,10 @@ export default function TermsPageClient() {
                             transition={{ duration: 0.6, ease: 'easeOut' }}
                             className="mb-8"
                         >
-                            <h1 className="mb-6 bg-gradient-to-r from-caramel to-orange-600 bg-clip-text pb-2 text-5xl leading-[1.15] font-extrabold tracking-tight text-transparent lg:text-4xl md:text-3xl">
+                            <h1 className="from-caramel mb-6 bg-gradient-to-r to-orange-600 bg-clip-text pb-2 text-5xl font-extrabold leading-[1.15] tracking-tight text-transparent md:text-3xl lg:text-4xl">
                                 Terms of Service
                             </h1>
-                            <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 dark:text-gray-300 lg:text-lg">
+                            <p className="mx-auto max-w-3xl text-xl leading-relaxed text-gray-600 lg:text-lg dark:text-gray-300">
                                 The rules for using Caramel, written to be read
                             </p>
                         </motion.div>
@@ -240,7 +265,7 @@ export default function TermsPageClient() {
                 <div className="mx-auto max-w-6xl px-6 pb-16 lg:px-8">
                     <div className="py-16">
                         <div className="mb-16 text-center">
-                            <div className="mb-6 inline-flex items-center gap-3 rounded-full bg-caramel/10 px-6 py-3 text-sm font-semibold text-caramel">
+                            <div className="bg-caramel/10 text-caramel mb-6 inline-flex items-center gap-3 rounded-full px-6 py-3 text-sm font-semibold">
                                 <FaFileContract className="h-4 w-4" />
                                 Effective Date: {EFFECTIVE_DATE}
                             </div>
@@ -250,7 +275,7 @@ export default function TermsPageClient() {
                                 of you in return. Our{' '}
                                 <Link
                                     href="/privacy"
-                                    className="font-semibold text-caramel underline-offset-2 hover:underline"
+                                    className="text-caramel font-semibold underline-offset-2 hover:underline"
                                 >
                                     Privacy Policy
                                 </Link>{' '}
@@ -266,11 +291,11 @@ export default function TermsPageClient() {
                                     className={cardClasses}
                                 >
                                     <div className="flex items-start gap-4">
-                                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
+                                        <div className="bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-xl">
                                             {section.icon}
                                         </div>
                                         <div className="flex-1">
-                                            <h2 className="mb-4 text-2xl font-bold text-gray-900 dark:text-white lg:text-xl">
+                                            <h2 className="mb-4 text-2xl font-bold text-gray-900 lg:text-xl dark:text-white">
                                                 {section.title}
                                             </h2>
                                             <div className="space-y-4 text-base leading-relaxed text-gray-700 dark:text-gray-300">
@@ -293,7 +318,7 @@ export default function TermsPageClient() {
                             className={`mx-auto mt-16 max-w-4xl ${cardClasses}`}
                         >
                             <div className="flex items-start gap-4">
-                                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-caramel/10 text-xl text-caramel dark:bg-caramel/20">
+                                <div className="bg-caramel/10 text-caramel dark:bg-caramel/20 flex h-12 w-12 items-center justify-center rounded-2xl text-xl">
                                     <FaEnvelope />
                                 </div>
                                 <div>
@@ -306,7 +331,7 @@ export default function TermsPageClient() {
                                     </p>
                                     <a
                                         href="mailto:hello@devino.ca"
-                                        className="inline-flex items-center gap-2 rounded-md font-semibold text-caramel transition-colors duration-200 hover:text-orange-600 focus-visible:ring-2 focus-visible:ring-caramel focus-visible:ring-offset-2 focus-visible:outline-none dark:focus-visible:ring-offset-darkBg"
+                                        className="text-caramel focus-visible:ring-caramel dark:focus-visible:ring-offset-darkBg inline-flex items-center gap-2 rounded-md font-semibold transition-colors duration-200 hover:text-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                                     >
                                         <FaEnvelope className="h-4 w-4" />
                                         hello@devino.ca
