@@ -470,21 +470,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v6
-        with:
-          run_install: false
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright
-        run: pnpm --filter caramel-app exec playwright install --with-deps chromium
-
       # NOTE: the PostHog real-ingestion env is deliberately NOT set here yet.
       # The deployed dev site does not have PostHog baked into its bundle until
       # this branch merges + redeploys, so support-flow.spec.ts's ingestion
@@ -528,6 +513,26 @@ jobs:
           # would otherwise read as a nested mapping key.
           DEPLOY_WAIT_HINT: "${{ github.ref == 'refs/heads/dev' && '' || 'Prod deploys are MANUAL: the Dokploy prod compose has autoDeploy OFF by design, so merging to main never reaches grabcaramel.com. This is not a failed deploy and not a broken build — the E2E suite runs against the LIVE site, so it cannot verify a commit prod is not carrying (prod serving this commit or a descendant of it passes). Deploy the prod compose, then re-run this job once, for the newest merge commit only.' }}"
         run: bash .github/workflows/scripts/wait-for-deploy.sh
+
+      # Order matters: the deploy gate runs BEFORE the toolchain installs. On main the gate polls
+      # once and fails with the exact reason whenever a manual prod deploy has not caught up
+      # (the common case), so installing pnpm deps + a Chromium first spent about 40s of a
+      # runner on every such red before the first useful line. Nothing below needs to run
+      # unless the deployment carries this commit.
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright
+        run: pnpm --filter caramel-app exec playwright install --with-deps chromium
 
       # run-e2e-push.sh wraps `pnpm test:e2e`: when the suite fails while the
       # served sha CHANGED during the run (a manual prod deploy swapped the
