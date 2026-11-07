@@ -32,6 +32,7 @@ describe('collapseStoreRows — subdomain slugs fold into ONE canonical base', (
                 base: 'gap.com',
                 couponCount: 41,
                 lastModified: d('2026-09-10T12:00:00Z'),
+                firstCreatedAt: null,
             },
         ])
     })
@@ -67,6 +68,7 @@ describe('collapseStoreRows — mixed-case slugs fold into their lowercase twin'
                 base: 'brooklinen.com',
                 couponCount: 11,
                 lastModified: d('2026-09-05T00:00:00Z'),
+                firstCreatedAt: null,
             },
         ])
     })
@@ -142,6 +144,7 @@ describe('collapseStoreRows — rows that name no store are dropped', () => {
                 base: 'shein.com',
                 couponCount: 1,
                 lastModified: d('2026-09-01T00:00:00Z'),
+                firstCreatedAt: null,
             },
         ])
     })
@@ -164,6 +167,36 @@ describe('collapseStoreRows — output shape', () => {
             'zeta.com',
         ])
         expect(entries[2]!.lastModified).toBeNull()
+    })
+
+    it('keeps the OLDEST creation across folded slugs, and any slug with no known creation date makes the base unknown', () => {
+        const entries = collapseStoreRows([
+            {
+                site: 'shop.gap.com',
+                coupon_count: 1,
+                last_updated: null,
+                first_created: d('2026-06-01T00:00:00Z'),
+            },
+            {
+                site: 'gap.com',
+                coupon_count: 1,
+                last_updated: null,
+                first_created: d('2026-05-13T01:40:42Z'),
+            },
+            {
+                site: 'au.shein.com',
+                coupon_count: 1,
+                last_updated: null,
+                first_created: d('2026-05-13T01:40:42Z'),
+            },
+            // No first_created at all (e.g. a neighbour-window row).
+            { site: 'shein.com', coupon_count: 1, last_updated: null },
+        ])
+        const byBase = new Map(entries.map(e => [e.base, e]))
+        expect(byBase.get('gap.com')!.firstCreatedAt).toEqual(
+            d('2026-05-13T01:40:42Z'),
+        )
+        expect(byBase.get('shein.com')!.firstCreatedAt).toBeNull()
     })
 
     it('returns [] for no rows', () => {

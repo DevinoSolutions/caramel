@@ -21,6 +21,8 @@ import {
     writeUsageSignal,
     writeWorkedSignal,
 } from '@/lib/couponsRepo'
+import { isPrunedFromSitemap } from '@/lib/seo/sitemapStorePrune'
+import { collapseStoreRows } from '@/lib/seo/sitemapStores'
 import {
     SHOPPER_COUPON_DESCRIPTION,
     SHOPPER_DAILY_SUBMISSION_CAP,
@@ -441,7 +443,7 @@ describe('requestSource (write, app sources INSERT via prisma.source.create)', (
 })
 
 describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
-    it('groups VISIBLE sited coupons per raw site with an ::int count and MAX(updated_at), ordered by site, LIMIT-bound', async () => {
+    it('groups VISIBLE sited coupons per raw site with an ::int count, MAX(updated_at) and MIN(created_at), ordered by site, LIMIT-bound', async () => {
         mockRows(
             sql => sql.includes('MAX(updated_at)'),
             [
@@ -449,6 +451,7 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
                     site: 'athleta.gap.com',
                     coupon_count: 7,
                     last_updated: new Date('2026-09-01T00:00:00.000Z'),
+                    first_created: new Date('2026-05-13T01:40:42.656Z'),
                 },
                 {
                     site: 'gap.com',
@@ -456,6 +459,7 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
                     // A driver handing the timestamp back as a string is
                     // normalized, not treated as drift (z.coerce.date).
                     last_updated: '2026-08-15T00:00:00.000Z',
+                    first_created: '2026-06-02T00:00:00.000Z',
                 },
             ],
         )
@@ -467,11 +471,13 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
                 site: 'athleta.gap.com',
                 coupon_count: 7,
                 last_updated: new Date('2026-09-01T00:00:00.000Z'),
+                first_created: new Date('2026-05-13T01:40:42.656Z'),
             },
             {
                 site: 'gap.com',
                 coupon_count: 30,
                 last_updated: new Date('2026-08-15T00:00:00.000Z'),
+                first_created: new Date('2026-06-02T00:00:00.000Z'),
             },
         ])
 
@@ -481,6 +487,8 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
         const q = capturedQueries[0]!
         expect(q).toContain('COUNT(*)::int AS coupon_count')
         expect(q).toContain('MAX(updated_at) AS last_updated')
+        // The sitemap prune's "too new to judge" age signal (T-15493).
+        expect(q).toContain('MIN(created_at) AS first_created')
         expect(q).toContain('expired = FALSE')
         expect(q).toContain('status IN (')
         expect(q).toContain('site IS NOT NULL')
@@ -490,10 +498,47 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
         expect(capturedValues[0]).toContain(5000)
     })
 
+    it('a NULL first_created parses to null (age unknown), never the epoch, so the prune keeps the store', async () => {
+        mockRows(
+            sql => sql.includes('MAX(updated_at)'),
+            [
+                {
+                    site: 'gap.com',
+                    coupon_count: 3,
+                    last_updated: new Date('2026-09-01T00:00:00.000Z'),
+                    first_created: null,
+                },
+            ],
+        )
+
+        const rows = await listStoreSitemapEntries(10)
+
+        expect(rows[0]!.first_created).toBeNull()
+        const [entry] = collapseStoreRows(rows)
+        expect(entry!.firstCreatedAt).toBeNull()
+        expect(isPrunedFromSitemap(entry!)).toBe(false)
+    })
+
+    it('a row missing first_created fails the zod boundary loudly (an unaged row must not silently become the epoch)', async () => {
+        mockRows(
+            sql => sql.includes('MAX(updated_at)'),
+            [{ site: 'gap.com', coupon_count: 3, last_updated: new Date() }],
+        )
+        await expect(listStoreSitemapEntries(10)).rejects.toThrow(
+            /coupons-db schema drift \[sitemap\.stores\]/,
+        )
+    })
+
     it('a row missing coupon_count fails the zod boundary loudly (drift, not silent zeros)', async () => {
         mockRows(
             sql => sql.includes('MAX(updated_at)'),
-            [{ site: 'gap.com', last_updated: new Date() }],
+            [
+                {
+                    site: 'gap.com',
+                    last_updated: new Date(),
+                    first_created: new Date(),
+                },
+            ],
         )
         await expect(listStoreSitemapEntries(10)).rejects.toThrow(
             /coupons-db schema drift \[sitemap\.stores\]/,
