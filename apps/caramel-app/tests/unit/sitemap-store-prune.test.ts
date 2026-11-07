@@ -144,9 +144,7 @@ describe('sitemap.ts — pruned stores leave the <loc>s, nothing else moves', ()
             // Both slugs of oldquiet.com are old -> pruned.
             row('shop.oldquiet.com', '2026-06-01T00:00:00Z'),
             row('oldquiet.com', '2026-05-13T01:40:42Z'),
-            // One slug of newquiet.com is old but the oldest still counts as
-            // the page's age, so it is pruned only if the OLDEST predates the
-            // window; here the oldest is young.
+            // Both slugs of newquiet.com are young -> kept.
             row('shop.newquiet.com', '2026-09-20T00:00:00Z'),
             row('newquiet.com', '2026-09-15T00:00:00Z'),
             // One folded slug has no known age -> the base stays.
@@ -159,6 +157,22 @@ describe('sitemap.ts — pruned stores leave the <loc>s, nothing else moves', ()
         expect(urls).not.toContain(`${ORIGIN}/coupons/oldquiet.com`)
         expect(urls).toContain(`${ORIGIN}/coupons/newquiet.com`)
         expect(urls).toContain(`${ORIGIN}/coupons/unknownage.com`)
+    })
+
+    it('a listed base whose folded slugs straddle the cutoff is pruned: the OLDEST slug wins, whatever the row order', async () => {
+        for (const ordered of [
+            [
+                row('oldquiet.com', '2026-05-13T01:40:42Z'),
+                row('shop.oldquiet.com', '2026-09-20T00:00:00Z'),
+            ],
+            [
+                row('shop.oldquiet.com', '2026-09-20T00:00:00Z'),
+                row('oldquiet.com', '2026-05-13T01:40:42Z'),
+            ],
+        ]) {
+            repoMock.listStoreSitemapEntries.mockResolvedValue(ordered)
+            expect(storeUrls(await sitemap())).toEqual([])
+        }
     })
 
     it('leaves the A–Z letter pages bucketed from ALL stores, pruned ones included', async () => {

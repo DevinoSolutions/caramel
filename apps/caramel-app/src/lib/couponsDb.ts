@@ -269,11 +269,16 @@ export type SiteAggregateRow = z.infer<typeof SiteAggregateRowSchema>
  * `MIN(created_at)` of the site's visible coupons — how long the store page has
  * had content (sitemapStorePrune.ts's "too new to judge" guard). Its own schema
  * so the neighbour-window reads that share SiteAggregateRowSchema do not pay
- * for a column they never use. `created_at` is NOT NULL, so a group always has
- * one; `z.coerce.date()` for the same driver-tolerance reason as `last_updated`.
+ * for a column they never use. `created_at` is NOT NULL, so a real group always
+ * has one; `.nullable()` keeps a null as null — "age unknown", which the prune
+ * keeps in the sitemap — instead of letting `z.coerce.date()` turn it into the
+ * epoch (1970), which would read as "older than the window" and PRUNE the store.
+ * A MISSING column is still a loud drift error (undefined coerces to an
+ * Invalid Date and fails). `z.coerce.date()` for the same driver-tolerance
+ * reason as `last_updated`.
  */
 export const SiteSitemapRowSchema = SiteAggregateRowSchema.extend({
-    first_created: z.coerce.date(),
+    first_created: z.coerce.date().nullable(),
 })
 export type SiteSitemapRow = z.infer<typeof SiteSitemapRowSchema>
 

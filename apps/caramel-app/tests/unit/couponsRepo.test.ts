@@ -21,6 +21,8 @@ import {
     writeUsageSignal,
     writeWorkedSignal,
 } from '@/lib/couponsRepo'
+import { isPrunedFromSitemap } from '@/lib/seo/sitemapStorePrune'
+import { collapseStoreRows } from '@/lib/seo/sitemapStores'
 import {
     SHOPPER_COUPON_DESCRIPTION,
     SHOPPER_DAILY_SUBMISSION_CAP,
@@ -494,6 +496,27 @@ describe('listStoreSitemapEntries (app/sitemap.ts read)', () => {
         expect(q).toContain('ORDER BY site ASC')
         expect(q).toContain('LIMIT ?')
         expect(capturedValues[0]).toContain(5000)
+    })
+
+    it('a NULL first_created parses to null (age unknown), never the epoch, so the prune keeps the store', async () => {
+        mockRows(
+            sql => sql.includes('MAX(updated_at)'),
+            [
+                {
+                    site: 'gap.com',
+                    coupon_count: 3,
+                    last_updated: new Date('2026-09-01T00:00:00.000Z'),
+                    first_created: null,
+                },
+            ],
+        )
+
+        const rows = await listStoreSitemapEntries(10)
+
+        expect(rows[0]!.first_created).toBeNull()
+        const [entry] = collapseStoreRows(rows)
+        expect(entry!.firstCreatedAt).toBeNull()
+        expect(isPrunedFromSitemap(entry!)).toBe(false)
     })
 
     it('a row missing first_created fails the zod boundary loudly (an unaged row must not silently become the epoch)', async () => {
