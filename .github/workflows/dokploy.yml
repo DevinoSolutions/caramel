@@ -5,9 +5,10 @@
 #
 # ONE FILE FOR BOTH ENVIRONMENTS. The ref decides the target:
 #   dev   (push or manual run) -> GitHub Environment `development` -> Dokploy compose "caramel-compose"             (release key `caramel-dev`)
-#   main  (MANUAL RUN ONLY)    -> GitHub Environment `production`  -> Dokploy compose "Caramel Prod Compose (LIVE)" (release key `caramel`)
-# A push to main has no trigger on purpose: the production compose has autoDeploy OFF by design, so merging to main never reaches
-# grabcaramel.com. Run this workflow by hand on main (Actions, Dokploy, Run workflow) to build and publish the production release.
+#   main  (push or manual run) -> GitHub Environment `production`  -> Dokploy compose "Caramel Prod Compose (LIVE)" (release key `caramel`)
+# Every push to main or dev builds that commit once and publishes one release. Nothing reaches a server until the Dokploy compose of that
+# key has a Connect (Dokploy Settings, GitHub Actions); the Connect, not this file, decides whether a release is deployed. The file does
+# not depend on dev containing main: a push to main publishes the production release by itself.
 # Pull requests are not built here: the compose-build job in checks-app.yml already builds the same Dockerfile and boots the stack.
 #
 # WHY HOSTED RUNNERS. Caramel is PUBLIC; the organisation self-hosted runner group refuses public repositories. Nothing here needs the
@@ -34,7 +35,7 @@
 name: Dokploy
 on:
   push:
-    branches: [dev]
+    branches: [main, dev]
   workflow_dispatch:
 concurrency:
   # One run per ref; a newer push waits behind the running one. Never cancel a run that may be publishing a release.
@@ -45,7 +46,7 @@ permissions:
 jobs:
   build:
     name: build web
-    # dev (push or manual run) and main (manual run only: a push to main has no trigger above).
+    # main and dev, on push or by a manual run; any other ref is skipped.
     if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
