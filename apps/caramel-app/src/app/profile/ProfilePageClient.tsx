@@ -27,6 +27,7 @@ import GetStartedChecklist from './sections/GetStartedChecklist'
 import PreferencesSection from './sections/PreferencesSection'
 import ReportsImpactSection from './sections/ReportsImpactSection'
 import SavingsSection from './sections/SavingsSection'
+import SignInMethodsSection from './sections/SignInMethodsSection'
 
 export default function ProfilePageClient() {
     const { data: session, isPending } = useSession()
@@ -197,6 +198,7 @@ export default function ProfilePageClient() {
         navItems.push({ id: 'preferences', label: 'Preferences' })
     }
     navItems.push({ id: 'account', label: 'Account' })
+    navItems.push({ id: 'sign-in-methods', label: 'Sign-in methods' })
     navItems.push({ id: 'data', label: 'Data & privacy' })
 
     return (
@@ -280,6 +282,7 @@ export default function ProfilePageClient() {
                         {/* Both render from the session, so they stay real
                             content even when the overview failed. */}
                         <AccountDetailsCard user={user} />
+                        <SignInMethodsSection />
                         <DataPrivacySection
                             overview={overview}
                             onDeleted={applyDataDeleted}
