@@ -84,11 +84,13 @@ struct AccountView: View {
             Button {
                 Task { await session.signIn(with: .apple) }
             } label: {
-                Label("Continue with Apple", systemImage: "applelogo")
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 6) {
+                    Image(systemName: "applelogo")
+                    Text("Continue with Apple")
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.black)
+            .buttonStyle(AppleSignInButtonStyle())
+            .accessibilityLabel("Continue with Apple")
             .disabled(session.isSigningIn)
             Button {
                 Task { await session.signIn(with: .google) }
@@ -197,5 +199,29 @@ struct AccountView: View {
         } catch {
             deleteMessage = "Could not delete: \(error.localizedDescription)"
         }
+    }
+}
+
+/// "Continue with Apple" drawn the way Apple's HIG requires for a Sign in with Apple
+/// button: the Apple logo and the title in one color, white on black in Light Mode and
+/// black on white in Dark Mode. The tab bar's orange tint used to color the logo
+/// (iPhone QA q6-cr3), which the HIG does not allow. The action stays SessionStore's
+/// sign-in, which is why this is a style and not ASAuthorizationAppleIDButton.
+private struct AppleSignInButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let foreground: Color = colorScheme == .dark ? .black : .white
+        let background: Color = colorScheme == .dark ? .white : .black
+        configuration.label
+            .font(.body.weight(.semibold))
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(foreground)
+            .tint(foreground)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .opacity(configuration.isPressed ? 0.75 : (isEnabled ? 1 : 0.5))
     }
 }
