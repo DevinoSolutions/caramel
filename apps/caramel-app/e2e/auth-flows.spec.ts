@@ -470,8 +470,8 @@ test.describe('Auth Flows — Protected Routes', () => {
         )
 
         // The overview call must fail with a 500, not a 401: a 401 correctly
-        // means "signed out" and useProfileOverview ends the session and
-        // redirects to /login, which raced this test's assertions.
+        // means "signed out": useProfileOverview ends the session and the
+        // page redirects to /login, which raced this test's assertions.
         await page.route('**/api/account/overview', route =>
             route.fulfill({
                 status: 500,
