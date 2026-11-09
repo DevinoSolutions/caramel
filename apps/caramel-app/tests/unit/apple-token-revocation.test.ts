@@ -63,6 +63,13 @@ function sentForm(call = 0): URLSearchParams {
     return new URLSearchParams(init.body as URLSearchParams)
 }
 
+/** A stored-shape identity token: only its payload is read by revocation. */
+function unsignedIdToken(claims: Record<string, unknown>): string {
+    const part = (value: unknown) =>
+        Buffer.from(JSON.stringify(value)).toString('base64url')
+    return `${part({ alg: 'RS256' })}.${part(claims)}.sig`
+}
+
 function captured(): { error: Error; hint: Record<string, unknown> }[] {
     return captureExceptionMock.mock.calls.map(([error, hint]) => ({
         error: error as Error,
@@ -78,7 +85,7 @@ describe('loadAppleRevocationTargets', () => {
 
         expect(prismaMock.account.findMany).toHaveBeenCalledWith({
             where: { userId: 'user-1', providerId: 'apple' },
-            select: { refreshToken: true, accessToken: true },
+            select: { refreshToken: true, accessToken: true, idToken: true },
         })
     })
 })
@@ -89,6 +96,7 @@ describe('revokeAppleGrants', () => {
             {
                 refreshToken: await encryptOAuthToken(REFRESH),
                 accessToken: await encryptOAuthToken(ACCESS),
+                idToken: null,
             },
         ])
 
@@ -110,15 +118,45 @@ describe('revokeAppleGrants', () => {
         expect(captureExceptionMock).not.toHaveBeenCalled()
     })
 
+    it('a grant from the iOS app sheet (stored id token aud = bundle id) is revoked as that client', async () => {
+        const outcome = await revokeAppleGrants([
+            {
+                refreshToken: REFRESH,
+                accessToken: null,
+                idToken: unsignedIdToken({ aud: 'com.devino.Caramel' }),
+            },
+        ])
+
+        expect(outcome).toBe('revoked')
+        expect(sentForm().get('client_id')).toBe('com.devino.Caramel')
+        expect(getAppleClientSecret).toHaveBeenCalledWith('com.devino.Caramel')
+    })
+
+    it('a web grant (id token aud = Services ID) or an unreadable id token stays on APPLE_CLIENT_ID', async () => {
+        await revokeAppleGrants([
+            {
+                refreshToken: REFRESH,
+                accessToken: null,
+                idToken: unsignedIdToken({ aud: 'com.test.signin' }),
+            },
+            { refreshToken: REFRESH, accessToken: null, idToken: 'garbage' },
+        ])
+
+        expect(sentForm(0).get('client_id')).toBe('com.test.signin')
+        expect(sentForm(1).get('client_id')).toBe('com.test.signin')
+    })
+
     it('reads a refresh token that was stored in plain text before encryption was enabled', async () => {
-        await revokeAppleGrants([{ refreshToken: REFRESH, accessToken: null }])
+        await revokeAppleGrants([
+            { refreshToken: REFRESH, accessToken: null, idToken: null },
+        ])
 
         expect(sentForm().get('token')).toBe(REFRESH)
     })
 
     it('falls back to the access token (hint access_token) when no refresh token was stored', async () => {
         const outcome = await revokeAppleGrants([
-            { refreshToken: null, accessToken: ACCESS },
+            { refreshToken: null, accessToken: ACCESS, idToken: null },
         ])
 
         expect(outcome).toBe('revoked')
@@ -144,7 +182,7 @@ describe('revokeAppleGrants', () => {
         )
 
         const outcome = await revokeAppleGrants([
-            { refreshToken: REFRESH, accessToken: null },
+            { refreshToken: REFRESH, accessToken: null, idToken: null },
         ])
 
         expect(outcome).toBe('failed')
@@ -176,7 +214,7 @@ describe('revokeAppleGrants', () => {
         )
 
         const outcome = await revokeAppleGrants([
-            { refreshToken: REFRESH, accessToken: null },
+            { refreshToken: REFRESH, accessToken: null, idToken: null },
         ])
 
         expect(outcome).toBe('failed')
@@ -190,7 +228,7 @@ describe('revokeAppleGrants', () => {
         fetchMock.mockRejectedValue(cause)
 
         const outcome = await revokeAppleGrants([
-            { refreshToken: REFRESH, accessToken: null },
+            { refreshToken: REFRESH, accessToken: null, idToken: null },
         ])
 
         expect(outcome).toBe('failed')
@@ -208,7 +246,7 @@ describe('revokeAppleGrants', () => {
         envMock.BETTER_AUTH_SECRET = 'rotated-secret'
 
         const outcome = await revokeAppleGrants([
-            { refreshToken: stored, accessToken: null },
+            { refreshToken: stored, accessToken: null, idToken: null },
         ])
 
         expect(outcome).toBe('failed')
@@ -224,7 +262,7 @@ describe('revokeAppleGrants', () => {
         })
 
         const outcome = await revokeAppleGrants([
-            { refreshToken: REFRESH, accessToken: null },
+            { refreshToken: REFRESH, accessToken: null, idToken: null },
         ])
 
         expect(outcome).toBe('failed')
@@ -234,7 +272,7 @@ describe('revokeAppleGrants', () => {
 
     it('an Apple account row with no token at all is reported (nothing can be revoked)', async () => {
         const outcome = await revokeAppleGrants([
-            { refreshToken: null, accessToken: null },
+            { refreshToken: null, accessToken: null, idToken: null },
         ])
 
         expect(outcome).toBe('failed')
@@ -248,7 +286,7 @@ describe('revokeAppleGrants', () => {
         envMock.APPLE_CLIENT_ID = undefined
 
         const outcome = await revokeAppleGrants([
-            { refreshToken: REFRESH, accessToken: null },
+            { refreshToken: REFRESH, accessToken: null, idToken: null },
         ])
 
         expect(outcome).toBe('failed')
@@ -268,8 +306,12 @@ describe('revokeAppleGrants', () => {
             .mockResolvedValueOnce(new Response(null, { status: 200 }))
 
         const outcome = await revokeAppleGrants([
-            { refreshToken: REFRESH, accessToken: null },
-            { refreshToken: 'r.second.0.def', accessToken: null },
+            { refreshToken: REFRESH, accessToken: null, idToken: null },
+            {
+                refreshToken: 'r.second.0.def',
+                accessToken: null,
+                idToken: null,
+            },
         ])
 
         expect(outcome).toBe('failed')
