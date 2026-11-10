@@ -100,24 +100,26 @@ const PrivacyPolicy = () => {
                                 on the page, on your device. Nothing new is sent
                                 to Caramel for that, except that the extension
                                 reads Caramel&apos;s feature switches from our
-                                server. If that also fails, and only after you
-                                tap to apply codes, the extension sends one
-                                request to our server (at most once per store in
-                                a browser tab). The request contains the
-                                store&apos;s hostname and a trimmed outline of
-                                the cart page&apos;s buttons, links, headings
-                                and form-control labels. Each name in the
-                                outline is cut to at most 100 characters, every
-                                digit is replaced with &quot;#&quot;,
-                                email-shaped text is replaced with a
-                                placeholder, and every word that is not on a
-                                fixed list of common interface and coupon words
-                                is dropped. The request never contains text you
-                                typed into fields, the page text outside that
-                                outline, or the page&apos;s address path or
-                                query. Its contents are the same whether or not
-                                you are signed in; the extension attaches its
-                                usual sign-in token as it does on other
+                                server and, if you&apos;re signed in, sends the
+                                box locations described under &quot;Coupon boxes
+                                the extension finds&quot; below. If that also
+                                fails, and only after you tap to apply codes,
+                                the extension sends one request to our server
+                                (at most once per store in a browser tab). The
+                                request contains the store&apos;s hostname and a
+                                trimmed outline of the cart page&apos;s buttons,
+                                links, headings and form-control labels. Each
+                                name in the outline is cut to at most 100
+                                characters, every digit is replaced with
+                                &quot;#&quot;, email-shaped text is replaced
+                                with a placeholder, and every word that is not
+                                on a fixed list of common interface and coupon
+                                words is dropped. The request never contains
+                                text you typed into fields, the page text
+                                outside that outline, or the page&apos;s address
+                                path or query. Its contents are the same whether
+                                or not you are signed in; the extension attaches
+                                its usual sign-in token as it does on other
                                 requests, but our server does not use it to
                                 identify you for this request. Our server asks
                                 an AI model which control on the page is the
@@ -231,6 +233,23 @@ const PrivacyPolicy = () => {
                                 turn checkout sharing off at any time in the
                                 extension&apos;s settings.
                             </>,
+                            <>
+                                <strong>
+                                    Coupon boxes the extension finds.
+                                </strong>{' '}
+                                If you&apos;re signed in and the extension finds
+                                the coupon field on a store we have no setup
+                                for, and a code you applied there lowered your
+                                total, it sends us that store&apos;s web address
+                                and the page locations of its coupon field,
+                                apply button and total, linked to your account.
+                                Never the code, your cart, order or payment
+                                details. We use it to support that store for
+                                every shopper once enough shoppers found the
+                                same field. We delete it 30 days after the
+                                extension last sent it, or when you delete your
+                                account, and it is included in your data export.
+                            </>,
                         ]}
                     />
                     <Sub>On our website</Sub>
@@ -302,7 +321,7 @@ const PrivacyPolicy = () => {
                     <Bullets
                         items={[
                             'Caramel’s servers are operated by Devino. Data travels to them encrypted over HTTPS.',
-                            'Account details, favorite stores, savings history and account-linked coupon results are kept until you delete them or ask us to delete your account.',
+                            'Account details, favorite stores, savings history, account-linked coupon results and the coupon boxes the extension found are kept until you delete them or ask us to delete your account; coupon boxes are also deleted 30 days after the extension last sent them. Codes you shared and stores you asked us to add stay after that, without your account, email or browser type on them.',
                             'Sign-in sessions expire after 7 days (website sessions are extended while you stay active); signing out ends the session and deletes its record immediately. Records of sessions that expire without signing out, including their IP address and browser type, are kept until you delete your account.',
                             'Cart page summaries are not stored in our database. They are processed to classify your cart, and the result is kept in temporary memory for up to 24 hours so the same cart is not processed twice.',
                             'Cart-page outlines (see “Finding the promo-code box” above) are not stored in our database. The model’s answer, which control is the code box, is kept in temporary memory for up to 24 hours for that store and page shape so the same page is not processed twice, looked up by a one-way hash of the store and outline rather than by the outline itself. Your IP address is used to rate-limit these requests. The outcome event described above is kept in our self-hosted analytics.',
@@ -403,7 +422,7 @@ const PrivacyPolicy = () => {
                         'Use it for advertising, or for creditworthiness or lending decisions.',
                         'Read or collect payment card details, your address, your order number or order history, or passwords you type into stores.',
                         'Send full page addresses or page contents of the sites you visit: for each page you load, the extension sends only its hostname (see above), and the cart summary only when described above.',
-                        'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
+                        'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page” and, if you are signed in, the coupon box locations described under “Coupon boxes the extension finds”, each only as described there.',
                         'Run code downloaded from the internet: everything the extension runs ships inside the extension package.',
                     ]}
                 />
@@ -462,8 +481,8 @@ const PrivacyPolicy = () => {
                     items={[
                         'Pause Caramel on any site, or turn auto-apply off, from the extension.',
                         'Turn checkout sharing and savings sync on or off at any time in the extension’s settings.',
-                        'Download your data, or delete your saved Caramel data (savings, favorite stores and coupon results), from Profile → Data & privacy on grabcaramel.com.',
-                        'Ask us to access, correct or delete your account and everything linked to it by emailing hello@devino.ca from the address on your account. We act on deletion requests within 30 days; deleting your account removes your login, sign-in sessions, favorite stores, savings history and coupon results, and unlinks you from codes you shared.',
+                        'Download your data, or delete your saved Caramel data (savings, favorite stores, coupon results and the coupon boxes the extension found; this also removes your account, email and browser type from your store requests and unlinks you from codes you shared), from Profile → Data & privacy on grabcaramel.com.',
+                        'Ask us to access, correct or delete your account and everything linked to it by emailing hello@devino.ca from the address on your account. We act on deletion requests within 30 days; deleting your account removes your login, sign-in sessions, favorite stores, savings history, coupon results and the coupon boxes the extension found, removes your account, email and browser type from your store requests, and unlinks you from codes you shared.',
                         'Uninstall the extension at any time; this stops all collection and removes what it stored in your browser.',
                     ]}
                 />
@@ -482,7 +501,7 @@ const PrivacyPolicy = () => {
             >
                 <div className="bg-caramel/10 text-caramel mb-6 inline-flex items-center gap-3 rounded-full px-6 py-3 text-sm font-semibold">
                     <FaShieldAlt className="h-4 w-4" />
-                    Effective Date: October 14, 2026
+                    Effective Date: November 10, 2026
                 </div>
                 <p className="mx-auto max-w-4xl text-lg leading-relaxed text-gray-600 dark:text-gray-300">
                     Welcome to{' '}

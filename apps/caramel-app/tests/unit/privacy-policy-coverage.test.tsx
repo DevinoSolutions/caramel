@@ -76,8 +76,8 @@ describe('privacy policy coverage', () => {
             'never contains text you typed into fields',
             "Devino's own AI model proxy",
             "which currently passes the request to NVIDIA's hosted model service (NIM)",
-            'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page”, and only as described there.',
-            'Effective Date: October 14, 2026',
+            'The only other page content the extension sends is the trimmed cart-page outline described under “Finding the promo-code box on a cart page” and, if you are signed in, the coupon box locations described under “Coupon boxes the extension finds”, each only as described there.',
+            'Effective Date: November 10, 2026',
             'for that store and page shape',
             'Your IP address is used to rate-limit these requests.',
         ]) {
@@ -99,5 +99,29 @@ describe('privacy policy coverage', () => {
             "Coupon codes you choose to share. If you're signed in, you can add a code on a store page, and, if the extension's \"Share codes I enter at checkout\" setting is on, the extension sends a code you typed yourself once the store accepts it. We store only the code, the store, and your account (to limit abuse); never your cart, order or payment details. Shared codes are shown publicly to other shoppers without your name. You can turn checkout sharing off at any time in the extension's settings.",
         )
         expect(normalized).not.toContain('is not switched on yet')
+    })
+
+    it('discloses the coupon box proposals a signed-in extension sends (T-15470, wording delegated 2026-11-10)', () => {
+        const normalized = text.replace(/&quot;/g, '"').replace(/\s+/g, ' ')
+        for (const claim of [
+            "Coupon boxes the extension finds. If you're signed in and the extension finds the coupon field on a store we have no setup for, and a code you applied there lowered your total, it sends us that store's web address and the page locations of its coupon field, apply button and total, linked to your account.",
+            'Never the code, your cart, order or payment details.',
+            'We delete it 30 days after the extension last sent it, or when you delete your account, and it is included in your data export.',
+            'sends the box locations described under "Coupon boxes the extension finds" below.',
+        ]) {
+            expect(normalized).toContain(claim)
+        }
+    })
+
+    it('covers coupon boxes, store requests and shared codes in retention and deletion (T-12703, wording delegated 2026-11-10)', () => {
+        const normalized = text.replace(/\s+/g, ' ')
+        for (const claim of [
+            'account-linked coupon results and the coupon boxes the extension found are kept until you delete them or ask us to delete your account; coupon boxes are also deleted 30 days after the extension last sent them.',
+            'Codes you shared and stores you asked us to add stay after that, without your account, email or browser type on them.',
+            'delete your saved Caramel data (savings, favorite stores, coupon results and the coupon boxes the extension found; this also removes your account, email and browser type from your store requests and unlinks you from codes you shared)',
+            'coupon results and the coupon boxes the extension found, removes your account, email and browser type from your store requests, and unlinks you from codes you shared.',
+        ]) {
+            expect(normalized).toContain(claim)
+        }
     })
 })
