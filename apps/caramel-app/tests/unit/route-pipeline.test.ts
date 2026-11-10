@@ -732,6 +732,34 @@ describe('extension/oauth/authorize — CORS + rate-limit (F-007)', () => {
         },
     )
 
+    // T-5449 H2 (closed 2026-11-10, T-4318): a nonce used to buy our OWN
+    // /redirect a pass through the allowlist, and the hop then parked the
+    // session under that caller-chosen nonce for /poll. Both are gone.
+    it.each(['apple', 'google'])(
+        '%s: refuses our own /redirect as a destination, nonce or not -> 400',
+        async provider => {
+            const extras: Record<string, string>[] = [
+                {},
+                { nonce: '3f2b8c1e-5a47-4d6b-9e10-7c2d4a8b9f01' },
+            ]
+            for (const extra of extras) {
+                const res = await authorizeGET(
+                    authorizeRequest({
+                        provider,
+                        // The hop URI the shim was exempted for: BETTER_AUTH_URL + /redirect.
+                        redirect_uri:
+                            'http://localhost:58000/api/extension/oauth/redirect',
+                        ...extra,
+                    }),
+                )
+                expect(res.status).toBe(400)
+                expect(await res.json()).toEqual({
+                    error: 'Disallowed redirect_uri',
+                })
+            }
+        },
+    )
+
     it('accepts the Edge Add-ons build redirect URI', async () => {
         const res = await authorizeGET(
             authorizeRequest({
