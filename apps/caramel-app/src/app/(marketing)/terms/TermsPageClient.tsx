@@ -40,7 +40,7 @@ import {
 //   custom EULA for it (checked 2026-11-07), so Apple's standard EULA applies;
 // - contact address: /privacy.
 // TODO(T-8425): legal wording waits for the owner's approval before this ships.
-const EFFECTIVE_DATE = 'October 26, 2026'
+const EFFECTIVE_DATE = 'November 10, 2026'
 
 type Section = {
     id: string
@@ -65,7 +65,7 @@ const sections: Section[] = [
             },
             {
                 subtitle: 'Changes to These Terms',
-                text: 'We may update these Terms as Caramel evolves. When we make a material change, we will update the effective date at the top of this page and, if you have an account, tell you by email or in the app before the change takes effect. Continuing to use Caramel after a change means you accept the updated Terms.',
+                text: 'We may update these Terms as Caramel evolves. When we make a material change, we will update the effective date at the top of this page and, if you have an account, tell you by email before the change takes effect. Continuing to use Caramel after a change means you accept the updated Terms.',
             },
         ],
     },
@@ -76,7 +76,7 @@ const sections: Section[] = [
         content: [
             {
                 subtitle: 'No Charge',
-                text: 'Caramel is free. There is no paid plan, and we never ask for a payment card. If that ever changes, we will update these Terms and tell you before anything is charged, and nothing you already use will start costing money without your agreement.',
+                text: 'Caramel is free. There is no paid plan, and we never ask for a payment card. If we ever add optional paid features, everything Caramel does for free today stays free, we will tell you before anything is offered for a fee, and nothing will be charged without your agreement.',
             },
         ],
     },
