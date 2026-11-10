@@ -2,8 +2,7 @@
 //
 // THE check of the signed state /api/extension/oauth/authorize issues: its
 // HMAC and its age. The code exchange (POST /api/extension/oauth) adds its own
-// provider/redirect-URI match on top; the redirect hop uses it alone, so it
-// never acts on a state it did not sign (security audit 2026-10-21, M2).
+// provider/redirect-URI match on top.
 import { env } from '@/lib/env'
 import { createHmac, timingSafeEqual } from 'crypto'
 
@@ -11,12 +10,10 @@ export interface ExtensionOAuthStatePayload {
     provider: string
     redirectUri: string
     iat: number
-    /** Safari shim only. TODO(safari-shim-removal) */
-    nonce?: unknown
     /**
-     * The Safari flow's install id + first-touch record, signed into the state
-     * by /authorize (its exchange runs server-side, so the extension cannot
-     * put them in the POST body). Unvalidated shape here: re-validated on read.
+     * The install id + first-touch record /authorize signed into the state
+     * (the POST body's own fields win). Unvalidated shape here: re-validated
+     * on read.
      */
     attribution?: { iid?: unknown; firstTouch?: unknown }
     /** The native app's PKCE S256 challenge, signed in by /authorize. */
