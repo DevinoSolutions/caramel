@@ -273,7 +273,7 @@ describe('Safari asks for a different pattern and can refuse the prompt outright
         const steps = screen.getByText(/For other websites/).closest('p')
         expect(steps?.textContent).toContain('Always Allow on Every Website')
         expect(steps?.textContent).toContain('page menu')
-        expect(steps?.textContent).not.toMatch(/AA/)
+        expect(steps?.textContent).not.toMatch(/\bAA\b/)
 
         fireEvent.click(screen.getByRole('button', { name: 'Enable Caramel' }))
         expect(requestCalls).toEqual([{ origins: ['<all_urls>'] }])

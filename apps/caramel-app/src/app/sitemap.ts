@@ -7,6 +7,7 @@ import { BASE_URL } from '@/lib/env.client'
 import { DOCS_PATH } from '@/lib/marketing/docsContent'
 import { COMPARISON_PATH } from '@/lib/seo/extensionComparison'
 import { HONEY_GUIDE_PATH } from '@/lib/seo/honeyExtensionGuide'
+import { isPrunedFromSitemap } from '@/lib/seo/sitemapStorePrune'
 import {
     STORE_SITEMAP_ROW_LIMIT,
     collapseStoreRows,
@@ -113,11 +114,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
             changeFrequency: route.changeFrequency,
             priority: route.priority,
         })),
-        ...stores.map(store => ({
-            url: `${origin}/coupons/${encodeURIComponent(store.base)}`,
-            lastModified: storeLastModified(store.lastModified),
-            changeFrequency: 'daily' as const,
-            priority: 0.7,
-        })),
+        // Store `<loc>`s only: the zero-impression stores are left out here
+        // (sitemapStorePrune.ts). The letter pages above are bucketed from ALL
+        // `stores`, so the directory still links every pruned page, and the
+        // pages themselves are untouched (indexable, no noindex).
+        ...stores
+            .filter(store => !isPrunedFromSitemap(store))
+            .map(store => ({
+                url: `${origin}/coupons/${encodeURIComponent(store.base)}`,
+                lastModified: storeLastModified(store.lastModified),
+                changeFrequency: 'daily' as const,
+                priority: 0.7,
+            })),
     ]
 }
