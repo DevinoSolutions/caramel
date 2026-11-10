@@ -481,8 +481,8 @@ jobs:
       # autodeploy of the same commit. Proven 2026-08-06: a625be9's own test
       # failed at 14:40:44Z, two seconds before the deploy carrying its fix
       # finished at 14:40:46Z. Wait for the site to report this commit or a
-      # descendant of it (T-9435: one manual prod deploy carries every merge up to
-      # main's HEAD, so a superseded commit's sha is never served; ancestry is
+      # descendant of it (T-9435: one deploy can carry several merges up to
+      # main's HEAD, so a superseded commit's sha may never be served; ancestry is
       # decided by GitHub's compare API, which GH_TOKEN below authorizes with the
       # job's `contents: read`).
       #
@@ -509,11 +509,10 @@ jobs:
           DEPLOY_WAIT_HINT: 'The site is still serving an older commit after 20 minutes. Both environments deploy from GitHub Actions (Dokploy pull mode): check the Dokploy workflow run for this commit and the service deployments tab, then re-run this job once the deploy has landed.'
         run: bash .github/workflows/scripts/wait-for-deploy.sh
 
-      # Order matters: the deploy gate runs BEFORE the toolchain installs. On main the gate polls
-      # once and fails with the exact reason whenever a manual prod deploy has not caught up
-      # (the common case), so installing pnpm deps + a Chromium first spent about 40s of a
-      # runner on every such red before the first useful line. Nothing below needs to run
-      # unless the deployment carries this commit.
+      # Order matters: the deploy gate runs BEFORE the toolchain installs. The gate waits up to
+      # 20 minutes on both branches, so installing pnpm deps + a Chromium first would spend
+      # runner time on every wait or timeout before the first useful line. Nothing below needs
+      # to run unless the deployment carries this commit.
       - uses: pnpm/action-setup@v6
         with:
           run_install: false
@@ -530,7 +529,7 @@ jobs:
         run: pnpm --filter caramel-app exec playwright install --with-deps chromium
 
       # run-e2e-push.sh wraps `pnpm test:e2e`: when the suite fails while the
-      # served sha CHANGED during the run (a manual prod deploy swapped the
+      # served sha CHANGED during the run (a deploy swapped the
       # containers mid-suite, T-9427) it reruns the suite once, provided the
       # settled deployment still carries this commit (it may be a newer
       # descendant). A failure with an unchanged sha stays red. The failed
