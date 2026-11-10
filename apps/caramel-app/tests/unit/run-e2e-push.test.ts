@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 // T-9427 — .github/workflows/scripts/run-e2e-push.sh runs the deployed-site E2E
 // suite and reruns it ONCE, only when the suite failed while /api/version's sha
-// CHANGED during the run (a manual prod deploy swapped the containers mid-suite).
+// CHANGED during the run (a deploy swapped the containers mid-suite).
 // Every other failure keeps the suite's own exit code. The script runs for real;
 // its collaborators are MOCKS planted first on a PATH that holds nothing else:
 //   - MOCK curl   — replays scripted (status code, body) /api/version responses,
