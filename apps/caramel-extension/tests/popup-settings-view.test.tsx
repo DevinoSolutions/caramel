@@ -174,6 +174,12 @@ describe('popup settings view', () => {
                 'Off unless you turn it on. Shares only the code and store, when the store accepts it. Requires sign-in.',
             ),
         ).toBeInTheDocument()
+        // T-17452: the same sync note the consent card shows, as helper text.
+        expect(
+            screen.getByText(
+                'Your choice is saved to your browser profile; in Chrome it syncs to your other computers signed in to the same Google profile (with Chrome sync on).',
+            ),
+        ).toBeInTheDocument()
         expect(share).not.toBeChecked()
         expect(syncData.checkoutCodeSharingConsent).toBeUndefined()
 
