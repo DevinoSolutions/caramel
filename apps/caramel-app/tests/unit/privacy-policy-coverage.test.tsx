@@ -132,7 +132,7 @@ describe('privacy policy coverage', () => {
             'Your settings, kept in your browser’s extension storage. If you use your browser’s sync feature, your browser syncs them to your other devices.',
         )
         expect(normalized).toContain(
-            'Your checkout code-sharing choice (Share codes or No thanks, when you chose, and which version of the prompt you saw), kept in your browser’s synced extension storage. In Chrome it follows your Google profile: other computers where you are signed in to Chrome with sync on use the same choice, and Google stores it as part of your Chrome Sync data. In Firefox it syncs through your Firefox account when Add-ons sync is on.',
+            'Your checkout code-sharing choice (Share codes or No thanks, when you chose, and which version of the prompt you saw), kept in your browser’s extension storage. In Chrome it follows your Google profile: other computers where you are signed in to Chrome with sync on use the same choice, and Google stores it as part of your Chrome Sync data. In Firefox on a computer it syncs through your Firefox account when Add-ons sync is on.',
         )
     })
 })

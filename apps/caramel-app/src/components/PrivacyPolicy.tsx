@@ -314,8 +314,8 @@ const PrivacyPolicy = () => {
                             'Your settings, kept in your browser’s extension storage. If you use your browser’s sync feature, your browser syncs them to your other devices.',
                             /* T-17452 2026-11-12: new wording, pending owner review. Chrome and
                                Firefox sync verified (MDN storage.sync; the manifest sets a Firefox
-                               add-on ID). Edge and Safari deliberately not named: not confirmed. */
-                            'Your checkout code-sharing choice (Share codes or No thanks, when you chose, and which version of the prompt you saw), kept in your browser’s synced extension storage. In Chrome it follows your Google profile: other computers where you are signed in to Chrome with sync on use the same choice, and Google stores it as part of your Chrome Sync data. In Firefox it syncs through your Firefox account when Add-ons sync is on.',
+                               add-on ID). Edge not named: not confirmed. Safari does not sync storage.sync (Apple docs), hence "extension storage", not "synced". */
+                            'Your checkout code-sharing choice (Share codes or No thanks, when you chose, and which version of the prompt you saw), kept in your browser’s extension storage. In Chrome it follows your Google profile: other computers where you are signed in to Chrome with sync on use the same choice, and Google stores it as part of your Chrome Sync data. In Firefox on a computer it syncs through your Firefox account when Add-ons sync is on.',
                             'Your sign-in session token, your account name, email and profile picture (cached for the popup), a short log of your recent savings, a cached list of supported stores, and recent diagnostic timings, kept in the extension’s local storage on this device.',
                             'While Caramel tries codes on a store page, the codes tried and the result are kept in that tab’s session storage, which your browser clears when you close the tab.',
                             'Uninstalling the extension removes everything it stored in your browser.',
