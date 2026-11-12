@@ -12,6 +12,7 @@ import {
 } from 'vitest'
 import {
     CODE_SHARING_CONSENT_KEY,
+    CODE_SHARING_SYNC_NOTE,
     codeSharingAccepted,
     parseCodeSharingConsent,
 } from '../code-sharing-consent.js'
@@ -1459,6 +1460,15 @@ describe('consent: nothing is sent before the shopper says yes', () => {
             )
             // Nothing leaked into the page's own DOM.
             expect(shareCard().children.length).toBe(0)
+        })
+
+        it('says the choice syncs, in one small line that is not a per-browser guess (T-17452)', async () => {
+            const root = await openCard()
+            const note = root.querySelector('#caramel-share-sync')
+            expect(note.textContent).toBe(
+                'Your choice is saved to your browser profile; in Chrome it syncs to your other computers signed in to the same Google profile (with Chrome sync on).',
+            )
+            expect(note.textContent).toBe(CODE_SHARING_SYNC_NOTE)
         })
 
         it('links to the privacy policy', async () => {

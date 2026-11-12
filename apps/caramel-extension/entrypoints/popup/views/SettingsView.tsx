@@ -12,6 +12,7 @@ import {
     caramelUsageDiagnosticsActive,
     logError,
 } from '../../../caramel-base.js'
+import { CODE_SHARING_SYNC_NOTE } from '../../../code-sharing-consent.js'
 import { caramelUrl } from '../../../popup-core.js'
 import { SavingsBanner } from '../components/SavingsBanner'
 import { useToast } from '../components/toast'
@@ -247,6 +248,9 @@ export function SettingsView({
                     <small>
                         Off unless you turn it on. Shares only the code and
                         store, when the store accepts it. Requires sign-in.
+                    </small>
+                    <small id="shareCheckoutCodesSyncNote">
+                        {CODE_SHARING_SYNC_NOTE}
                     </small>
                 </span>
                 <input

@@ -124,4 +124,15 @@ describe('privacy policy coverage', () => {
             expect(normalized).toContain(claim)
         }
     })
+
+    it('lists the synced checkout code-sharing choice as its own browser-storage item, next to the unchanged settings item (T-17452, wording pending owner review)', () => {
+        const normalized = text.replace(/\s+/g, ' ')
+        // The owner-approved settings sentence stays exactly as it was.
+        expect(normalized).toContain(
+            'Your settings, kept in your browser’s extension storage. If you use your browser’s sync feature, your browser syncs them to your other devices.',
+        )
+        expect(normalized).toContain(
+            'Your checkout code-sharing choice (Share codes or No thanks, when you chose, and which version of the prompt you saw), kept in your browser’s synced extension storage. In Chrome it follows your Google profile: other computers where you are signed in to Chrome with sync on use the same choice, and Google stores it as part of your Chrome Sync data. In Firefox it syncs through your Firefox account when Add-ons sync is on.',
+        )
+    })
 })
