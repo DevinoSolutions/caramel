@@ -176,7 +176,7 @@ jobs:
             echo "${key}/web=ghcr.io/devinosolutions/caramel/web@${DIGEST_WEB}"
             echo 'EOF_IMAGES'
           } >> "${GITHUB_OUTPUT}"
-      - uses: DevinoSolutions/dokploy-release@d66a2e9a36c7c154f92f9aa18b7f7aced6e73b77 # v1.1.0
+      - uses: DevinoSolutions/dokploy-release@38d84fb3f3e72d766b4067579d2d9e6bca93d5cb # v2.0.0
         with:
           service: ${{ steps.images.outputs.key }}
           environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
