@@ -1,5 +1,9 @@
+import { fastFailFetch, isAiUnavailableError } from '@/lib/ai-fast-fail'
 import { env } from '@/lib/env'
-import { fetchWithoutRedirects } from '@/lib/proxy-fallback-headers'
+import {
+    fetchWithoutRedirects,
+    isDevinoProxyUrl,
+} from '@/lib/proxy-fallback-headers'
 import * as Sentry from '@sentry/nextjs'
 
 const DEFAULT_MODEL = env.OPENROUTER_MODEL
@@ -46,6 +50,43 @@ export class OpenRouterError extends Error {
     }
 }
 
+/**
+ * Fast-fail bounds for a call through the Devino proxy (T-17816, rule C4g).
+ * Every chat() call is non-streamed, so the canonical non-streamed bounds
+ * apply (50 s first byte, 55 s for all attempts: the proxy holds a
+ * non-streamed reply up to 40 s before committing it), each capped at the
+ * caller's own timeoutMs, which stays the real budget of the call.
+ */
+export const NON_STREAMED_FIRST_BYTE_MS = 50_000
+export const NON_STREAMED_DEADLINE_MS = 55_000
+
+/** The global fetch, read at call time, that never follows a redirect. */
+const noRedirectFetch: typeof fetch = (input, init) =>
+    fetch(input, { ...init, redirect: 'error' })
+
+/**
+ * How one chat() call is sent.
+ *
+ * On the Devino proxy: fast-fail (ai-fast-fail.ts, the fleet copy). A dropped
+ * connection, a first-byte timeout or a 429/502/503/504 is retried at most
+ * twice, only while the call's budget leaves room; the paid-fallback headers
+ * ride the first attempt only; and no attempt follows a redirect, which would
+ * hand the key (and the paid key) to whatever host it names. That replaces
+ * fetchWithoutRedirects there, whose connect-only retry fast-fail covers.
+ *
+ * Anywhere else (OpenRouter direct): exactly what it was. One attempt; with
+ * the paid key, no redirect followed.
+ */
+function sendFor(timeoutMs: number, carriesFallbackKey: boolean): typeof fetch {
+    if (isDevinoProxyUrl(env.OPENROUTER_API_URL)) {
+        return fastFailFetch(noRedirectFetch, {
+            firstByteMs: Math.min(NON_STREAMED_FIRST_BYTE_MS, timeoutMs),
+            deadlineMs: Math.min(NON_STREAMED_DEADLINE_MS, timeoutMs),
+        })
+    }
+    return carriesFallbackKey ? fetchWithoutRedirects : fetch
+}
+
 export async function chat(
     messages: ChatMessage[],
     opts: ChatOptions = {},
@@ -63,8 +104,9 @@ export async function chat(
     // their dashboard) — both stashed on the active span below.
     const requestId = crypto.randomUUID()
 
+    const timeoutMs = opts.timeoutMs ?? 8000
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 8000)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
         const body: Record<string, unknown> = {
             model: opts.model || DEFAULT_MODEL,
@@ -87,7 +129,7 @@ export async function chat(
         const carriesFallbackKey = Object.keys(opts.headers ?? {}).some(
             name => name.toLowerCase() === 'x-orf-fallback-key',
         )
-        const send = carriesFallbackKey ? fetchWithoutRedirects : fetch
+        const send = sendFor(timeoutMs, carriesFallbackKey)
         const res = await send(`${env.OPENROUTER_API_URL}/chat/completions`, {
             method: 'POST',
             signal: controller.signal,
@@ -100,6 +142,19 @@ export async function chat(
                 'X-Request-Id': requestId,
             },
             body: JSON.stringify(body),
+        }).catch((error: unknown) => {
+            // Fast-fail gave up (the proxy stayed unreachable, or sent no reply
+            // headers within the budget): the same OpenRouterError a failed
+            // status is, with timedOut set so the callers report a slow
+            // upstream as a warning, as they do for their own abort.
+            if (isAiUnavailableError(error)) {
+                throw new OpenRouterError(
+                    `openrouter unavailable: ${error.detail}`,
+                    error.status,
+                    { timedOut: error.kind === 'timeout', cause: error },
+                )
+            }
+            throw error
         })
         if (!res.ok) {
             const detail = await res.text().catch(() => '')
