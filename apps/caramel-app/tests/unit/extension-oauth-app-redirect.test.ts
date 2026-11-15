@@ -231,14 +231,19 @@ describe('GET /api/extension/oauth/authorize — the app redirect URI', () => {
         expect(inner.r).toBe(APP)
     })
 
-    it('refuses a nonce together with the app URI', async () => {
+    it('ignores a nonce: it is never signed into the state (Safari shim removed, T-4318)', async () => {
         const res = await authorize({
             provider: 'google',
             redirect_uri: APP,
             code_challenge: CHALLENGE,
             nonce: '3f2b8c1e-5a47-4d6b-9e10-7c2d4a8b9f01',
         })
-        expect(res.status).toBe(400)
+        expect(res.status).toBe(200)
+        const { state } = (await res.json()) as { state: string }
+        const payload = JSON.parse(
+            Buffer.from(state.split('.')[0]!, 'base64url').toString(),
+        ) as Record<string, unknown>
+        expect('nonce' in payload).toBe(false)
     })
 
     it('refuses a look-alike app URI', async () => {

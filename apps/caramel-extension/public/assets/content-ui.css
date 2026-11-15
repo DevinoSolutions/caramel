@@ -600,6 +600,13 @@ button:focus {
     line-height: 1.45;
     color: var(--cm-text-secondary);
 }
+/* T-17452: small print under the body, same family as the privacy link. */
+.caramel-share-sync {
+    margin: 0 0 8px;
+    font-size: var(--cm-text-xs);
+    line-height: 1.45;
+    color: var(--cm-text-muted);
+}
 .caramel-share-privacy {
     display: inline-block;
     margin: 0 0 12px;

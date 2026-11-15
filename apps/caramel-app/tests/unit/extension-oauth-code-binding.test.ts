@@ -6,30 +6,25 @@ import {
     isBoundCode,
 } from '@/lib/auth/extensionOAuthCodeBinding'
 import { NATIVE_APP_REDIRECT_URI } from '@/lib/auth/extensionOAuthRedirect'
-import {
-    NONCE_STORE_MAX_ENTRIES,
-    consumeNonceResult,
-    resetNonceStoreForTests,
-    setNonceResult,
-} from '@/lib/extension-oauth-nonce'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { NextRequest } from 'next/server'
 import { createHash, createHmac } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Security audit 2026-10-21 (T-5449), H1 and M2.
+// Security audit 2026-10-21 (T-5449), H1, H2 and M2.
 //
 // H1: every code that comes back through our /redirect hop is exchanged under
-// the SAME provider redirect_uri, so the provider cannot tell the app's flow
-// from the Safari shim's, and nothing tied a code to the state it was issued
-// with. A code lifted from the app's callback could be traded under a fresh
-// Safari-shim state, which carries no PKCE challenge, and the app's verifier
-// was never asked for. The hop now binds each code to its state, and the
-// exchange redeems a hop code only under that state.
+// the SAME provider redirect_uri, so the provider cannot tell one hop flow
+// from another, and nothing tied a code to the state it was issued with. A
+// code lifted from the app's callback could be traded under another state
+// naming the hop, which carries no PKCE challenge, and the app's verifier was
+// never asked for. The hop now binds each code to its state, and the exchange
+// redeems a hop code only under that state.
 //
-// M2: the hop is unauthenticated, yet its Safari branch stored results and ran
-// internal exchanges for whatever (unverified) state it was handed, with no
-// throttle. It now acts only on a state we signed, and it is rate-limited.
+// H2 / M2: the hop's Safari branch (removed 2026-11-10, T-4318) completed the
+// exchange itself and parked the session under a caller-chosen nonce for
+// /poll. The branch and /poll are gone: a state naming the hop is forwarded
+// nowhere, and every hop request is rate-limited.
 
 const { envMock, OAUTH_STATE_SECRET } = vi.hoisted(() => {
     const OAUTH_STATE_SECRET = 'test-oauth-state-secret-code-binding'
@@ -83,6 +78,9 @@ const EXT = 'https://gaimofgglbackoimfjopicmbmnlccfoe.chromiumapp.org/'
 const VERIFIER = 'a'.repeat(20) + 'B'.repeat(20) + '-._~0123456789'
 const CHALLENGE = createHash('sha256').update(VERIFIER).digest('base64url')
 const NONCE = '11111111-2222-3333-4444-555555555555'
+// The shipped Safari 1.4.11 build's state shape: our own hop as redirectUri,
+// plus a nonce. Authorize no longer signs it; the pins below sign it by hand.
+const SAFARI_SHAPE = { provider: 'google', redirectUri: HOP, nonce: NONCE }
 
 function sign(payload: Record<string, unknown>, secret = OAUTH_STATE_SECRET) {
     const data = JSON.stringify({ ...payload, iat: Date.now() })
@@ -119,7 +117,6 @@ beforeEach(() => {
     fetchMock.mockClear()
     vi.stubGlobal('fetch', fetchMock)
     vi.mocked(checkRateLimit).mockClear()
-    resetNonceStoreForTests()
 })
 
 const exchange = (body: Record<string, unknown>) =>
@@ -139,21 +136,17 @@ const providerTokenCalls = () =>
     )
 
 describe('a code is redeemable only under the state it came back with (H1)', () => {
-    it("THE ATTACK: the app's code under a fresh Safari-shim state is refused before any provider call", async () => {
+    it("THE ATTACK: the app's code under another hop state is refused before any provider call", async () => {
         // What a hostile app on the device holds after intercepting the
         // callback: the hop-bound code and the app's state (with its PKCE
-        // challenge, which it cannot satisfy). It mints its own shim state.
+        // challenge, which it cannot satisfy), plus some other hop state.
         const appState = sign({
             provider: 'google',
             redirectUri: APP,
             codeChallenge: CHALLENGE,
         })
         const interceptedCode = bindCodeToState('GOOGLE_CODE', appState)
-        const shimState = sign({
-            provider: 'google',
-            redirectUri: HOP,
-            nonce: NONCE,
-        })
+        const shimState = sign(SAFARI_SHAPE)
 
         const res = await exchange({
             provider: 'google',
@@ -169,12 +162,8 @@ describe('a code is redeemable only under the state it came back with (H1)', () 
         expect(providerTokenCalls()).toHaveLength(0)
     })
 
-    it('and the RAW code under that shim state is refused too (the hop never forwards one)', async () => {
-        const shimState = sign({
-            provider: 'google',
-            redirectUri: HOP,
-            nonce: NONCE,
-        })
+    it('and the RAW code under that hop state is refused too (the hop never forwards one)', async () => {
+        const shimState = sign(SAFARI_SHAPE)
         const res = await exchange({
             provider: 'google',
             code: 'GOOGLE_CODE',
@@ -293,49 +282,30 @@ describe('the binding itself', () => {
     })
 })
 
-describe('the hop acts only on a state we signed, and is throttled (M2)', () => {
+describe('the Safari poll branch is gone (H2) and the hop is throttled (M2)', () => {
     const hop = (params: Record<string, string>) =>
         redirectGET(new NextRequest(`${HOP}?${new URLSearchParams(params)}`))
 
-    it('a forged Safari state (unsigned nonce) stores nothing and runs no exchange', async () => {
-        const forged = sign(
-            { provider: 'google', redirectUri: HOP, nonce: NONCE },
-            'not-our-secret',
-        )
-        const res = await hop({ code: 'C', state: forged })
-        expect(res.status).toBe(400)
-        expect(fetchMock).not.toHaveBeenCalled()
-        expect(consumeNonceResult(NONCE)).toBeNull()
-    })
-
-    it('a forged Safari error callback does not plant a sentinel either', async () => {
-        const forged = sign(
-            { provider: 'google', redirectUri: HOP, nonce: NONCE },
-            'not-our-secret',
-        )
-        await hop({ error: 'access_denied', state: forged })
-        expect(consumeNonceResult(NONCE)).toBeNull()
-    })
-
-    it('a genuine Safari state still completes, through a bound code', async () => {
-        const state = sign({
-            provider: 'google',
-            redirectUri: HOP,
-            nonce: NONCE,
+    it('a genuinely signed Safari-shaped state runs no exchange and mints nothing', async () => {
+        const res = await hop({
+            code: 'GOOGLE_CODE',
+            state: sign(SAFARI_SHAPE),
         })
-        // The in-process exchange is the app's own POST; route the loopback
-        // fetch into the real handler so the binding is checked for real.
-        fetchMock.mockImplementationOnce(
-            async (input: RequestInfo | URL, init?: RequestInit) => {
-                expect(String(input)).toBe(`${BASE}/api/extension/oauth`)
-                const body = JSON.parse(String(init?.body))
-                expect(codeBoundToState(body.code, state)).toBe('GOOGLE_CODE')
-                return exchange(body)
-            },
-        )
-        const res = await hop({ code: 'GOOGLE_CODE', state })
-        expect(res.status).toBe(200)
-        expect(consumeNonceResult(NONCE)?.token).toBe('session-token')
+        expect(res.status).toBe(400)
+        expect(await res.json()).toEqual({
+            error: 'Missing extension redirect URI',
+        })
+        expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('a Safari-shaped error callback is answered as JSON, with no page and no exchange', async () => {
+        const res = await hop({
+            error: 'access_denied',
+            state: sign(SAFARI_SHAPE),
+        })
+        expect(res.status).toBe(400)
+        expect(res.headers.get('content-type')).toContain('application/json')
+        expect(fetchMock).not.toHaveBeenCalled()
     })
 
     it('every hop request goes through the per-IP mutation limit', async () => {
@@ -344,25 +314,5 @@ describe('the hop acts only on a state we signed, and is throttled (M2)', () => 
             expect.anything(),
             'mutation',
         )
-    })
-
-    it('the nonce store refuses a new entry once full, and keeps the old ones', () => {
-        for (let i = 0; i < NONCE_STORE_MAX_ENTRIES; i++) {
-            expect(
-                setNonceResult(`nonce-${String(i).padStart(12, '0')}`, {
-                    token: 't',
-                    username: null,
-                    image: null,
-                }),
-            ).toBe(true)
-        }
-        expect(
-            setNonceResult('one-nonce-too-many', {
-                token: 't',
-                username: null,
-                image: null,
-            }),
-        ).toBe(false)
-        expect(consumeNonceResult('nonce-000000000000')?.token).toBe('t')
     })
 })

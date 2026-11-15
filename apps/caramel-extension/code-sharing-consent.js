@@ -17,10 +17,31 @@
 // CODE_SHARING_PROMPT_VERSION when the prompt's meaning changes therefore
 // re-asks every shopper, by construction.
 //
+// STORAGE AREA IS DELIBERATE: storage.SYNC, not storage.local (owner rule
+// 2026-11-12, T-17452). The shopper's choice follows their browser profile: it
+// roams to their other computers signed in to the same Chrome (Google) profile
+// with Chrome sync on, and the consent card, the popup toggle and the privacy
+// policy all say so (CODE_SHARING_SYNC_NOTE below). This is the opposite of the
+// session token, which caramel-base.js moved to storage.local because a
+// credential must not roam. A future agent must NOT "fix" this by moving the
+// record to local: that would silently break what those three surfaces tell the
+// shopper. Pinned by tests/code-sharing-consent-storage-area.test.mjs.
+//
 // Pure: callers pass the browser handle, so this module is safe to import into
 // the service worker (it touches no DOM and has no top-level effects).
 export const CODE_SHARING_CONSENT_KEY = 'checkoutCodeSharingConsent'
 const CODE_SHARING_PROMPT_VERSION = 1
+
+// The one-line "this syncs" note shown on the consent card and under the popup
+// toggle (T-17452, wording pending owner review). One string so the two
+// surfaces cannot drift. It is deliberately NOT per-browser: the content realm
+// has no build-time browser stamp (background.js's detectStoreChannel runs only
+// in the worker and needs the user agent to tell Edge from Chrome), so it says
+// what is true in every build and names the one browser where the sync is
+// confirmed. Showing it does not change what the consent means, so it does not
+// bump CODE_SHARING_PROMPT_VERSION.
+export const CODE_SHARING_SYNC_NOTE =
+    'Your choice is saved to your browser profile; in Chrome it syncs to your other computers signed in to the same Google profile (with Chrome sync on).'
 
 // The version the shopper is asked about now. Read by the funnel diagnostics
 // (code-share-funnel.js) so a drop can be told apart per prompt wording.

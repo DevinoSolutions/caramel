@@ -99,18 +99,3 @@ function isIpAddress(value: string): boolean {
         return false
     }
 }
-
-/**
- * Copy every client-IP header present on `from` onto `to`. For a server-side
- * hop that re-issues the visitor's request to our own API (the Safari OAuth
- * shim's exchange call): the inner request is metered by readClientIp too, so
- * it carries the original headers rather than none. Best effort only: if the
- * hop leaves through Cloudflare, Cloudflare overwrites CF-Connecting-IP (see
- * the TODO on completeSafariOauth in the oauth redirect route).
- */
-export function forwardClientIpHeaders(from: Headers, to: Headers): void {
-    for (const name of CLIENT_IP_HEADERS) {
-        const value = from.get(name)
-        if (value) to.set(name, value)
-    }
-}

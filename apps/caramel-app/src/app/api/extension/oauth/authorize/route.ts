@@ -14,7 +14,6 @@ import {
 import { isValidCodeChallenge } from '@/lib/auth/nativeAppPkce'
 import { env } from '@/lib/env'
 import { BASE_URL } from '@/lib/env.client'
-import { isValidNonce } from '@/lib/extension-oauth-nonce'
 import { createHmac } from 'crypto'
 import { NextResponse } from 'next/server'
 
@@ -23,31 +22,11 @@ const OAUTH_STATE_SECRET = env.EXTENSION_OAUTH_STATE_SECRET
 const createSignedState = (payload: {
     provider: 'google' | 'apple'
     redirectUri: string
-    // ====================================================================
-    // COMPATIBILITY SHIM for the shipped Safari/iOS build (store version
-    // published 2026-04-29): remove after a poll-free Safari version ships.
-    // TODO(safari-shim-removal)
-    // ====================================================================
-    // Present ONLY for the shipped Safari flow, which cannot capture an OAuth
-    // redirect and instead polls for the result (see
-    // src/lib/extension-oauth-nonce.ts). Carrying it INSIDE the signed state is
-    // what lets /redirect recognize a Safari callback: the OAuth provider hands
-    // the state back to us untouched, so the nonce survives the round trip
-    // without the provider needing to know about it.
-    //
-    // Chrome/Firefox send no nonce and are byte-identically unaffected:
-    // JSON.stringify drops an `undefined` value, so the signed payload for a
-    // nonce-less call is exactly the string it was before this shim, and the
-    // POST exchange's verifySignedState() re-hashes the decoded payload as-is
-    // (it never re-serializes), so an EXTRA key cannot invalidate a signature.
-    nonce?: string
     // The install id + first-touch record the extension passed as `iid` / `ft`
-    // (validated). Only the Safari flow sends them here: its exchange runs
-    // server-side on /redirect, which cannot see the extension's storage, so the
-    // signed state is how they reach POST /api/extension/oauth. The other
-    // browsers put the same two fields in that POST's body. Omitted entirely
-    // (not null) when absent, so an attribution-less state is byte-identical to
-    // what it was before.
+    // (validated), signed into the state so POST /api/extension/oauth can read
+    // them when its body carries none. The extensions put the same two fields in
+    // that POST's body, which wins. Omitted entirely (not null) when absent, so
+    // an attribution-less state is byte-identical to what it was before.
     attribution?: { iid?: string; firstTouch?: FirstTouchRecord }
     // The native app's PKCE S256 challenge (nativeAppPkce.ts), signed into the
     // state so the exchange can demand the matching verifier. Present ONLY for
@@ -91,10 +70,6 @@ export const GET = withRoute(
         const provider = searchParams.get('provider') as
             'google' | 'apple' | null
         const redirectUri = searchParams.get('redirect_uri')
-        // COMPATIBILITY SHIM (see createSignedState above) —
-        // TODO(safari-shim-removal). Absent for Chrome/Firefox, which keeps
-        // their behavior exactly as it was.
-        const nonceParam = searchParams.get('nonce')
 
         if (!provider) {
             return NextResponse.json(
@@ -113,29 +88,6 @@ export const GET = withRoute(
         if (!redirectUri) {
             return NextResponse.json(
                 { error: 'Missing redirect_uri parameter' },
-                { status: 400 },
-            )
-        }
-
-        // A nonce outside the bounds /poll will look up would produce a state
-        // whose result can never be collected — the popup would poll a dead
-        // nonce for its full 5 minutes and then report a timeout. Refuse it
-        // here instead, so the failure is legible at the call that caused it.
-        // TODO(safari-shim-removal)
-        if (nonceParam !== null && !isValidNonce(nonceParam)) {
-            return NextResponse.json(
-                { error: 'Invalid nonce parameter' },
-                { status: 400 },
-            )
-        }
-        const nonce = nonceParam ?? undefined
-
-        // The native app never polls: its result comes back on the redirect.
-        // A nonce in the state would make /redirect take the Safari branch and
-        // swallow the code, so the combination is refused rather than guessed.
-        if (nonce !== undefined && isNativeAppRedirectUri(redirectUri)) {
-            return NextResponse.json(
-                { error: 'nonce is not supported with the app redirect_uri' },
                 { status: 400 },
             )
         }
@@ -171,17 +123,8 @@ export const GET = withRoute(
         // Never sign a state (or build a provider URL) for a destination that
         // is not one of our extensions — the redirect hop refuses to forward
         // to one anyway (extensionOAuthRedirect.ts), this just fails at the
-        // call that caused it. The Safari nonce flow is exempt ONLY for its
-        // one real redirect_uri, our OWN /redirect (it exchanges the code
-        // server-side and never forwards it): a nonce on any other
-        // destination gets no free pass. TODO(safari-shim-removal)
-        const isSafariShimRedirect =
-            nonce !== undefined &&
-            redirectUri === `${baseURL}/api/extension/oauth/redirect`
-        if (
-            !isSafariShimRedirect &&
-            !isAllowedExtensionRedirectUri(redirectUri)
-        ) {
+        // call that caused it.
+        if (!isAllowedExtensionRedirectUri(redirectUri)) {
             reportRejectedExtensionRedirect({
                 route: 'extension/oauth/authorize',
                 provider,
@@ -205,7 +148,6 @@ export const GET = withRoute(
             const state = createSignedState({
                 provider,
                 redirectUri,
-                nonce,
                 codeChallenge,
                 attribution:
                     installId || firstTouch

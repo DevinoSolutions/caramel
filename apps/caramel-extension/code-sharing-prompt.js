@@ -1,5 +1,6 @@
 // Split out of UI-helpers.js (T-5446), moved verbatim: no behavior change.
 import { CARAMEL_ENV } from './caramel-env.js'
+import { CODE_SHARING_SYNC_NOTE } from './code-sharing-consent.js'
 import {
     CARAMEL_X_ICON,
     caramelShopperOnly,
@@ -44,6 +45,7 @@ export async function showCodeSharingPrompt({ site, code }) {
 <h2 id="caramel-share-title" class="caramel-share-title">Share this code with other Caramel shoppers?</h2>
 <p class="caramel-share-code"><span id="caramel-share-code-text"></span> <span class="caramel-share-at">at <span id="caramel-share-site-text"></span></span></p>
 <p class="caramel-share-body">Caramel would send only the code and the store, linked to your account to prevent abuse — never your cart, order or payment details. Shared codes are shown publicly without your name. Choosing Share codes also turns this on for codes you enter at checkout later. You can change this anytime in Caramel’s settings.</p>
+<p id="caramel-share-sync" class="caramel-share-sync"></p>
 <a id="caramel-share-privacy" class="caramel-share-privacy" target="_blank" rel="noopener noreferrer">Privacy policy</a>
 <div class="caramel-share-actions">
 <button id="caramel-share-yes" class="caramel-share-btn" type="button">Share codes</button>
@@ -51,6 +53,8 @@ export async function showCodeSharingPrompt({ site, code }) {
 </div>`
     card.querySelector('#caramel-share-code-text').textContent = code
     card.querySelector('#caramel-share-site-text').textContent = site
+    card.querySelector('#caramel-share-sync').textContent =
+        CODE_SHARING_SYNC_NOTE
     card.querySelector('#caramel-share-privacy').href =
         `${CARAMEL_ENV.baseUrl}/privacy`
     root.appendChild(card)

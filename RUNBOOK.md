@@ -156,34 +156,33 @@ broken. Check Dokploy's Postgres container/managed DB status first.
 
 Deploys run through Dokploy. Prod (grabcaramel.com, www and docs) is the
 **"Caramel Prod Compose (LIVE)"** compose service in the Caramel Dokploy
-project. It builds the root `docker-compose.yml` from `main`.
+project. Its source is the GitHub Actions provider (Dokploy pull mode).
 
-**Prod deploys are manual by design: auto-deploy is OFF on the prod
-compose.** A push to `main` still reaches Dokploy through the GitHub App
-webhook, and Dokploy answers `200 {"message":"No apps to deploy"}`. Merging to
-`main` therefore never deploys by itself. Verified on 2026-10-27: #569 and #571
-sat undeployed until a deploy was queued by hand.
+**Prod and dev deploy automatically since 2026-11-07.** Every push to `main`
+(prod) or `dev` builds the web image in `.github/workflows/dokploy.yml`
+(GitHub Actions) and Dokploy deploys that release to the matching compose; it
+no longer builds from source. Merging to `main` therefore deploys by itself,
+within minutes.
 
 Merge-to-main checklist (whoever merges does all of it):
 
-1. Right after the merge, take a backup of the prod compose's Postgres (the
-   compose backup in Dokploy), then queue ONE prod deploy of the compose.
-   Never queue in the 23:55-00:05Z window (a team-wide no-deploy rule for
-   the shared Dokploy host around 00:00Z). Keep at most one queued deploy per
-   service: if one is already waiting, leave it alone (it builds `main`'s HEAD
-   when it runs) and never re-queue.
-2. When the deploy is done, check that `https://grabcaramel.com/api/version`
-   reports the merged sha (or a descendant) and capture it.
-3. Re-run the failed E2E job of the newest merge commit on `main` that the
-   deploy carries, once. Never re-run several at once: a re-run in the same
-   concurrency group cancels any other in-flight one. On `main` the push-mode
-   E2E job checks once that prod already serves the commit or a descendant of
-   it (`DEPLOY_WAIT_TIMEOUT_SECONDS` is `0` there; ancestry is decided by
-   GitHub's compare API) and fails immediately when it does not, which is
-   every merge, because no deploy has run yet. Re-run it after step 2 passes.
-   One deploy usually carries several merges: older merge commits' E2E runs
-   stay red on the commit list by design (they would pass on a re-run, since
-   prod serves a descendant of them, but the newest one is enough).
+1. Take a backup of the prod compose's Postgres (the compose backup in
+   Dokploy) BEFORE merging to `main`, because the merge is what deploys.
+   Never merge in the 23:55-00:05Z window (a team-wide no-deploy rule for the
+   shared Dokploy host around 00:00Z). Do not queue a manual Dokploy deploy
+   for caramel: the push already did, and a second queued job only adds
+   contention.
+2. After the merge, check that `https://grabcaramel.com/api/version` reports
+   the merged sha (or a descendant) and capture it.
+3. The push-mode E2E job waits for the deploy by itself: on both `main` and
+   `dev` its deploy gate polls for up to 1200s
+   (`DEPLOY_WAIT_TIMEOUT_SECONDS`; ancestry is decided by GitHub's compare
+   API) before the suite runs. Re-run a failed E2E job only after step 2
+   passes, once, for the newest merge commit. Never re-run several at once:
+   a re-run in the same concurrency group cancels any other in-flight one.
+   One deploy can carry several merges, so an older merge commit's sha may
+   never be served; its E2E run can stay red by design (a re-run would pass,
+   since prod serves a descendant of it, but the newest one is enough).
 
 Since F-016 the root `docker-compose.yml` (`Dockerfile` +
 `docker-entrypoint.sh`) is the INTENDED deployment unit — local and CI build
@@ -197,7 +196,9 @@ Rollback sequence:
 1. Confirm the outage via `/api/health/db` and Sentry.
 2. Open the Dokploy dashboard, find the prod compose (above), and use its
    deployment history to redeploy the last known-good build. TODO(human):
-   confirm the exact rollback button for the compose service.
+   confirm the exact rollback button for the compose service. To leave pull
+   mode entirely, disconnect the GitHub Actions provider on the prod compose
+   and set its source back to github/`main`.
 3. Re-run the [post-deploy smoke check](#post-deploy-smoke-check) against
    the rolled-back deployment before declaring it resolved.
 4. If the regression was a DB migration, `prisma migrate deploy` is

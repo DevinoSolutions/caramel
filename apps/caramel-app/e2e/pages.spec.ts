@@ -120,6 +120,24 @@ test.describe('Privacy Page', () => {
     })
 })
 
+test.describe('Terms Page', () => {
+    // grabcaramel.com/terms 404'd until T-8425.
+    test('terms page renders content and links the privacy policy', async ({
+        page,
+    }) => {
+        const res = await page.goto('/terms')
+        expect(res?.status()).toBe(200)
+        await expect(
+            page.getByRole('heading', { name: 'Terms of Service', level: 1 }),
+        ).toBeVisible()
+        await expect(
+            page
+                .getByRole('main')
+                .getByRole('link', { name: 'Privacy Policy' }),
+        ).toHaveAttribute('href', '/privacy')
+    })
+})
+
 test.describe('Supported Stores Page', () => {
     test('supported stores page loads', async ({ page }) => {
         await page.goto('/supported-stores')

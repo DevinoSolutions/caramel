@@ -52,7 +52,10 @@ const communityLinks = [
     },
 ]
 
-const legalLinks = [{ name: 'Privacy Policy', url: '/privacy' }]
+const legalLinks = [
+    { name: 'Privacy Policy', url: '/privacy' },
+    { name: 'Terms of Service', url: '/terms' },
+]
 
 const headingClasses =
     'text-sm font-semibold uppercase tracking-wider text-white dark:text-caramel'

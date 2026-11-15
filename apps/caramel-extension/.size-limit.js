@@ -287,7 +287,11 @@ module.exports = [
         // 4inkjets.com), and a config run whose total read before the submit
         // but not after stops instead of chaining over a possible win.
         // Measured 116.45 kB.
-        limit: '116.7 KB',
+        // 2026-11-12 (T-17452), raised 116.7 -> 116.9 kB: the consent card
+        // says the choice syncs across the browser profile, and the sentence
+        // is one shared constant the popup reads too (code-sharing-consent.js).
+        // Measured 116.76 kB (+0.31 kB).
+        limit: '116.9 KB',
         brotli: false,
     },
     {
