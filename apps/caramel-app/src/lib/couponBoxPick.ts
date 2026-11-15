@@ -22,7 +22,7 @@
 import { createCouponBoxAnswerCache } from '@/lib/couponBoxPickAnswerCache'
 import { env } from '@/lib/env'
 import { firstJsonObject } from '@/lib/llmJson'
-import { chat } from '@/lib/openrouter'
+import { chat, OpenRouterError } from '@/lib/openrouter'
 import { scrubOutline } from '@/lib/outlineScrub'
 import { proxyFallbackHeaders } from '@/lib/proxy-fallback-env'
 import * as Sentry from '@sentry/nextjs'
@@ -769,7 +769,11 @@ export async function pickCouponBox(
         // by the minified stack frames, which change every build and reopened
         // the same timeout as a "new" issue each release (CARAMEL-27/2G/2Q/34,
         // T-7526).
-        const timedOut = error instanceof Error && error.name === 'AbortError'
+        // On the Devino proxy, fast-fail can run out of the same budget first:
+        // chat() then throws an OpenRouterError with timedOut set.
+        const timedOut =
+            (error instanceof Error && error.name === 'AbortError') ||
+            (error instanceof OpenRouterError && error.timedOut)
         Sentry.captureException(error, {
             level: timedOut ? 'warning' : 'error',
             tags: { surface: 'coupon-box-pick', operation: 'model_call' },
