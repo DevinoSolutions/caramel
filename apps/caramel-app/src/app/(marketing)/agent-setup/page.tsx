@@ -5,6 +5,7 @@ import {
     AGENT_SETUP_PATH,
     API,
     APP_NAME,
+    MCP_URL,
     PROMPT_MD_URL,
     RESOURCES,
 } from '@/lib/agentSetup/agentSetup.config'
@@ -121,9 +122,16 @@ export default function AgentSetupPage() {
                             (store lookup).
                         </li>
                         <li>
-                            Nothing that needs a key. There is no {APP_NAME} MCP
-                            server or SDK; the browser extension itself is yours
-                            to install from{' '}
+                            Optional, for your {APP_NAME} account (saved stores,
+                            savings, settings): the {APP_NAME} MCP server at{' '}
+                            <code className="break-words">
+                                <UrlBreakableText text={MCP_URL} />
+                            </code>
+                            , which signs in with your {APP_NAME} account.
+                        </li>
+                        <li>
+                            Nothing that needs a key. The browser extension
+                            itself is yours to install from{' '}
                             <Link
                                 href="/apps"
                                 className="text-caramel underline hover:no-underline"

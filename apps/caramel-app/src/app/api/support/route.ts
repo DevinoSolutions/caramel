@@ -22,6 +22,7 @@ import { auth } from '@/lib/auth/auth'
 import { parseRecipientList, sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import { APP_VERSION } from '@/lib/env.client'
+import { currentBridgedSession } from '@/lib/mcp/routeBridgeContext'
 import { sentryIssueSearchUrl } from '@/lib/sentryLinks'
 import { render } from '@react-email/render'
 import * as Sentry from '@sentry/nextjs'
@@ -192,8 +193,11 @@ export const POST = withRoute(
 
         try {
             // A session ALWAYS overrides client-supplied identity for the
-            // user_id + reply email — client identity is never trusted.
-            const session = await auth.api.getSession({ headers: req.headers })
+            // user_id + reply email — client identity is never trusted. An
+            // MCP support request runs as its OAuth user (routeBridge.ts).
+            const session =
+                currentBridgedSession() ??
+                (await auth.api.getSession({ headers: req.headers }))
             const userId = session?.user?.id
             const replyEmail = session?.user?.email ?? body.email
 

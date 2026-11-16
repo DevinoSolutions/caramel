@@ -44,6 +44,12 @@ const { prismaMock } = vi.hoisted(() => ({
         // couponsRepo.unlinkCodesSubmittedByUser (T-12392).
         $executeRaw: vi.fn(),
         session: { deleteMany: vi.fn(async () => ({ count: 1 })) },
+        // MCP OAuth grants, cleared with the account (connectedApps.ts).
+        oauthConsent: { deleteMany: vi.fn() },
+        oauthAccessToken: { deleteMany: vi.fn() },
+        oauthRefreshToken: { deleteMany: vi.fn() },
+        mcpGrantRevocation: { deleteMany: vi.fn() },
+        mcpToolCall: { deleteMany: vi.fn() },
     },
 }))
 vi.mock('@/lib/prisma', () => ({ default: prismaMock }))

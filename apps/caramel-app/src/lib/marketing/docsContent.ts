@@ -12,6 +12,8 @@
 // - supported stores: (marketing)/supported-stores/page.tsx description
 // - sources: (marketing)/sources/page.tsx description
 // - agent setup: (marketing)/agent-setup/page.tsx + agentSetup.config.ts
+// - MCP server: src/lib/mcp/server.ts (instructions), src/lib/mcp/tools/
+//   registry.ts (what the tools do), src/app/api/mcp/route.ts (the URLs)
 // - support: (marketing)/support/page.tsx ("a human replies within 1 business
 //   day"), .well-known/security.txt (Contact: the support page)
 // - install links: src/lib/brandLinks.ts
@@ -168,7 +170,7 @@ export const DOCS_SECTIONS: ReadonlyArray<DocsSection> = [
         heading: 'Using Caramel with an AI agent',
         paragraphs: [
             'Paste one sentence into Claude Code, Codex, Cursor, OpenCode or GitHub Copilot and it installs the Caramel coupon skill and verifies the public coupon API. No API key and no account are needed.',
-            'The coupon API is public, unauthenticated, read-only JSON: query it with ?site=<domain> or ?search=<text>, and resolve store domains with /api/coupons/stores?q=<prefix>. There is no Caramel MCP server or SDK; the browser extension itself is for you to install.',
+            'The coupon API is public, unauthenticated, read-only JSON: query it with ?site=<domain> or ?search=<text>, and resolve store domains with /api/coupons/stores?q=<prefix>. There is no SDK; the browser extension itself is for you to install.',
         ],
         links: [
             {
@@ -189,6 +191,30 @@ export const DOCS_SECTIONS: ReadonlyArray<DocsSection> = [
                 href: '/api/coupons',
                 description: 'public, read-only JSON',
                 resource: true,
+            },
+        ],
+    },
+    {
+        id: 'mcp',
+        heading: 'Connect Caramel to Claude, ChatGPT or another AI app (MCP)',
+        paragraphs: [
+            'The Caramel MCP server lets an AI app work with your Caramel account: find coupon codes and the best deals for a store, see your savings, save or unsave stores, change your settings, submit or rate a code, ask Caramel to support a store, contact support, export your data, and delete your data or your account (it asks you first).',
+            'Add a remote MCP server (streamable HTTP) with the address https://grabcaramel.com/api/mcp. The first time it is used, your AI app opens the Caramel sign-in and consent screen, where you choose what it may do. Directories that list each tool by name use https://grabcaramel.com/api/mcp?tools=directory.',
+            'In Claude Code: claude mcp add --transport http caramel https://grabcaramel.com/api/mcp, then run /mcp and pick caramel to sign in.',
+            'See or disconnect connected AI apps under Connected AI apps on your profile. Disconnecting stops the app right away.',
+        ],
+        links: [
+            {
+                label: 'MCP server card',
+                href: '/.well-known/mcp/server-card.json',
+                description:
+                    'the endpoint, transport and sign-in metadata in one document',
+                resource: true,
+            },
+            {
+                label: 'Your profile',
+                href: '/profile#connected-apps',
+                description: 'see and disconnect connected AI apps',
             },
         ],
     },

@@ -18,16 +18,19 @@ const appDir = path.resolve(__dirname, '../../src/app')
 const authDir = path.join(appDir, '(auth)')
 const providersFile = path.join(appDir, 'providers.tsx')
 
-function authRoutes(): string[] {
+/** Every page under (auth), nested ones included (/oauth/consent). */
+function authRoutes(dir = authDir, prefix = ''): string[] {
     return fs
-        .readdirSync(authDir, { withFileTypes: true })
+        .readdirSync(dir, { withFileTypes: true })
         .filter(entry => entry.isDirectory())
-        .filter(entry =>
-            ['page.tsx', 'page.ts'].some(file =>
-                fs.existsSync(path.join(authDir, entry.name, file)),
-            ),
-        )
-        .map(entry => `/${entry.name}`)
+        .flatMap(entry => {
+            const route = `${prefix}/${entry.name}`
+            const full = path.join(dir, entry.name)
+            const own = ['page.tsx', 'page.ts'].some(file =>
+                fs.existsSync(path.join(full, file)),
+            )
+            return [...(own ? [route] : []), ...authRoutes(full, route)]
+        })
 }
 
 function declaredLayoutlessRoutes(): string[] {

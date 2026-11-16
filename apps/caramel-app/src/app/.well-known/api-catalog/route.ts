@@ -1,7 +1,10 @@
 import { BASE_URL } from '@/lib/env.client'
+import { MCP_RESOURCE } from '@/lib/mcp/oauthConfig'
 
 // RFC 9727 API catalog: where an agent looks first for a site's public APIs.
-// Caramel publishes one, the read-only coupon API that llms.txt documents
+// Caramel publishes two: the MCP server (OAuth, the user's account; its
+// server card and RFC 9728 metadata as service-meta) and the read-only coupon
+// API that llms.txt documents
 // (/api/coupons?site=<domain>|?search=<text>, /api/coupons/stores?q=<prefix>).
 // The write endpoints beside it (submit, report, increment, expire) serve the
 // extension and are not a supported integration surface, so they are not
@@ -19,6 +22,20 @@ const SERVICE_DOCS = [
 
 const API_CATALOG = {
     linkset: [
+        {
+            anchor: MCP_RESOURCE,
+            'service-doc': [{ href: `${origin}/docs#mcp`, type: 'text/html' }],
+            'service-meta': [
+                {
+                    href: `${origin}/.well-known/mcp/server-card.json`,
+                    type: 'application/json',
+                },
+                {
+                    href: `${origin}/.well-known/oauth-protected-resource`,
+                    type: 'application/json',
+                },
+            ],
+        },
         {
             anchor: `${origin}/api/coupons`,
             'service-doc': SERVICE_DOCS,

@@ -35,7 +35,11 @@
         "lighthouse": "lhci autorun"
     },
     "dependencies": {
+        "@better-auth/oauth-provider": "1.7.18",
         "@heroicons/react": "2.2.0",
+        "@mastra/core": "1.83.0",
+        "@mastra/mcp": "2.9.0",
+        "@mastra/quickjs": "0.1.5",
         "@prisma/adapter-pg": "7.10.1",
         "@prisma/client": "7.10.1",
         "@react-email/render": "2.2.0",
@@ -45,6 +49,7 @@
         "@tailwindcss/postcss": "4.3.5",
         "bcryptjs": "3.0.3",
         "better-auth": "1.7.18",
+        "fetch-to-node": "2.1.0",
         "formik": "2.4.9",
         "framer-motion": "14.10.1",
         "jose": "6.2.15",
@@ -54,6 +59,7 @@
         "posthog-js": "1.447.3",
         "posthog-node": "5.63.1",
         "prisma": "7.10.1",
+        "quickjs-emscripten": "0.31.0",
         "rate-limiter-flexible": "11.3.0",
         "react": "19.3.1",
         "react-dom": "19.3.1",

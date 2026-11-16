@@ -7,6 +7,7 @@ import {
     type AppleRevocationOutcome,
 } from '@/lib/auth/appleTokenRevocation'
 import { expireSessionCookies } from '@/lib/auth/expireSessionCookies'
+import { accountOAuthCleanup } from '@/lib/mcp/connectedApps'
 import prisma from '@/lib/prisma'
 import {
     foldRequesterEmail,
@@ -33,6 +34,9 @@ import { z } from 'zod'
 //    columns, not a foreign key, and a signed-out request carries NO user id,
 //    so the SetNull alone would leave the address behind. They are scrubbed in
 //    the same transaction with the same predicate the data-delete route uses.
+//  - The MCP OAuth grants (consents, access and refresh tokens, Disconnect
+//    watermarks, the MCP tool-call audit rows) hang off no foreign key either
+//    and are deleted in the same transaction (accountOAuthCleanup).
 //  - verification_tokens (better-auth's one-time tokens) hang off no foreign
 //    key either: their `identifier` holds the address (or a purpose prefix plus
 //    the address) and, for a password-reset token, `value` holds the user id.
@@ -139,6 +143,10 @@ export const POST = withRoute(
                 where: verificationWhere({ userId, email }),
             }),
             prisma.user.deleteMany({ where: { id: userId } }),
+            // The AI apps connected over MCP (src/lib/mcp/connectedApps.ts).
+            // better-auth's OAuth tables hold `userId` as a plain column, not
+            // a foreign key, so the user cascade does not reach them.
+            ...accountOAuthCleanup(userId),
         ])
 
         const deleted = users.count > 0

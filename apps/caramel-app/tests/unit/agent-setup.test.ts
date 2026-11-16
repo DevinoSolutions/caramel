@@ -3,6 +3,7 @@ import {
     AGENT_GUIDES,
     AGENT_SETUP_COPY_TEXT,
     API,
+    MCP_URL,
     PROMPT_MD_URL,
     renderPromptMd,
     SKILL_NAME,
@@ -63,8 +64,12 @@ describe('agent-setup prompt.md', () => {
         )
         // Placeholders the spec template uses; none may survive rendering.
         expect(body).not.toMatch(/<App>|<docs-host>|<app-domain>|TODO|lorem/i)
-        // No invented integrations: Caramel has no MCP server or SDK.
-        expect(body).not.toMatch(/mcp\.grabcaramel|claude mcp add|npm i /)
+        // No invented integrations: no SDK, no MCP subdomain. The MCP server
+        // is the real one at /api/mcp (src/app/api/mcp/route.ts).
+        expect(body).not.toMatch(/mcp\.grabcaramel|npm i /)
+        expect(body).toContain(
+            `claude mcp add --transport http caramel ${MCP_URL}`,
+        )
         expect(AGENT_SETUP_COPY_TEXT).toBe(
             `Fetch and execute the appropriate instructions to set me up for Caramel from ${PROMPT_MD_URL}`,
         )

@@ -52,6 +52,8 @@ export default function Providers({ children }: { children: ReactNode }) {
             '/verify',
             '/forgot-password',
             '/reset-password',
+            // MCP OAuth consent: (auth) shell, no site Header/Footer.
+            '/oauth/consent',
         ],
         [],
     )

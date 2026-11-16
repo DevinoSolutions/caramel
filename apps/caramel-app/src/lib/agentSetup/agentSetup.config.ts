@@ -9,7 +9,12 @@
 // WHAT CARAMEL ACTUALLY HAS (audit 2026-09-22 — the spec says "wire up the
 // richest integration the app actually has", and forbids a watered-down
 // generic snippet, so this is the honest inventory):
-//   - NO MCP server, NO SDK, NO CLI, NO webhooks, NO docs subdomain.
+//   - NO SDK, NO CLI, NO webhooks, NO docs subdomain.
+//   - The Caramel MCP server (added 2026-11-16, src/app/api/mcp/route.ts):
+//     remote streamable HTTP at MCP_URL below, OAuth 2.1 sign-in with the
+//     user's Caramel account. It is the integration for a signed-in user's
+//     account (settings, saved stores, savings); the skill below stays the
+//     no-account path for coupon lookups.
 //   - A PUBLIC, unauthenticated, read-only coupon API: `GET /api/coupons`
 //     (site/search/page/limit — src/app/api/coupons/route.ts, rate-limited
 //     `read`, no origin gate) plus `/api/coupons/stores` and
@@ -23,6 +28,7 @@
 // everyone else: `npx skills add`), know the API, verify with one call.
 import { GITHUB_REPO_URL } from '@/lib/brandLinks'
 import { BASE_URL } from '@/lib/env.client'
+import { MCP_RESOURCE } from '@/lib/mcp/oauthConfig'
 
 export const APP_NAME = 'Caramel'
 
@@ -44,6 +50,9 @@ export const SKILLS_REPO = 'DevinoSolutions/caramel'
 export const MARKETPLACE_NAME = 'devino-caramel'
 export const PLUGIN_NAME = 'caramel'
 export const SKILL_NAME = 'caramel-coupons'
+
+/** The Caramel MCP server (OAuth; the user signs in with Caramel). */
+export const MCP_URL = MCP_RESOURCE
 
 /** The public API an agent calls. */
 export const API = {
@@ -82,8 +91,8 @@ const skillsCliInstallFor = (agent: string) =>
 /**
  * Per-agent instructions. Claude Code gets the plugin (marketplace +
  * install); everyone else gets the same skill through the `skills` CLI,
- * which places SKILL.md where that agent reads it. No MCP entries: there is
- * no Caramel MCP server, and an invented endpoint would 404.
+ * which places SKILL.md where that agent reads it. The MCP server is a
+ * separate, optional step in prompt.md (it needs the user's sign-in).
  */
 export const AGENT_GUIDES: readonly AgentGuide[] = [
     {
@@ -193,6 +202,8 @@ Steps:
 3. Verify the public coupon API answers.
 4. Print the completion message.
 
+Only if the user asked for account features (saved stores, savings, settings), also follow "Optional: connect the user's ${APP_NAME} account (MCP)" below.
+
 ## 1. Credentials
 
 None. The ${APP_NAME} coupon API is public and read-only; there is no API key, no OAuth and no environment variable to set. Never ask the user for a key.
@@ -232,6 +243,15 @@ Success: ${API.verifyExpectation}
 Print exactly this, filling the brackets:
 
 > ${APP_NAME} is set up for [agent name]. Installed: the \`${SKILL_NAME}\` skill (looks up coupon codes through ${API.coupons}). Verified: the public API answered for nike.com. Still yours to do: [the follow-up lines for your agent]. To have codes applied automatically while you shop, install the ${APP_NAME} extension for your browser from ${RESOURCES.apps} (an agent cannot install a browser extension for you).
+
+## Optional: connect the user's ${APP_NAME} account (MCP)
+
+The skill needs no account. To also let this agent work with the user's ${APP_NAME} account (saved stores, savings, settings, submitting and rating codes), add the ${APP_NAME} MCP server: remote, streamable HTTP, at \`${MCP_URL}\`. It signs in with OAuth: the user approves the connection on ${APP_NAME}'s consent screen the first time a tool is used, and chooses which permissions to grant.
+
+- Claude Code: \`claude mcp add --transport http caramel ${MCP_URL}\`, then tell the user to run /mcp and pick caramel to sign in.
+- Any other MCP client: add a remote (streamable HTTP) server named caramel with the URL above.
+
+Skip this step unless the user asked for account features.
 
 ## Resources
 

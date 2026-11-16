@@ -1,5 +1,6 @@
 import { safeReturnPath } from '@/lib/auth/safeReturnPath'
 import { BASE_URL } from '@/lib/env.client'
+import { oauthAuthorizeContinuation } from '@/lib/mcp/authorizeContinuation'
 import type { Metadata } from 'next'
 import LoginPageClient from './LoginPageClient'
 
@@ -63,15 +64,23 @@ export default async function Login({
         error?: string | string[]
         provider?: string | string[]
         next?: string
+        // The rest is an OAuth authorize request the MCP OAuth server bounced
+        // here (src/lib/mcp/authorizeContinuation.ts).
+        [authorizeParam: string]: string | string[] | undefined
     }>
 }) {
-    const { verified, error, provider, next } = await searchParams
+    const allParams = await searchParams
+    const { verified, error, provider } = allParams
+    const next = typeof allParams.next === 'string' ? allParams.next : undefined
     // `?provider=apple|google` is the extension deep-link (Safari/Firefox open
     // the login page preset to a provider). Normalize to the two real values
     // and ignore anything else, so a junk param can never auto-launch.
     const raw = Array.isArray(provider) ? provider[0] : provider
     const autoProvider = raw === 'google' || raw === 'apple' ? raw : undefined
-    const returnPath = safeReturnPath(next)
+    // An AI app connecting to Caramel (MCP) sent a signed-out visitor here:
+    // after sign-in, resume its authorize request instead of the home page.
+    const returnPath =
+        oauthAuthorizeContinuation(allParams) ?? safeReturnPath(next)
     return (
         <LoginPageClient
             verified={verified}

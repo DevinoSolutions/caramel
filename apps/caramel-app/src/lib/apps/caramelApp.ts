@@ -42,7 +42,7 @@ export const CARAMEL_APP: DevinoApp = parseDevinoApp({
         { type: 'macos', url: SAFARI_APP_STORE_URL },
     ],
     audiences: ['students'],
-    // No MCP server: the extension's only LLM surface is the internal cart
-    // classifier. The /apps AI section is gated on this flag.
-    mcp: false,
+    // The Caramel MCP server (src/app/api/mcp/route.ts, 2026-11-16). The
+    // /apps "Use Caramel with your AI" section is gated on this flag.
+    mcp: true,
 })
