@@ -9,7 +9,7 @@ browser = "1.10.0"
 fragment = "1.9.1"
 credentials = "1.5.0"
 googleid = "1.1.1"
-serialization = "1.12.0"
+serialization = "1.13.0"
 coroutines = "1.11.0"
 junit = "4.13.2"
 
