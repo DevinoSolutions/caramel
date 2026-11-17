@@ -146,6 +146,33 @@ function classifySeverity(vuln: OsvVuln): string {
 
 const HIGH_OR_CRITICAL = new Set(['HIGH', 'CRITICAL'])
 
+// Dated allowlist for HIGH/CRITICAL advisories that have NO patched release
+// yet. An entry stops gating only up to and including its `expires` day (UTC);
+// after that the advisory fails the gate again, so every entry must be
+// re-reviewed or dropped. Anything with a fix gets a real version bump instead.
+interface AllowedAdvisory {
+    id: string
+    expires: string // YYYY-MM-DD, inclusive
+    reason: string
+}
+
+const ALLOWED_ADVISORIES: readonly AllowedAdvisory[] = [
+    {
+        id: 'GHSA-fc5q-39xc-vjpf',
+        expires: '2026-12-01',
+        reason: 'build/dev tooling only, repo-authored patterns; checked no tracked source imports picomatch, micromatch, minimatch, fast-glob, globby, tinyglobby, glob or anymatch, and pnpm why --prod shows picomatch only under @sentry/nextjs build plugins (@rollup/plugin-commonjs), vite/tinyglobby/fdir peers and sass @parcel/watcher; drop when picomatch ships a fix (micromatch/picomatch#194)',
+    },
+]
+
+function activeAllowance(
+    id: string,
+    today = new Date().toISOString().slice(0, 10),
+): AllowedAdvisory | undefined {
+    return ALLOWED_ADVISORIES.find(
+        entry => entry.id === id && today <= entry.expires,
+    )
+}
+
 async function auditProdDeps(): Promise<number> {
     const pkgs = readProdClosure()
     console.log(
@@ -177,14 +204,28 @@ async function auditProdDeps(): Promise<number> {
 
     const failures: string[] = []
     const informational: string[] = []
+    const allowed: string[] = []
     for (const [pkg, ids] of Array.from(vulnIdsByPkg.entries())) {
         for (const id of ids) {
             const info = severityById.get(id)
             if (!info || info.withdrawn) continue
             const line = `  [${info.severity}] ${pkg} ${id} — ${info.summary.slice(0, 80)}`
-            if (HIGH_OR_CRITICAL.has(info.severity)) failures.push(line)
-            else informational.push(line)
+            if (!HIGH_OR_CRITICAL.has(info.severity)) {
+                informational.push(line)
+                continue
+            }
+            const allowance = activeAllowance(id)
+            if (allowance)
+                allowed.push(`${line} (allowed until ${allowance.expires})`)
+            else failures.push(line)
         }
+    }
+
+    if (allowed.length) {
+        console.log(
+            `[audit:prod] ${allowed.length} HIGH/CRITICAL advisory(ies) on the dated allowlist (not gating until expiry):`,
+        )
+        allowed.forEach(line => console.log(line))
     }
 
     if (informational.length) {
