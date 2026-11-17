@@ -150,7 +150,7 @@ model id ends up pinned.
 
 ### Routing through the Devino proxy
 
-`OPENROUTER_API_URL` (default `https://openrouter.ai/api/v1`) sets the base
+`OPENROUTER_API_URL` (default `https://proxyai.devino.ca/v1`; an openrouter.ai URL is refused at boot, T-19010) sets the base
 the classifier POSTs `<base>/chat/completions` to. To move production off
 OpenRouter, set three env vars together on the deploy:
 `OPENROUTER_API_URL=https://proxyai.devino.ca/v1`, `OPENROUTER_API_KEY` = a
