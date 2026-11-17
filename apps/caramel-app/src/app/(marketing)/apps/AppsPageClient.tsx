@@ -16,7 +16,9 @@
 // The page still has a job there (the sibling apps), so it is not redirected
 // away; it opens with an "already installed" note instead.
 import AgentSetupPill from '@/components/growth/AgentSetupPill'
+import { MCP_URL } from '@/lib/agentSetup/agentSetup.config'
 import { trackGrowthEvent } from '@/lib/analytics/growthEvents'
+import { CARAMEL_APP } from '@/lib/apps/caramelApp'
 import { canAdvertiseInstall } from '@/lib/surface/detectSurface'
 import { useSurface } from '@/lib/surface/SurfaceProvider'
 import Link from 'next/link'
@@ -260,9 +262,36 @@ export default function AppsPageClient() {
                     </section>
                 )}
 
-                {/* No "use with your AI tools" section: Caramel ships no MCP
-                    server (CARAMEL_APP.mcp is false). Add it here, gated on
-                    that flag, the day one exists — never before. */}
+                {CARAMEL_APP.mcp && (
+                    <section
+                        aria-labelledby="apps-ai-heading"
+                        data-testid="apps-ai-section"
+                    >
+                        <h2
+                            id="apps-ai-heading"
+                            className="mb-1 text-xl font-semibold text-gray-900 dark:text-white"
+                        >
+                            Use Caramel with your AI
+                        </h2>
+                        <p className="max-w-3xl text-gray-600 dark:text-gray-300">
+                            Connect Caramel to Claude, ChatGPT or any MCP client
+                            to find coupon codes and manage your saved stores
+                            and settings from a chat. Add this server address
+                            and sign in with your Caramel account:
+                        </p>
+                        <code className="mt-3 block w-fit break-all rounded-xl bg-gray-100 px-3 py-2 text-sm text-gray-900 dark:bg-white/10 dark:text-gray-100">
+                            {MCP_URL}
+                        </code>
+                        <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                            <Link
+                                href="/docs#mcp"
+                                className="text-caramel underline hover:no-underline"
+                            >
+                                How to connect
+                            </Link>
+                        </p>
+                    </section>
+                )}
 
                 <section
                     aria-labelledby="apps-devino-heading"

@@ -205,3 +205,13 @@ the coupon input, its apply button, or the toggle that reveals the box.
   is unset.
 
 Results are in `SCOREBOARD.md` § Coupon-box pick.
+
+## MCP tool choice eval
+
+`mcpToolChoice.eval.ts` gives a model the real MCP server instructions and every
+registered tool's id, title and description (`src/lib/mcp/server.ts`,
+`src/lib/mcp/tools/registry.ts`, imported, never copied) and asks which tool it
+would call first for 30 user requests, one per tool family. A case passes when
+the answer is one of the ids the case accepts; the gate is a match rate of at
+least 0.85. No tool runs and no database is touched. CI: the "MCP tool choice
+eval" job in `ai-evals.yml`, path-filtered to `src/lib/mcp/**` and `evals/**`.

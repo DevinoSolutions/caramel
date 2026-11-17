@@ -50,6 +50,21 @@ const { prismaMock, transactionMock } = vi.hoisted(() => {
             savingsEvent: { deleteMany: vi.fn() },
             favoriteStore: { deleteMany: vi.fn() },
             couponReport: { deleteMany: vi.fn() },
+            // The MCP OAuth grants (src/lib/mcp/connectedApps.ts), cleared
+            // in the same transaction because they hold no FK to the user.
+            oauthConsent: {
+                deleteMany: vi.fn(() => ({ op: 'oauthConsents' })),
+            },
+            oauthAccessToken: {
+                deleteMany: vi.fn(() => ({ op: 'oauthAccessTokens' })),
+            },
+            oauthRefreshToken: {
+                deleteMany: vi.fn(() => ({ op: 'oauthRefreshTokens' })),
+            },
+            mcpGrantRevocation: {
+                deleteMany: vi.fn(() => ({ op: 'mcpGrantRevocations' })),
+            },
+            mcpToolCall: { deleteMany: vi.fn(() => ({ op: 'mcpToolCalls' })) },
         },
     }
 })
@@ -228,13 +243,30 @@ describe('POST /api/account/delete', () => {
         await POST(deleteRequest({ confirm: 'DELETE' }))
 
         expect(transactionMock).toHaveBeenCalledTimes(1)
-        // The batch is [suggestions scrub, verification erase, user delete],
-        // in that order: the scrub needs the email the user row carries.
+        // The batch is [suggestions scrub, verification erase, user delete,
+        // then the MCP OAuth grants], in that order: the scrub needs the
+        // email the user row carries.
         expect(transactionMock.mock.calls[0]![0]).toEqual([
             { op: 'suggestions' },
             { op: 'verification' },
             { op: 'user' },
+            { op: 'oauthConsents' },
+            { op: 'oauthAccessTokens' },
+            { op: 'oauthRefreshTokens' },
+            { op: 'mcpGrantRevocations' },
+            { op: 'mcpToolCalls' },
         ])
+        for (const model of [
+            prismaMock.oauthConsent,
+            prismaMock.oauthAccessToken,
+            prismaMock.oauthRefreshToken,
+            prismaMock.mcpGrantRevocation,
+            prismaMock.mcpToolCall,
+        ]) {
+            expect(model.deleteMany).toHaveBeenCalledWith({
+                where: { userId: USER_ID },
+            })
+        }
         const scrub = prismaMock.siteSuggestion.updateMany.mock.calls[0]![0]
         expect(scrub.where).toEqual({
             OR: [

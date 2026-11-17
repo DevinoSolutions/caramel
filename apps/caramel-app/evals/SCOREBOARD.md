@@ -149,3 +149,15 @@ refused by the route and score as no pick; the largest fixture outline is ~35 Ki
 | 2026-10-30 | deepseek-v4.1-flash                         | 40 KiB | **100.0%** (64/64) | 1245 / 7758ms     | **GREEN** ×2, paid backup candidate (2026-10-30), same request. No misses, no empty answers. Slowest answer 14.5s. Known miss coversandall.com answered no box. As a backup it starts after the proxy's 8s wait, so an answer slower than 12s (1 per run here) would miss the route's 20s timeout.                                                                                                                                                                                                                                                                                         |
 | 2026-11-04 | nemotron-3.5-lightning-30b-a3b, effort none | 40 KiB | **76.6%** (49/64)  | 1318 / 14006ms    | **RED**, rejected again as a replacement (T-8107). Through the Devino proxy, at reasoning effort low it still thinks through all 1000 tokens and returns nothing. At effort none it answers in about 40 tokens, but answers no box on 13 pages that have one (smkw.com, lacoste.ca, moltonbrown.com, samsonite.com, onekingslane.com, originpc.com and others), as in the 2026-10-21 reasoning-off row. castlery.com hit the 20s timeout. Local run, temporary effort override, not committed.                                                                                             |
 | 2026-11-04 | gpt-oss-20b (exact-model pin)               | 40 KiB | -                  | -                 | **RED**, provider side: 35 calls hit the 20s model timeout and the suite ran out of its 12 minutes before scoring. The free NIM pool was saturated that morning (the proxy lane reported other projects' eval and probe load). No code change; prod answers on the paid backup when the free model is slow.                                                                                                                                                                                                                                                                                |
+
+## MCP tool choice
+
+Dated rows from real `mcpToolChoice.eval.ts` runs (30 cases; gate: match rate
+
+> = 0.85). The model reads the real MCP server instructions and every registered
+> tool's id, title and description, and names the tool it would call first.
+
+| Date       | Model                    | Cases | Match rate         | Notes                                                                                                      |
+| ---------- | ------------------------ | ----- | ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| 2026-11-16 | fast-best (Devino proxy) | 30    | gate passed        | **GREEN**, first run of the new suite (local, through the proxy). Pass/fail only: the run was not verbose. |
+| 2026-11-16 | fast-best (Devino proxy) | 30    | **100.0%** (30/30) | **GREEN** ×2, same configuration, verbose. No misses.                                                      |

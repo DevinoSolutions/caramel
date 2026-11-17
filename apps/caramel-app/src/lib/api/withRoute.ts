@@ -36,6 +36,7 @@
 import { handleRouteError } from '@/lib/api/handleRouteError'
 import { readBodyCapped } from '@/lib/api/readBodyCapped'
 import { env } from '@/lib/env'
+import { currentBridgedSession } from '@/lib/mcp/routeBridgeContext'
 import {
     checkBearerFailureLimit,
     checkRateLimit,
@@ -246,13 +247,23 @@ export function withRoute<TBody = undefined>(
             // pull in the full better-auth graph (bcrypt, prisma, email
             // templates); every route that declares no `auth` keeps the
             // dependency graph it had pre-F-007.
-            const { auth } = await import('@/lib/auth/auth')
-            // Identical resolution for both modes — they differ ONLY in
-            // what a null result means. getSession returns null (it does
-            // not throw) for a missing, malformed, revoked, or expired
-            // credential, so 'optional' turns all of those into an
-            // anonymous request rather than a 401.
-            session = await auth.api.getSession({ headers: req.headers })
+            //
+            // An MCP tool call runs this route in-process as the user its
+            // OAuth token belongs to (src/lib/mcp/routeBridge.ts): that
+            // identity was verified by the MCP server, so it is used as is.
+            // The scope cannot be entered from an HTTP request.
+            const bridged = currentBridgedSession()
+            if (bridged) {
+                session = bridged
+            } else {
+                const { auth } = await import('@/lib/auth/auth')
+                // Identical resolution for both modes — they differ ONLY in
+                // what a null result means. getSession returns null (it does
+                // not throw) for a missing, malformed, revoked, or expired
+                // credential, so 'optional' turns all of those into an
+                // anonymous request rather than a 401.
+                session = await auth.api.getSession({ headers: req.headers })
+            }
             if (!session && config.auth === 'session') {
                 return unauthorized(cors)
             }

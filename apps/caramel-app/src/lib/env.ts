@@ -93,6 +93,10 @@ const serverObjectSchema = z.object({
     // value fails the boot instead of becoming a guessable secret.
     DEV_PROOF_SESSION_SECRET: z.string().trim().min(32).optional(),
     UPKUMA_HEALTH_SECRET: z.string().optional(),
+    // ChatGPT apps domain verification: the token the OpenAI platform issues
+    // for a submission, served at /.well-known/openai-apps-challenge. Unset
+    // (or blank) answers 404 there.
+    OPENAI_APPS_CHALLENGE_TOKEN: z.string().optional(),
     // Sendly is the ONLY email transport (src/lib/email.ts); useSend and Resend
     // are retired. The key is optional so a dev/CI boot without email still
     // starts — sendEmail() throws loudly at send time if it is missing.

@@ -100,7 +100,7 @@ describe('CARAMEL_APP (local entry until the producer lists Caramel)', () => {
         expect(storeUrl(CARAMEL_APP, 'edge')).toBe(EDGE_ADDONS_URL)
         expect(storeUrl(CARAMEL_APP, 'macos')).toBe(SAFARI_APP_STORE_URL)
         expect(storeUrl(CARAMEL_APP, 'android')).toBeNull()
-        expect(CARAMEL_APP.mcp).toBe(false)
+        expect(CARAMEL_APP.mcp).toBe(true)
     })
 })
 

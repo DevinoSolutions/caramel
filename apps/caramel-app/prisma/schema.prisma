@@ -542,3 +542,222 @@ model CouponBoxProposal {
   @@index([createdAt])
   @@map("coupon_box_proposals")
 }
+
+// ---------------------------------------------------------------------------
+// OAuth 2.1 authorization server for the Caramel MCP server (2026-11-16).
+//
+// These tables belong to better-auth's `jwt` and `oauthProvider` plugins
+// (@better-auth/oauth-provider 1.7.18, see src/lib/auth/auth.ts). Field names
+// and types are the plugin's own schema; only the @@map table names are ours.
+// The plugin keeps `userId` as a plain column (no relation), so account
+// deletion clears these rows itself (src/lib/mcp/connectedApps.ts).
+// ---------------------------------------------------------------------------
+
+model OauthClient {
+  id                               String    @id @default(cuid())
+  clientId                         String    @unique
+  clientSecret                     String?
+  disabled                         Boolean   @default(false)
+  skipConsent                      Boolean?
+  enableEndSession                 Boolean?
+  subjectType                      String?
+  scopes                           String[]  @default([])
+  userId                           String?
+  createdAt                        DateTime? @default(now())
+  updatedAt                        DateTime? @updatedAt
+  name                             String?
+  uri                              String?
+  icon                             String?
+  contacts                         String[]  @default([])
+  tos                              String?
+  policy                           String?
+  softwareId                       String?
+  softwareVersion                  String?
+  softwareStatement                String?
+  redirectUris                     String[]  @default([])
+  postLogoutRedirectUris           String[]  @default([])
+  tokenEndpointAuthMethod          String?
+  grantTypes                       String[]  @default([])
+  responseTypes                    String[]  @default([])
+  public                           Boolean?
+  type                             String?
+  requirePKCE                      Boolean?
+  referenceId                      String?
+  metadata                         Json?
+  clientDiscoveryId                String?
+  clientCredentialsScopes          String[]  @default([])
+  backchannelLogoutUri             String?
+  backchannelLogoutSessionRequired Boolean?
+  applicationType                  String?
+  jwks                             String?
+  jwksUri                          String?
+  dpopBoundAccessTokens            Boolean?  @default(false)
+
+  @@index([userId])
+  @@map("oauth_clients")
+}
+
+model OauthRefreshToken {
+  id                      String    @id @default(cuid())
+  token                   String    @unique
+  clientId                String
+  sessionId               String?
+  userId                  String
+  referenceId             String?
+  expiresAt               DateTime
+  createdAt               DateTime  @default(now())
+  revoked                 DateTime?
+  authTime                DateTime?
+  scopes                  String[]  @default([])
+  authorizationCodeId     String?
+  resources               String[]  @default([])
+  requestedUserInfoClaims String[]  @default([])
+  rotatedAt               DateTime?
+  rotationReplayResponse  String?
+  rotationReplayExpiresAt DateTime?
+  confirmation            Json?
+
+  @@index([clientId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([authorizationCodeId])
+  @@map("oauth_refresh_tokens")
+}
+
+model OauthAccessToken {
+  id                      String    @id @default(cuid())
+  token                   String    @unique
+  clientId                String
+  sessionId               String?
+  userId                  String?
+  referenceId             String?
+  refreshId               String?
+  expiresAt               DateTime
+  createdAt               DateTime  @default(now())
+  scopes                  String[]  @default([])
+  authorizationCodeId     String?
+  resources               String[]  @default([])
+  requestedUserInfoClaims String[]  @default([])
+  revoked                 DateTime?
+  confirmation            Json?
+
+  @@index([clientId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([refreshId])
+  @@index([authorizationCodeId])
+  @@map("oauth_access_tokens")
+}
+
+model OauthConsent {
+  id                      String   @id @default(cuid())
+  clientId                String
+  userId                  String?
+  referenceId             String?
+  scopes                  String[] @default([])
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  resources               String[] @default([])
+  requestedUserInfoClaims String[] @default([])
+
+  @@index([clientId])
+  @@index([userId])
+  @@map("oauth_consents")
+}
+
+model Jwks {
+  id         String    @id @default(cuid())
+  publicKey  String
+  privateKey String
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime?
+  alg        String?
+  crv        String?
+
+  @@map("jwks")
+}
+
+model OauthResource {
+  id                            String    @id @default(cuid())
+  identifier                    String    @unique
+  name                          String
+  accessTokenTtl                Int?
+  refreshTokenTtl               Int?
+  signingAlgorithm              String?
+  signingKeyId                  String?
+  allowedScopes                 String[]  @default([])
+  customClaims                  Json?
+  dpopBoundAccessTokensRequired Boolean?  @default(false)
+  disabled                      Boolean?  @default(false)
+  createdAt                     DateTime? @default(now())
+  updatedAt                     DateTime? @updatedAt
+  policyVersion                 Int?      @default(1)
+  metadata                      Json?
+
+  @@map("oauth_resources")
+}
+
+model OauthClientResource {
+  id         String    @id @default(cuid())
+  clientId   String
+  resourceId String
+  metadata   Json?
+  createdAt  DateTime? @default(now())
+
+  @@unique([clientId, resourceId])
+  @@index([clientId])
+  @@index([resourceId])
+  @@map("oauth_client_resources")
+}
+
+model OauthClientAssertion {
+  id        String   @id
+  expiresAt DateTime
+
+  @@index([expiresAt])
+  @@map("oauth_client_assertions")
+}
+
+/// Disconnect watermark for one (user, AI client) grant. Access tokens are
+/// stateless JWTs, so deleting the consent alone cannot reach a token already
+/// issued, and a reconnect would bring it back. Every MCP call refuses a token
+/// issued at or before revokedAt (src/lib/mcp/principal.ts).
+model McpGrantRevocation {
+  userId    String   @map("user_id")
+  clientId  String   @map("client_id")
+  revokedAt DateTime @map("revoked_at")
+
+  @@id([userId, clientId])
+  @@map("mcp_grant_revocations")
+}
+
+/// One row per MCP tool call that writes or is refused (fleet MCP contract
+/// section 9). Argument HASH only, never the arguments. Kept 90 days
+/// (src/lib/mcp/audit.ts prunes older rows).
+model McpToolCall {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  clientId     String   @map("client_id")
+  tool         String
+  tier         String
+  argsHash     String   @map("args_hash")
+  confirmNonce String?  @map("confirm_nonce")
+  ok           Boolean
+  error        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([tool, createdAt])
+  @@index([createdAt])
+  @@map("mcp_tool_calls")
+}
+
+/// Spent confirm-token nonces. The primary key makes a second spend fail
+/// (src/lib/mcp/confirmToken.ts). Rows past expiresAt are swept.
+model McpConfirmNonce {
+  nonce     String   @id
+  expiresAt DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("mcp_confirm_nonces")
+}

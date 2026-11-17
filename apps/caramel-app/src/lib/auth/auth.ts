@@ -1,19 +1,30 @@
 import ResetPasswordTemplate from '@/emails/ResetPasswordTemplate'
 import VerificationRequestTemplate from '@/emails/VerificationRequestTemplate'
 import { createAppleSocialProviderConfig } from '@/lib/auth/appleClientSecret'
+import { dynamicRegistrationDefaultsToPublicClient } from '@/lib/auth/dcrPublicClient'
 import { handleUserCreated } from '@/lib/auth/signupHook'
 import { authSecret } from '@/lib/authSecret'
 import { CLIENT_IP_HEADERS } from '@/lib/clientIp'
 import { sendEmail } from '@/lib/email'
 import { env } from '@/lib/env'
 import { BASE_URL, clientEnv } from '@/lib/env.client'
+import {
+    ACCESS_TOKEN_ISSUED_AT_MS_CLAIM,
+    ACCESS_TOKEN_TTL_SECONDS,
+    AUTHORIZATION_CODE_TTL_SECONDS,
+    MCP_RESOURCE,
+    MCP_SCOPES,
+    OIDC_SCOPES,
+    REFRESH_TOKEN_TTL_SECONDS,
+} from '@/lib/mcp/oauthConfig'
 import prisma from '@/lib/prisma'
+import { oauthProvider } from '@better-auth/oauth-provider'
 import { render } from '@react-email/render'
 import * as Sentry from '@sentry/nextjs'
 import bcrypt from 'bcryptjs'
 import { betterAuth } from 'better-auth'
 import { prismaAdapter } from 'better-auth/adapters/prisma'
-import { bearer } from 'better-auth/plugins'
+import { bearer, jwt } from 'better-auth/plugins'
 
 const saltRounds = env.BCRYPT_SALT_ROUNDS
 const appleIdTrustedOrigins = ['https://appleid.apple.com']
@@ -235,5 +246,65 @@ export const auth = betterAuth({
             },
         },
     },
-    plugins: [bearer()],
+    // The jwt plugin's own `/token` route hands the browser a SESSION JWT
+    // signed with the same key as MCP access tokens. Nothing here uses it,
+    // and the OAuth provider docs require it off (OAuth Provider Mode).
+    disabledPaths: ['/token'],
+    plugins: [
+        bearer(),
+        /**
+         * OAuth 2.1 authorization server for the Caramel MCP server
+         * (src/app/api/mcp/route.ts). `jwt()` signs the access tokens and
+         * publishes the JWKS at /api/auth/jwks; `disableSettingJwtHeader`
+         * keeps session JWTs out of the browser (see disabledPaths above).
+         * PKCE (S256) is the plugin default and always enforced for public
+         * clients. Loopback redirect URIs with ephemeral ports (Claude Code)
+         * are accepted port-insensitively (RFC 8252) by the plugin itself.
+         */
+        jwt({ disableSettingJwtHeader: true }),
+        oauthProvider({
+            // Claude, ChatGPT and Claude Code register themselves (RFC 7591)
+            // without credentials: both flags are required for that.
+            allowDynamicClientRegistration: true,
+            allowUnauthenticatedClientRegistration: true,
+            // One protected resource: the MCP endpoint, which is the JWT
+            // `aud`. `allowedScopes` is spelled out: left unset the plugin
+            // seeds NULL, which a Prisma String[] column cannot store.
+            resources: [
+                {
+                    identifier: MCP_RESOURCE,
+                    allowedScopes: [...OIDC_SCOPES, ...MCP_SCOPES],
+                },
+            ],
+            // Claude Code and Cursor register an http://127.0.0.1 callback
+            // without `application_type`; 1.7 would validate it as `web`
+            // (https only) and refuse it. `infer` treats loopback and
+            // private-use callbacks as native.
+            clientRegistrationDefaultApplicationType: 'infer',
+            // One resource, no per-client resource policy. The 1.7 default
+            // (true) refuses every dynamically registered client at
+            // /oauth2/token with `invalid_target`.
+            enforcePerClientResources: false,
+            // The full allow-list; `offline_access` must stay or no client
+            // ever gets a refresh token.
+            scopes: [...OIDC_SCOPES, ...MCP_SCOPES],
+            loginPage: '/login',
+            consentPage: '/oauth/consent',
+            // Fleet auth window (src/lib/mcp/oauthConfig.ts). A 30-day
+            // stateless JWT is safe only because every MCP call re-checks
+            // the grant behind it (src/lib/mcp/principal.ts).
+            accessTokenExpiresIn: ACCESS_TOKEN_TTL_SECONDS,
+            refreshTokenExpiresIn: REFRESH_TOKEN_TTL_SECONDS,
+            codeExpiresIn: AUTHORIZATION_CODE_TTL_SECONDS,
+            // Millisecond issue time for the Disconnect watermark: `iat`
+            // alone cannot order a token against a Disconnect in the same
+            // second.
+            customAccessTokenClaims: () => ({
+                [ACCESS_TOKEN_ISSUED_AT_MS_CLAIM]: Date.now(),
+            }),
+        }),
+        // A registration that omits token_endpoint_auth_method stays a public
+        // PKCE client instead of being minted an unrequested secret.
+        dynamicRegistrationDefaultsToPublicClient(),
+    ],
 })

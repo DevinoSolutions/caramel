@@ -21,6 +21,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import AccountDetailsCard from './sections/AccountDetailsCard'
 import AccountHeaderCard from './sections/AccountHeaderCard'
+import ConnectedAppsSection from './sections/ConnectedAppsSection'
 import DataPrivacySection from './sections/DataPrivacySection'
 import FavoriteStoresSection from './sections/FavoriteStoresSection'
 import GetStartedChecklist from './sections/GetStartedChecklist'
@@ -197,6 +198,7 @@ export default function ProfilePageClient() {
         navItems.push({ id: 'preferences', label: 'Preferences' })
     }
     navItems.push({ id: 'account', label: 'Account' })
+    navItems.push({ id: 'connected-apps', label: 'AI apps' })
     navItems.push({ id: 'data', label: 'Data & privacy' })
 
     return (
@@ -280,6 +282,7 @@ export default function ProfilePageClient() {
                         {/* Both render from the session, so they stay real
                             content even when the overview failed. */}
                         <AccountDetailsCard user={user} />
+                        <ConnectedAppsSection />
                         <DataPrivacySection
                             overview={overview}
                             onDeleted={applyDataDeleted}

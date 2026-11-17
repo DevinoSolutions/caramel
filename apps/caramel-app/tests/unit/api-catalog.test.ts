@@ -24,11 +24,12 @@ describe('/.well-known/api-catalog', () => {
         expect(catalog.linkset.length).toBeGreaterThan(0)
     })
 
-    it('lists exactly the read-only coupon endpoints llms.txt documents, never the extension write routes', async () => {
+    it('lists the MCP server and exactly the read-only coupon endpoints llms.txt documents, never the extension write routes', async () => {
         const catalog = (await GET().json()) as Linkset
         const anchors = catalog.linkset.map(entry => entry.anchor)
 
         expect(anchors).toEqual([
+            `${origin}/api/mcp`,
             `${origin}/api/coupons`,
             `${origin}/api/coupons/stores`,
         ])
@@ -37,10 +38,24 @@ describe('/.well-known/api-catalog', () => {
         }
     })
 
-    it('points every endpoint at docs this app serves on its own origin', async () => {
+    it('points the MCP server at its docs, server card and resource metadata', async () => {
+        const catalog = (await GET().json()) as Linkset
+        const mcp = catalog.linkset[0] as Linkset['linkset'][number] & {
+            'service-meta': { href: string }[]
+        }
+        expect(mcp['service-doc'].map(doc => doc.href)).toEqual([
+            `${origin}/docs#mcp`,
+        ])
+        expect(mcp['service-meta'].map(doc => doc.href)).toEqual([
+            `${origin}/.well-known/mcp/server-card.json`,
+            `${origin}/.well-known/oauth-protected-resource`,
+        ])
+    })
+
+    it('points every coupon endpoint at docs this app serves on its own origin', async () => {
         const catalog = (await GET().json()) as Linkset
 
-        for (const entry of catalog.linkset) {
+        for (const entry of catalog.linkset.slice(1)) {
             expect(entry['service-doc'].map(doc => doc.href)).toEqual([
                 `${origin}/llms.txt`,
                 `${origin}/agent-setup/prompt.md`,

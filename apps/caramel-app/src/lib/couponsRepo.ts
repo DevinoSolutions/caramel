@@ -381,6 +381,30 @@ export async function listCoupons(
     return { coupons, total: totalRow[0]?.total ?? 0 }
 }
 
+/**
+ * One coupon by id, under the same visibility predicate and shopper text
+ * cleanup as listCoupons, or null when it does not exist or is not visible.
+ * The MCP `get_coupon` tool (src/lib/mcp/tools/coupons.ts) is the reader.
+ */
+export async function getVisibleCoupon(
+    couponId: string,
+): Promise<CouponListRow | null> {
+    const rawCoupons = await prisma.$queryRaw(Prisma.sql`
+        SELECT id, code, site, title, description, rating,
+               discount_type, discount_amount, expiry, expired,
+               times_used AS "timesUsed",
+               status, verification_message AS "verificationMessage",
+               (new_customers_only IS TRUE) AS "newCustomersOnly"
+        FROM coupons
+        WHERE ${visibleCouponsWhere()} AND id = ${couponId}::text
+        LIMIT 1
+    `)
+    const [coupon] = forShoppers(
+        parseCouponRows(CouponListRowSchema, rawCoupons, 'coupons.get'),
+    )
+    return coupon ?? null
+}
+
 /** What the store page's FAQ may state about a store, all read from the
  *  catalog in the count query below (never per-store invented copy). */
 export type StoreCouponFacts = {

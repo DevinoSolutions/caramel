@@ -2,8 +2,9 @@ name: AI Evals
 
 # F-012 — standing eval gates for the app's LLM surfaces: the cart classifier
 # (cartClassifier -> openrouter -> /api/classify-cart) and the coupon-box pick
-# (couponBoxPick -> openrouter -> /api/extension/coupon-box-pick), one job
-# each. Mirrors checks-app.yml's setup
+# (couponBoxPick -> openrouter -> /api/extension/coupon-box-pick), plus the
+# MCP server's tool choice (src/lib/mcp instructions and tool descriptions
+# read by a model), one job each. Mirrors checks-app.yml's setup
 # steps and coupons-schema-drift.yml's loud-secret-check convention (no
 # silent skip when a required secret is missing — see PLAN-F-012.md).
 #
@@ -26,6 +27,9 @@ on:
       - 'apps/caramel-app/src/lib/env.ts'
       - 'apps/caramel-app/src/app/api/classify-cart/**'
       - 'apps/caramel-app/src/app/api/extension/coupon-box-pick/**'
+      # The MCP server's instructions and tool descriptions are what the
+      # tool-choice eval reads.
+      - 'apps/caramel-app/src/lib/mcp/**'
       # The extension's outline code decides which words the pick ever sees.
       - 'apps/caramel-extension/coupon-box-outline.js'
       - 'apps/caramel-app/evals/**'
@@ -215,9 +219,88 @@ jobs:
           path: apps/caramel-app/eval-report.txt
           retention-days: 3
 
+  eval-mcp-tool-choice:
+    name: MCP tool choice eval
+    runs-on: ubuntu-latest
+    # Same reason as the cart job: the artifact upload authenticates with a
+    # GitHub OIDC token; a job-level block replaces the workflow-level one.
+    permissions:
+      id-token: write
+      contents: read
+    # 30 sequential short live calls.
+    timeout-minutes: 15
+    if: |
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The tool registry imports the coupon read layer, which needs the
+      # generated Prisma client (src/generated/prisma, gitignored) to load.
+      # No tool runs and no database is touched.
+      - name: Generate Prisma client
+        run: pnpm --filter caramel-app exec prisma generate
+
+      - name: Verify OPENROUTER_API_KEY secret is configured
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::OPENROUTER_API_KEY secret is not set on this repository. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      # Same optional repo variables as the cart job (the Devino proxy base
+      # and its model pin); unset falls back to src/lib/env.ts's defaults.
+      - name: Apply optional OPENROUTER_API_URL / OPENROUTER_MODEL repo variables
+        env:
+          VAR_OPENROUTER_API_URL: ${{ vars.OPENROUTER_API_URL }}
+          VAR_OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+        run: |
+          if [ -n "$VAR_OPENROUTER_API_URL" ]; then
+            echo "OPENROUTER_API_URL=$VAR_OPENROUTER_API_URL" >> "$GITHUB_ENV"
+            echo "Eval base: $VAR_OPENROUTER_API_URL (repo variable)"
+          else
+            echo "Eval base: env.ts default (OpenRouter)"
+          fi
+          if [ -n "$VAR_OPENROUTER_MODEL" ]; then
+            echo "OPENROUTER_MODEL=$VAR_OPENROUTER_MODEL" >> "$GITHUB_ENV"
+            echo "Eval model: $VAR_OPENROUTER_MODEL (repo variable)"
+          else
+            echo "Eval model: env.ts default"
+          fi
+
+      - name: Run MCP tool choice eval
+        working-directory: ./apps/caramel-app
+        shell: bash
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: pnpm exec vitest run --config vitest.eval.config.ts --silent=false --reporter=verbose evals/mcpToolChoice.eval.ts | tee eval-report.txt
+
+      - name: Upload eval report
+        if: ${{ !cancelled() }}
+        uses: DevinoSolutions/artifact/upload@v1
+        with:
+          name: mcp-tool-choice-eval-report
+          path: apps/caramel-app/eval-report.txt
+          retention-days: 3
+
   notify-on-nightly-failure:
     name: Open issue on nightly failure
-    needs: [eval, eval-coupon-box-pick]
+    needs: [eval, eval-coupon-box-pick, eval-mcp-tool-choice]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -237,4 +320,4 @@ jobs:
           gh issue create \
             --repo "${{ github.repository }}" \
             --title "Nightly AI eval failed ($(date -u +%F))" \
-            --body "A nightly AI eval run (cart classifier and/or coupon-box pick) failed on $(date -u +%F' '%T' UTC'). This can mean a model degraded/drifted, the OPENROUTER_API_KEY secret expired or was revoked, a repo variable is missing, or a real regression landed in cartClassifier/couponBoxPick/openrouter. The run shows which job failed: $RUN_URL"
+            --body "A nightly AI eval run (cart classifier, coupon-box pick and/or MCP tool choice) failed on $(date -u +%F' '%T' UTC'). This can mean a model degraded/drifted, the OPENROUTER_API_KEY secret expired or was revoked, a repo variable is missing, or a real regression landed in cartClassifier/couponBoxPick/openrouter. The run shows which job failed: $RUN_URL"

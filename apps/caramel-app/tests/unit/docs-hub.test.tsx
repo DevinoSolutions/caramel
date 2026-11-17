@@ -54,6 +54,7 @@ describe('docs hub content', () => {
             'how-codes-are-found-and-tested',
             'supported-stores',
             'ai-agents',
+            'mcp',
             'privacy-and-data',
             'support',
             'machine-readable-resources',
