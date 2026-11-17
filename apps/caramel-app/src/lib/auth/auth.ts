@@ -1,5 +1,9 @@
 import ResetPasswordTemplate from '@/emails/ResetPasswordTemplate'
 import VerificationRequestTemplate from '@/emails/VerificationRequestTemplate'
+import {
+    ACCOUNT_LINKING,
+    unverifiedAccountTakeBack,
+} from '@/lib/auth/accountLinking'
 import { createAppleSocialProviderConfig } from '@/lib/auth/appleClientSecret'
 import { handleUserCreated } from '@/lib/auth/signupHook'
 import { authSecret } from '@/lib/authSecret'
@@ -220,13 +224,37 @@ export const auth = betterAuth({
     // account deletion (T-5065); oauthTokenCrypto.ts reads and writes the same
     // format for the extension/app mint. Rows written before this was enabled
     // stay readable (plain text is passed through).
-    account: { encryptOAuthTokens: true },
+    //
+    // Same email = same account, whatever the sign-in method (owner rule
+    // 2026-10-27): policy and the take-back of an unverified account in
+    // src/lib/auth/accountLinking.ts.
+    account: { encryptOAuthTokens: true, accountLinking: ACCOUNT_LINKING },
     // Every account created THROUGH better-auth (email sign-up, Google, Apple)
     // is recorded once: `users.acquisition` + the `signup_completed` event.
     // The extension's own OAuth mint creates users with raw Prisma (this hook
     // never fires for it) and calls the same recorder itself, see
     // extensionOAuthSession.ts. The handler never throws (signupHook.ts).
     databaseHooks: {
+        account: {
+            create: {
+                // A Google/Apple sign-in proving the address of an UNVERIFIED
+                // account takes it back first: every session revoked, the
+                // password cleared.
+                before: unverifiedAccountTakeBack(event => {
+                    Sentry.captureMessage(
+                        'auth: unverified account taken back on link',
+                        {
+                            level: 'warning',
+                            tags: {
+                                area: 'auth',
+                                event: 'account-link-take-back',
+                            },
+                            extra: { ...event },
+                        },
+                    )
+                }),
+            },
+        },
         user: {
             create: {
                 after: async (user, context) => {
