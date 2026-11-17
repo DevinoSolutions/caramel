@@ -247,9 +247,9 @@ describe('chat() — Sentry span trace correlation (F-011)', () => {
     })
 })
 
-describe('chat() — OPENROUTER_API_URL base (OpenRouter by default, Devino proxy when set)', () => {
+describe('chat() — OPENROUTER_API_URL base (the Devino proxy by default, T-19010)', () => {
     // The real zod parse, not the mock above: proves the value env.ts
-    // produces for an UNSET variable is exactly the old hardcoded base.
+    // produces for an UNSET variable is the Devino proxy, never openrouter.ai.
     async function realParsedBase(source: Record<string, string | undefined>) {
         const actual =
             await vi.importActual<typeof import('@/lib/env')>('@/lib/env')
@@ -260,14 +260,14 @@ describe('chat() — OPENROUTER_API_URL base (OpenRouter by default, Devino prox
         }).OPENROUTER_API_URL
     }
 
-    it('with OPENROUTER_API_URL unset, POSTs to the unchanged https://openrouter.ai/api/v1/chat/completions', async () => {
+    it('with OPENROUTER_API_URL unset, POSTs to the Devino proxy, never to openrouter.ai', async () => {
         envMock.OPENROUTER_API_URL = await realParsedBase({})
         fetchMock.mockResolvedValueOnce(
             jsonResponse({ choices: [{ message: { content: 'ok' } }] }),
         )
         await chat([{ role: 'user', content: 'hi' }])
         const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
-        expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
+        expect(url).toBe('https://proxyai.devino.ca/v1/chat/completions')
     })
 
     it('with OPENROUTER_API_URL set to the Devino proxy, POSTs there with the same body and bearer key', async () => {

@@ -119,14 +119,14 @@ describe('parseServerEnv', () => {
         ).toBe(valid)
     })
 
-    it('(o) OPENROUTER_API_URL unset or blank defaults to https://openrouter.ai/api/v1; a set value loses its trailing slash; a non-URL fails boot', () => {
+    it('(o) OPENROUTER_API_URL unset or blank defaults to the Devino proxy; a set value loses its trailing slash; a non-URL fails boot', () => {
         expect(parseServerEnv(validServerFixture).OPENROUTER_API_URL).toBe(
-            'https://openrouter.ai/api/v1',
+            'https://proxyai.devino.ca/v1',
         )
         expect(
             parseServerEnv({ ...validServerFixture, OPENROUTER_API_URL: '' })
                 .OPENROUTER_API_URL,
-        ).toBe('https://openrouter.ai/api/v1')
+        ).toBe('https://proxyai.devino.ca/v1')
         expect(
             parseServerEnv({
                 ...validServerFixture,
@@ -139,6 +139,48 @@ describe('parseServerEnv', () => {
                 OPENROUTER_API_URL: 'proxyai.devino.ca',
             }),
         ).toThrow(/OPENROUTER_API_URL/)
+    })
+
+    it.each([
+        'https://openrouter.ai/api/v1',
+        'https://OpenRouter.ai/api/v1/',
+        'https://api.openrouter.ai/v1',
+    ])(
+        '(o.1) a direct OpenRouter URL (%s) fails boot without echoing the value (T-19010)',
+        url => {
+            let message = ''
+            try {
+                parseServerEnv({
+                    ...validServerFixture,
+                    OPENROUTER_API_URL: url,
+                })
+            } catch (err) {
+                message = (err as Error).message
+            }
+            expect(message).toMatch(/OPENROUTER_API_URL/)
+            expect(message).not.toContain('openrouter.ai')
+        },
+    )
+
+    it('(o.2) a paid sk-or key in OPENROUTER_API_KEY fails boot without echoing it; a proxy key boots (T-19010)', () => {
+        const paidKey = 'sk-or-v1-' + '0'.repeat(64)
+        let message = ''
+        try {
+            parseServerEnv({
+                ...validServerFixture,
+                OPENROUTER_API_KEY: paidKey,
+            })
+        } catch (err) {
+            message = (err as Error).message
+        }
+        expect(message).toMatch(/OPENROUTER_API_KEY/)
+        expect(message).not.toContain(paidKey)
+        expect(
+            parseServerEnv({
+                ...validServerFixture,
+                OPENROUTER_API_KEY: 'orf_ca' + 'x'.repeat(38),
+            }).OPENROUTER_API_KEY,
+        ).toBe('orf_ca' + 'x'.repeat(38))
     })
 
     it('(d.1) JWT_SECRET alone (no BETTER_AUTH_SECRET) satisfies the requirement', () => {

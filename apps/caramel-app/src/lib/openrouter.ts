@@ -119,10 +119,10 @@ export async function chat(
         }
         if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort
 
-        // env.OPENROUTER_API_URL defaults to https://openrouter.ai/api/v1 (no
-        // trailing slash), so with it unset this is exactly the URL this file
-        // used to hardcode; set, it points at an OpenAI-compatible relay such
-        // as the Devino proxy (https://proxyai.devino.ca/v1).
+        // env.OPENROUTER_API_URL defaults to the Devino proxy
+        // (https://proxyai.devino.ca/v1, no trailing slash); boot refuses an
+        // openrouter.ai URL and a paid sk-or key, so no call reaches
+        // OpenRouter directly (T-19010).
         // A request carrying the paid-fallback key follows no redirect: fetch
         // strips only Authorization and cookies on a cross-origin redirect,
         // so a plain fetch would hand X-ORF-Fallback-Key to the new host.

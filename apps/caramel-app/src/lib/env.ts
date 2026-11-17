@@ -21,6 +21,20 @@ import { isValidWallClockPeriodMinutes } from '@/lib/wallClockSchedule'
 import 'server-only'
 import { z } from 'zod'
 
+/** The Devino proxy: every model call goes here, never to OpenRouter directly. */
+export const DEFAULT_OPENROUTER_API_URL = 'https://proxyai.devino.ca/v1'
+
+/** True when `url` is openrouter.ai itself or one of its subdomains. */
+function namesOpenRouterDirectly(url: string): boolean {
+    let host: string
+    try {
+        host = new URL(url).hostname.toLowerCase()
+    } catch {
+        return false
+    }
+    return host === 'openrouter.ai' || host.endsWith('.openrouter.ai')
+}
+
 const serverObjectSchema = z.object({
     // ---- Required (fail-fast) ------------------------------------------
     DATABASE_URL: z.string().min(1, { error: 'DATABASE_URL is required' }),
@@ -238,16 +252,18 @@ const serverObjectSchema = z.object({
     ),
     OPENROUTER_API_KEY: z.string().optional(),
     // Base URL of the OpenAI-compatible chat API that openrouter.ts POSTs
-    // `${OPENROUTER_API_URL}/chat/completions` to. Unset (or blank) =
-    // OpenRouter itself, byte-identical to the old hardcoded URL. Set to the
-    // Devino proxy (https://proxyai.devino.ca/v1) to route the classifier
-    // there; OPENROUTER_API_KEY and OPENROUTER_MODEL must then be a proxy key
-    // and a proxy pin. Trailing slashes are stripped; a non-URL fails boot.
+    // `${OPENROUTER_API_URL}/chat/completions` to. Unset (or blank) = the
+    // Devino proxy (https://proxyai.devino.ca/v1); OPENROUTER_API_KEY must be
+    // a proxy key and OPENROUTER_MODEL a proxy pin. 2026-11-18 (T-19010): a
+    // blank URL used to mean openrouter.ai, so an env holding a paid sk-or key
+    // called OpenRouter behind the proxy's back. A URL on openrouter.ai and an
+    // sk-or key in OPENROUTER_API_KEY now fail boot, naming the variable and
+    // never its value. Trailing slashes are stripped; a non-URL fails boot.
     OPENROUTER_API_URL: z
         .string()
         .optional()
         .transform(v =>
-            (v?.trim() || 'https://openrouter.ai/api/v1').replace(/\/+$/, ''),
+            (v?.trim() || DEFAULT_OPENROUTER_API_URL).replace(/\/+$/, ''),
         )
         .pipe(z.url()),
     OPENROUTER_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
@@ -384,6 +400,26 @@ const serverSchema = serverObjectSchema
     .refine(data => Boolean(data.BETTER_AUTH_SECRET || data.JWT_SECRET), {
         error: 'At least one of BETTER_AUTH_SECRET or JWT_SECRET must be set',
         path: ['BETTER_AUTH_SECRET'],
+    })
+    .superRefine((data, ctx) => {
+        // T-19010: every model call goes through the Devino proxy. The
+        // messages name the variable only; a key or URL never reaches a log.
+        if (namesOpenRouterDirectly(data.OPENROUTER_API_URL)) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['OPENROUTER_API_URL'],
+                message:
+                    'OPENROUTER_API_URL must not point at OpenRouter directly; use the Devino proxy',
+            })
+        }
+        if (/^\s*sk-or-/.test(data.OPENROUTER_API_KEY ?? '')) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['OPENROUTER_API_KEY'],
+                message:
+                    'OPENROUTER_API_KEY holds a direct OpenRouter key; use a Devino proxy key',
+            })
+        }
     })
     .superRefine((data, ctx) => {
         // Truthiness, not `!== undefined`: .env.example ships APPLE_CLIENT_ID=
