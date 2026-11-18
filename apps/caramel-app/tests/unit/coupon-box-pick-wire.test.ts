@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The coupon-box pick on the wire: the REAL chat() client with only fetch
 // faked, so this pins what actually leaves the server — the configured model,
-// temperature 0, the JSON response format, and the X-ORF-Strict header that
-// pins the exact model on a relay (coupon-box-pick.test.ts fakes chat() and
-// cannot see the request itself).
+// temperature 0, the JSON response format, and no X-ORF-Strict header, so the
+// proxy can hedge to the pinned model's other hosts (coupon-box-pick.test.ts
+// fakes chat() and cannot see the request itself).
 const { envMock } = vi.hoisted(() => ({
     envMock: {
         OPENROUTER_API_KEY: 'test-openrouter-key',
@@ -48,7 +48,7 @@ beforeEach(() => {
 })
 
 describe('coupon-box pick request', () => {
-    it('sends X-ORF-Strict: 1 with the configured model, temperature 0, low reasoning effort and a JSON response format', async () => {
+    it('sends the configured model with no X-ORF-Strict, temperature 0, low reasoning effort and a JSON response format', async () => {
         const result = await pickCouponBox({
             domain: 'wire-test.example',
             outline: '- form:\n  - [7] textbox "Promo code"',
@@ -59,7 +59,7 @@ describe('coupon-box pick request', () => {
         const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
         expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
         const headers = init.headers as Record<string, string>
-        expect(headers['X-ORF-Strict']).toBe('1')
+        expect(headers['X-ORF-Strict']).toBeUndefined()
         expect(headers['Authorization']).toBe('Bearer test-openrouter-key')
         const body = JSON.parse(init.body as string)
         expect(body).toMatchObject({
@@ -98,7 +98,7 @@ describe('coupon-box pick request', () => {
             const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
             const headers = init.headers as Record<string, string>
             expect(headers['X-ORF-Free-Second-Model']).toBe(expected)
-            expect(headers['X-ORF-Strict']).toBe('1')
+            expect(headers['X-ORF-Strict']).toBeUndefined()
         },
     )
 })

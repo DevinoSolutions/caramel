@@ -225,8 +225,10 @@ describe('the pick', () => {
             model: 'test/box-model',
             temperature: 0,
             responseFormat: 'json_object',
-            headers: { 'X-ORF-Strict': '1' },
         })
+        // No X-ORF-Strict: it would stop the proxy hedging to the pinned
+        // model's other hosts (prod 2026-11-18 17:42Z).
+        expect(opts.headers).toEqual({})
     })
 
     describe('the paid fallback (Aladdin approved 2026-10-23)', () => {
@@ -251,18 +253,18 @@ describe('the pick', () => {
                 ]
             )[1].headers
 
-        it('with no key set, sends only the exact-model header', async () => {
+        it('with no key set, sends no headers', async () => {
             envMock.OPENROUTER_API_URL = 'https://proxyai.devino.ca/v1'
             envMock.OPENROUTER_FALLBACK_API_KEY = undefined
             try {
                 await pickCouponBox({ domain: freshDomain(), outline: OUTLINE })
-                expect(sentHeaders()).toEqual({ 'X-ORF-Strict': '1' })
+                expect(sentHeaders()).toEqual({})
             } finally {
                 restore()
             }
         })
 
-        it('with a key and the Devino proxy, sends the key, model and wait beside the exact-model header', async () => {
+        it('with a key and the Devino proxy, sends the key, model and wait', async () => {
             envMock.OPENROUTER_API_URL = 'https://proxyai.devino.ca/v1'
             envMock.OPENROUTER_FALLBACK_API_KEY = KEY
             envMock.OPENROUTER_FALLBACK_MODEL = 'deepseek/deepseek-v4.1-flash'
@@ -270,7 +272,6 @@ describe('the pick', () => {
             try {
                 await pickCouponBox({ domain: freshDomain(), outline: OUTLINE })
                 expect(sentHeaders()).toEqual({
-                    'X-ORF-Strict': '1',
                     'X-ORF-Fallback-Key': KEY,
                     'X-ORF-Fallback-Model': 'deepseek/deepseek-v4.1-flash',
                     'X-ORF-Fallback-After': '6',
@@ -285,7 +286,7 @@ describe('the pick', () => {
             envMock.OPENROUTER_FALLBACK_API_KEY = KEY
             try {
                 await pickCouponBox({ domain: freshDomain(), outline: OUTLINE })
-                expect(sentHeaders()).toEqual({ 'X-ORF-Strict': '1' })
+                expect(sentHeaders()).toEqual({})
             } finally {
                 restore()
             }
