@@ -147,6 +147,79 @@ describe('chat() — OpenRouter fetch contract (F-011 pin)', () => {
             'empty response',
         )
     })
+
+    // T-19233: a 200 whose content is '' or only whitespace used to come back
+    // as the answer, so the caller parsed nothing and the paid reply that was
+    // cut off at max_tokens (finish_reason "length") was never counted as a
+    // failure. Each shape now throws, carrying emptyReply and the finish reason.
+    it.each([
+        ['an empty string', { content: '' }, 'stop'],
+        ['only whitespace', { content: '  \n ' }, 'stop'],
+        ['null content cut off at max_tokens', { content: null }, 'length'],
+        ['an empty string cut off at max_tokens', { content: '' }, 'length'],
+    ])(
+        'throws an OpenRouterError with emptyReply when the reply is %s',
+        async (_label, message, finishReason) => {
+            fetchMock.mockResolvedValueOnce(
+                jsonResponse({
+                    choices: [{ message, finish_reason: finishReason }],
+                }),
+            )
+            const promise = chat([{ role: 'user', content: 'hi' }])
+            await expect(promise).rejects.toBeInstanceOf(OpenRouterError)
+            await expect(promise).rejects.toMatchObject({
+                emptyReply: true,
+                finishReason,
+                message: `empty response (finish_reason=${finishReason})`,
+            })
+        },
+    )
+
+    it('still returns a reply that has text, and marks no error as emptyReply', async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse({
+                choices: [
+                    { message: { content: '{"a":1}' }, finish_reason: 'stop' },
+                ],
+            }),
+        )
+        await expect(chat([{ role: 'user', content: 'hi' }])).resolves.toBe(
+            '{"a":1}',
+        )
+        fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'x' }, 500))
+        await expect(
+            chat([{ role: 'user', content: 'hi' }]),
+        ).rejects.toMatchObject({ emptyReply: false })
+    })
+
+    it('records how the Devino proxy routed the call on the active span', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({ choices: [{ message: { content: 'ok' } }] }),
+                {
+                    status: 200,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-orf-fallback': 'free_second_model; reason=slow',
+                        'x-orf-free-second-model':
+                            'served; model=gpt-oss-20b; reason=slow',
+                        'x-orf-model-fallback':
+                            'requested=a; served=b; reason=free_second_model',
+                    },
+                },
+            ),
+        )
+        await chat([{ role: 'user', content: 'hi' }])
+        expect(setAttributesMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                'orf.fallback': 'free_second_model; reason=slow',
+                'orf.free_second_model':
+                    'served; model=gpt-oss-20b; reason=slow',
+                'orf.model_fallback':
+                    'requested=a; served=b; reason=free_second_model',
+            }),
+        )
+    })
 })
 
 describe('chat() — per-call extra headers', () => {

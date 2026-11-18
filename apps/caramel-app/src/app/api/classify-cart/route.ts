@@ -173,7 +173,11 @@ export const POST = withRoute(
                     fingerprint: [
                         'classify-cart',
                         'model_call',
-                        error.timedOut ? 'timeout' : 'error',
+                        error.timedOut
+                            ? 'timeout'
+                            : error.emptyReply
+                              ? 'empty_reply'
+                              : 'error',
                     ],
                 })
             }

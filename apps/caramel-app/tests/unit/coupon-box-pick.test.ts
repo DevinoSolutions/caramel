@@ -1074,6 +1074,35 @@ describe('the pick', () => {
         )
     })
 
+    // T-19233: chat() now throws on a blank or cut-off reply. It gets its own
+    // fingerprint so a model that answers nothing is not lost among real errors.
+    it('an empty reply is no_pick/model_error under its own fingerprint, with the finish reason', async () => {
+        const { OpenRouterError } = await import('@/lib/openrouter')
+        chatMock.mockImplementation(async () => {
+            throw new OpenRouterError(
+                'empty response (finish_reason=length)',
+                200,
+                {
+                    emptyReply: true,
+                    finishReason: 'length',
+                },
+            )
+        })
+        const res = await post({ domain: freshDomain(), outline: OUTLINE })
+        expect(await res.json()).toEqual({
+            outcome: 'no_pick',
+            reason: 'model_error',
+        })
+        expect(captureExceptionMock).toHaveBeenCalledWith(
+            expect.objectContaining({ emptyReply: true }),
+            expect.objectContaining({
+                level: 'error',
+                fingerprint: ['coupon-box-pick', 'model_call', 'empty_reply'],
+                extra: expect.objectContaining({ finishReason: 'length' }),
+            }),
+        )
+    })
+
     it('a repeated (store, outline) is a cache hit: the model is not called again', async () => {
         const domain = freshDomain()
         const first = await post({ domain, outline: OUTLINE })

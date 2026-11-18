@@ -12,6 +12,7 @@ const { envMock } = vi.hoisted(() => ({
         OPENROUTER_MODEL: 'anthropic/claude-haiku-4.5',
         COUPON_BOX_LLM_ENABLED: true,
         COUPON_BOX_PICK_MODEL: 'test/box-model',
+        COUPON_BOX_PICK_SECOND_MODEL: undefined as string | undefined,
     },
 }))
 vi.mock('@/lib/env', () => ({ env: envMock }))
@@ -27,6 +28,7 @@ vi.stubGlobal('fetch', fetchMock)
 import { pickCouponBox } from '@/lib/couponBoxPick'
 
 beforeEach(() => {
+    envMock.COUPON_BOX_PICK_SECOND_MODEL = undefined
     fetchMock.mockReset()
     fetchMock.mockResolvedValue(
         new Response(
@@ -72,4 +74,31 @@ describe('coupon-box pick request', () => {
             'Store: wire-test.example\n\n- form:\n  - [7] textbox "Promo code"',
         )
     })
+
+    // T-19233: a free second model lets the Devino proxy answer a slow free
+    // pin for free instead of paying. The header goes out only when a model is
+    // configured and it is not the pin (the proxy ignores same_model).
+    it.each([
+        [
+            'set',
+            'cohere/command-a-plus-05-2026',
+            'cohere/command-a-plus-05-2026',
+        ],
+        ['unset', undefined, undefined],
+        ['the pin itself', 'test/box-model', undefined],
+    ])(
+        'X-ORF-Free-Second-Model when the second model is %s',
+        async (label, second, expected) => {
+            envMock.COUPON_BOX_PICK_SECOND_MODEL = second
+            // A store of its own per case: the pick caches by (store, outline).
+            await pickCouponBox({
+                domain: `second-model-${label.replace(/\W+/g, '-')}.example`,
+                outline: '- form:\n  - [7] textbox "Promo code"',
+            })
+            const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+            const headers = init.headers as Record<string, string>
+            expect(headers['X-ORF-Free-Second-Model']).toBe(expected)
+            expect(headers['X-ORF-Strict']).toBe('1')
+        },
+    )
 })
