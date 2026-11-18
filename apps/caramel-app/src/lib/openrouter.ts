@@ -37,17 +37,45 @@ export class OpenRouterError extends Error {
     readonly timedOut: boolean
     /** The underlying error (the tsconfig lib predates ES2022 `Error.cause`). */
     readonly cause?: unknown
+    /** True when the upstream answered 200 with no usable text (empty or
+     * whitespace content, e.g. a reply cut off at max_tokens before it wrote
+     * anything). A caller may retry once; it is never a silent success. */
+    readonly emptyReply: boolean
+    /** The upstream's finish_reason on an empty reply, when it sent one. */
+    readonly finishReason?: string
     constructor(
         message: string,
         status?: number,
-        options: { timedOut?: boolean; cause?: unknown } = {},
+        options: {
+            timedOut?: boolean
+            cause?: unknown
+            emptyReply?: boolean
+            finishReason?: string
+        } = {},
     ) {
         super(message)
         this.name = 'OpenRouterError'
         this.status = status
         this.timedOut = options.timedOut ?? false
         this.cause = options.cause
+        this.emptyReply = options.emptyReply ?? false
+        this.finishReason = options.finishReason
     }
+}
+
+/** The Devino proxy's routing report on a reply: which path answered
+ * (`X-ORF-Fallback`, e.g. `paid` or `free_second_model`) and how a
+ * requested free second model fared (`X-ORF-Free-Second-Model`, e.g.
+ * `served; model=…; reason=slow`). Absent headers stay undefined. */
+export function proxyRouteAttributes(headers: Headers): Record<string, string> {
+    const attrs: Record<string, string> = {}
+    const fallback = headers.get('x-orf-fallback')
+    const freeSecond = headers.get('x-orf-free-second-model')
+    const modelFallback = headers.get('x-orf-model-fallback')
+    if (fallback) attrs['orf.fallback'] = fallback
+    if (freeSecond) attrs['orf.free_second_model'] = freeSecond
+    if (modelFallback) attrs['orf.model_fallback'] = modelFallback
+    return attrs
 }
 
 /**
@@ -165,7 +193,10 @@ export async function chat(
         }
         const json = (await res.json()) as {
             id?: string
-            choices?: { message?: { content?: string } }[]
+            choices?: {
+                message?: { content?: string | null }
+                finish_reason?: string | null
+            }[]
         }
 
         // No-op outside prod: Sentry.init only runs there (see
@@ -176,11 +207,26 @@ export async function chat(
             ...(typeof json?.id === 'string'
                 ? { 'openrouter.generation_id': json.id }
                 : {}),
+            ...proxyRouteAttributes(res.headers),
         })
 
-        const content = json?.choices?.[0]?.message?.content
-        if (typeof content !== 'string')
-            throw new OpenRouterError('empty response')
+        // A 200 with no usable text is a failure, never a result: an empty
+        // string (a reasoning model that spent max_tokens thinking, or an
+        // upstream that cut the reply) used to pass as success and every
+        // caller then read it as "the model said nothing" (T-19233).
+        const choice = json?.choices?.[0]
+        const content = choice?.message?.content
+        if (typeof content !== 'string' || content.trim() === '') {
+            const finishReason =
+                typeof choice?.finish_reason === 'string'
+                    ? choice.finish_reason
+                    : undefined
+            throw new OpenRouterError(
+                `empty response${finishReason ? ` (finish_reason=${finishReason})` : ''}`,
+                res.status,
+                { emptyReply: true, finishReason },
+            )
+        }
         return content
     } finally {
         clearTimeout(timeout)

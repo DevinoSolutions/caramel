@@ -48,8 +48,10 @@ const SYSTEM_PROMPT = [
 
 // A reasoning model's hidden reasoning counts against max_tokens (the F-017
 // lesson in evals/SCOREBOARD.md), so this is sized for the reasoning plus a
-// one-line JSON answer, not for the answer alone.
-const MAX_TOKENS = 1000
+// one-line JSON answer, not for the answer alone. The free second model gets
+// the same body: at 1000, cohere/command-a-plus-05-2026 returned empty replies
+// cut off at the cap on 6-10 of 64 eval calls; at 3000 it returned none.
+const MAX_TOKENS = 3000
 // Measured on the eval set (sequential): p50 ~4s, slowest answer 13.6s.
 const TIMEOUT_MS = 20_000
 const WHY_MAX_CHARS = 200
@@ -703,6 +705,19 @@ const cache = createCouponBoxAnswerCache<CachedAnswer>({
  * to Sentry and answered as `no_pick`. Throws CouponBoxOutlineTooLargeError
  * for an outline over MAX_OUTLINE_BYTES (the route rejects those first).
  */
+/**
+ * The X-ORF-Free-Second-Model header for the pick: a FREE model the Devino
+ * proxy dials when the pinned model has no answer by 75% of the paid timer, or
+ * fails or answers blank, so a slow free pin is answered free instead of on
+ * the paid key (T-19233). Nothing is sent when COUPON_BOX_PICK_SECOND_MODEL is
+ * unset or names the pin itself (the proxy would ignore it as same_model).
+ */
+export function freeSecondModelHeader(pin: string): Record<string, string> {
+    const second = env.COUPON_BOX_PICK_SECOND_MODEL
+    if (!second || second === pin) return {}
+    return { 'X-ORF-Free-Second-Model': second }
+}
+
 export async function pickCouponBox(
     request: CouponBoxPickRequest,
     admitModelCall?: () => Promise<void>,
@@ -759,6 +774,7 @@ export async function pickCouponBox(
                 headers: {
                     ...proxyFallbackHeaders(env.OPENROUTER_API_URL),
                     'X-ORF-Strict': '1',
+                    ...freeSecondModelHeader(model),
                 },
             },
         )
@@ -774,15 +790,25 @@ export async function pickCouponBox(
         const timedOut =
             (error instanceof Error && error.name === 'AbortError') ||
             (error instanceof OpenRouterError && error.timedOut)
+        // An empty or cut-off reply (chat() throws with emptyReply) is a
+        // model failure of its own, grouped apart from a real error.
+        const emptyReply = error instanceof OpenRouterError && error.emptyReply
         Sentry.captureException(error, {
             level: timedOut ? 'warning' : 'error',
             tags: { surface: 'coupon-box-pick', operation: 'model_call' },
             fingerprint: [
                 'coupon-box-pick',
                 'model_call',
-                timedOut ? 'timeout' : 'error',
+                timedOut ? 'timeout' : emptyReply ? 'empty_reply' : 'error',
             ],
-            extra: { domain: request.domain, model, timeoutMs: TIMEOUT_MS },
+            extra: {
+                domain: request.domain,
+                model,
+                timeoutMs: TIMEOUT_MS,
+                ...(error instanceof OpenRouterError && error.finishReason
+                    ? { finishReason: error.finishReason }
+                    : {}),
+            },
         })
         return { outcome: 'no_pick', reason: 'model_error' }
     }

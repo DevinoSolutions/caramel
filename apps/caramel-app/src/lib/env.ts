@@ -286,6 +286,14 @@ const serverObjectSchema = z.object({
         .string()
         .optional()
         .transform(v => v?.trim() || undefined),
+    // A FREE model the Devino proxy may answer the pick with when the pinned
+    // model is slow, down or answers blank, before it pays (sent as
+    // X-ORF-Free-Second-Model; the proxy ignores a paid id, a tier name or the
+    // pin itself). Optional: unset sends nothing. Eval-gate it like the pin.
+    COUPON_BOX_PICK_SECOND_MODEL: z
+        .string()
+        .optional()
+        .transform(v => v?.trim() || undefined),
     // Per-day ceiling on UNCACHED coupon-box model calls, process-wide
     // (couponBoxPickBudget.ts). Non-negative integer; 0 = no model calls at
     // all (the soft kill switch, RUNBOOK.md); unset = 2000. Garbage fails boot.
