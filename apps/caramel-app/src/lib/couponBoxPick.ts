@@ -759,9 +759,16 @@ export async function pickCouponBox(
                 // field: a provider that rejects it turns every pick into
                 // no_pick, which the eval reports as red.
                 reasoningEffort: 'low',
-                // X-ORF-Strict pins the exact model on a relay that would
-                // otherwise fall back to another free one; ignored by a
-                // provider that does not know it. The paid-fallback headers
+                // No X-ORF-Strict: the pin (super-vl:free) is in no proxy
+                // tier and this request carries no image, so its only
+                // failover is the same model on its other hosts, and the
+                // proxy hedges to them only on a non-strict request. With
+                // Strict it waited on OpenRouter's silent copy while Kilo's
+                // sat idle, and the paid timer answered (prod 2026-11-18
+                // 17:42Z, request 4ebafb2680b94385). A pin on a model a tier
+                // lists would fail over to its tier-mates, so re-check this
+                // when the pin changes.
+                // The paid-fallback headers
                 // (Aladdin approved 2026-10-23, reversing the #346 rule that
                 // kept the paid key off this guest-reachable route) let the
                 // proxy answer on Caramel's own OpenRouter key when the free
@@ -773,7 +780,6 @@ export async function pickCouponBox(
                 // MIN_PAID_PATH_DEADLINE_SECONDS, pinned by a test.
                 headers: {
                     ...proxyFallbackHeaders(env.OPENROUTER_API_URL),
-                    'X-ORF-Strict': '1',
                     ...freeSecondModelHeader(model),
                 },
             },
