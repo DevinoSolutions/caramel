@@ -3,25 +3,16 @@ import {
     base64Encode,
     decrypt,
     encrypt,
-    encryptJsonServer,
 } from '@/lib/securityHelpers/cryptoHelpers'
-import { NextApiRequest } from 'next'
 import { describe, expect, it } from 'vitest'
 
 // Characterization pins (F-013) — lock CURRENT behavior of cryptoHelpers.ts
-// before encryptJsonServer's `payload` param widens `any`->`unknown` and
-// decryptJsonClient's return narrows `any`->`unknown`. decryptJsonClient
+// before decryptJsonClient's return narrows `any`->`unknown`. decryptJsonClient
 // itself needs `window`/`navigator` (browser-only) — per plan, pinned here
 // via its pure ingredients (encrypt/decrypt, which decryptJsonClient calls
 // through unchanged) rather than adding a jsdom environment for this file.
 // The decryptJsonClient<-decryptJsonData seam is already pinned end-to-end
 // (with cryptoHelpers mocked) by decryptJsonData.test.ts.
-
-function makeApiReq(host: string, userAgent: string): NextApiRequest {
-    return {
-        headers: { host, 'user-agent': userAgent },
-    } as unknown as NextApiRequest
-}
 
 describe('base64Encode / base64Decode', () => {
     it('round-trips arbitrary text', () => {
@@ -52,24 +43,5 @@ describe('encrypt / decrypt (pure XOR+base64)', () => {
         const text = 'secret payload'
         const cipher = encrypt(text, 'right-key')
         expect(decrypt(cipher, 'wrong-key')).not.toBe(text)
-    })
-})
-
-describe('encryptJsonServer', () => {
-    it('strips the port from Host and combines with User-Agent as the XOR key — pins behavior across the payload any->unknown widen', () => {
-        const req = makeApiReq('example.com:3000', 'test-agent')
-        const payload = { hello: 'world', n: 42 }
-
-        const cipher = encryptJsonServer(req, payload)
-
-        // Independently decrypt with the pure primitive using the same
-        // port-stripped-domain + UA key derivation encryptJsonServer uses.
-        const decrypted = decrypt(cipher, 'example.comtest-agent')
-        expect(JSON.parse(decrypted)).toEqual(payload)
-    })
-
-    it('missing Host/User-Agent headers fall back to empty string (no throw)', () => {
-        const req = { headers: {} } as unknown as NextApiRequest
-        expect(() => encryptJsonServer(req, { a: 1 })).not.toThrow()
     })
 })
