@@ -11,7 +11,7 @@
             "shell-quote": "1.11.0",
             "web-ext>tmp": "0.2.7",
             "undici": "7.30.1",
-            "effect": "3.20.0",
+            "effect": "3.22.1",
             "vitest>picomatch": "4.0.4",
             "vite": "8.1.6",
             "postcss": "8.5.31",

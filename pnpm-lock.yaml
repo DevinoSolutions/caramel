@@ -8,7 +8,7 @@ overrides:
   shell-quote: 1.11.0
   web-ext>tmp: 0.2.7
   undici: 7.30.1
-  effect: 3.20.0
+  effect: 3.22.1
   vitest>picomatch: 4.0.4
   vite: 8.1.6
   postcss: 8.5.31
@@ -92,13 +92,13 @@ importers:
         version: 2.2.0(react@19.3.1)
       '@mastra/core':
         specifier: 1.83.0
-        version: 1.83.0(@opentelemetry/api@1.10.0)(effect@3.20.0)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
+        version: 1.83.0(@opentelemetry/api@1.10.0)(effect@3.22.1)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
       '@mastra/mcp':
         specifier: 2.9.0
-        version: 2.9.0(@mastra/core@1.83.0(@opentelemetry/api@1.10.0)(effect@3.20.0)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(zod@4.6.7)
+        version: 2.9.0(@mastra/core@1.83.0(@opentelemetry/api@1.10.0)(effect@3.22.1)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(zod@4.6.7)
       '@mastra/quickjs':
         specifier: 0.1.5
-        version: 0.1.5(@mastra/core@1.83.0(@opentelemetry/api@1.10.0)(effect@3.20.0)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))
+        version: 0.1.5(@mastra/core@1.83.0(@opentelemetry/api@1.10.0)(effect@3.22.1)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))
       '@prisma/adapter-pg':
         specifier: 7.10.1
         version: 7.10.1
@@ -2587,7 +2587,7 @@ packages:
       '@types/json-schema': ^7.0.15
       '@valibot/to-json-schema': ^1.3.0
       arktype: ^2.1.20
-      effect: 3.20.0
+      effect: 3.22.1
       sury: ^10.0.0 || ^11.0.0
       typebox: ^1.0.17
       valibot: ^1.4.2
@@ -2617,7 +2617,7 @@ packages:
       '@standard-community/standard-json': ^0.4.1
       '@standard-schema/spec': ^1.0.0
       arktype: ^2.1.20
-      effect: 3.20.0
+      effect: 3.22.1
       openapi-types: ^12.1.3
       sury: ^10.0.0
       typebox: ^1.0.0
@@ -4279,8 +4279,8 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  effect@3.20.0:
-    resolution: {integrity: sha512-qMLfDJscrNG8p/aw+IkT9W7fgj50Z4wG5bLBy0Txsxz8iUHjDIkOgO3SV0WZfnQbNG2VJYb0b+rDLMrhM4+Krw==}
+  effect@3.22.1:
+    resolution: {integrity: sha512-TNoXushmPOBAjJlthF5d2QwnX2xBPEtcNJr5XKNKbRLbDvBcOYkXlYDfvGfSA0zriwLFuCll5MDtNMAdZL17PQ==}
 
   electron-to-chromium@1.5.478:
     resolution: {integrity: sha512-pftG+ma5Lm8O6/p45bhYT6StBN5ziQymaRzmCZwFl8DwWHKPPD93FdOmP1aqftcepolQYvrcyTLa17kE8Yf+jg==}
@@ -9125,7 +9125,7 @@ snapshots:
     dependencies:
       '@lukeed/csprng': 1.1.0
 
-  '@mastra/core@1.83.0(@opentelemetry/api@1.10.0)(effect@3.20.0)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)':
+  '@mastra/core@1.83.0(@opentelemetry/api@1.10.0)(effect@3.22.1)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@4.22.3)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@4.22.3)'
@@ -9144,7 +9144,7 @@ snapshots:
       execa: 9.6.1
       fastq: 1.20.3
       hono: 4.13.18
-      hono-openapi: 1.6.0(effect@3.20.0)(hono@4.13.18)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
+      hono-openapi: 1.6.0(effect@3.22.1)(hono@4.13.18)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
       ignore: 7.0.14
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -9178,9 +9178,9 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/mcp@2.9.0(@mastra/core@1.83.0(@opentelemetry/api@1.10.0)(effect@3.20.0)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(zod@4.6.7)':
+  '@mastra/mcp@2.9.0(@mastra/core@1.83.0(@opentelemetry/api@1.10.0)(effect@3.22.1)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(zod@4.6.7)':
     dependencies:
-      '@mastra/core': 1.83.0(@opentelemetry/api@1.10.0)(effect@3.20.0)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
+      '@mastra/core': 1.83.0(@opentelemetry/api@1.10.0)(effect@3.22.1)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
       '@modelcontextprotocol/client': 2.4.0
       '@modelcontextprotocol/core': 2.4.0
       '@modelcontextprotocol/ext-apps': 2.0.4(@modelcontextprotocol/client@2.4.0)(@modelcontextprotocol/core@2.4.0)(@modelcontextprotocol/server@2.4.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(zod@4.6.7)
@@ -9195,9 +9195,9 @@ snapshots:
       - react
       - react-dom
 
-  '@mastra/quickjs@0.1.5(@mastra/core@1.83.0(@opentelemetry/api@1.10.0)(effect@3.20.0)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))':
+  '@mastra/quickjs@0.1.5(@mastra/core@1.83.0(@opentelemetry/api@1.10.0)(effect@3.22.1)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.83.0(@opentelemetry/api@1.10.0)(effect@3.20.0)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
+      '@mastra/core': 1.83.0(@opentelemetry/api@1.10.0)(effect@3.22.1)(express@4.22.3)(rxjs@7.8.2)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
       quickjs-emscripten: 0.31.0
       ts-blank-space: 0.6.2
 
@@ -9675,7 +9675,7 @@ snapshots:
     dependencies:
       c12: 3.3.4(magicast@0.5.5)
       deepmerge-ts: 8.0.2
-      effect: 3.20.0
+      effect: 3.22.1
       empathic: 2.0.0
     transitivePeerDependencies:
       - magicast
@@ -10192,23 +10192,23 @@ snapshots:
     dependencies:
       size-limit: 14.3.0
 
-  '@standard-community/standard-json@0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.20.0)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)':
+  '@standard-community/standard-json@0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.22.1)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/json-schema': 7.0.15
       quansync: 0.2.11
     optionalDependencies:
-      effect: 3.20.0
+      effect: 3.22.1
       valibot: 1.4.2(typescript@5.9.3)
       zod: 4.6.7
 
-  '@standard-community/standard-openapi@0.2.12(@standard-community/standard-json@0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.20.0)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))(@standard-schema/spec@1.1.0)(effect@3.20.0)(openapi-types@12.1.3)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)':
+  '@standard-community/standard-openapi@0.2.12(@standard-community/standard-json@0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.22.1)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))(@standard-schema/spec@1.1.0)(effect@3.22.1)(openapi-types@12.1.3)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)':
     dependencies:
-      '@standard-community/standard-json': 0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.20.0)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
+      '@standard-community/standard-json': 0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.22.1)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
       openapi-types: 12.1.3
     optionalDependencies:
-      effect: 3.20.0
+      effect: 3.22.1
       valibot: 1.4.2(typescript@5.9.3)
       zod: 4.6.7
 
@@ -11895,7 +11895,7 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  effect@3.20.0:
+  effect@3.22.1:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 3.23.2
@@ -12949,11 +12949,11 @@ snapshots:
     dependencies:
       react-is: 16.13.1
 
-  hono-openapi@1.6.0(effect@3.20.0)(hono@4.13.18)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7):
+  hono-openapi@1.6.0(effect@3.22.1)(hono@4.13.18)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7):
     dependencies:
       '@hono/standard-validator': 0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.18)
-      '@standard-community/standard-json': 0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.20.0)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
-      '@standard-community/standard-openapi': 0.2.12(@standard-community/standard-json@0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.20.0)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))(@standard-schema/spec@1.1.0)(effect@3.20.0)(openapi-types@12.1.3)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
+      '@standard-community/standard-json': 0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.22.1)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
+      '@standard-community/standard-openapi': 0.2.12(@standard-community/standard-json@0.4.1(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(effect@3.22.1)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7))(@standard-schema/spec@1.1.0)(effect@3.22.1)(openapi-types@12.1.3)(valibot@1.4.2(typescript@5.9.3))(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
       '@types/json-schema': 7.0.15
       hono: 4.13.18
