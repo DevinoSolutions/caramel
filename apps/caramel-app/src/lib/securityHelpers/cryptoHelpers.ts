@@ -1,5 +1,3 @@
-import { NextApiRequest } from 'next'
-
 // Function to calculate Base64 encoding of a string
 export function base64Encode(string: string): string {
     // In a pure Node environment, replace with:
@@ -52,29 +50,6 @@ export function encrypt(text: string, key: string): string {
 export function decrypt(base64Text: string, key: string): string {
     const encryptedText = base64Decode(base64Text)
     return xorWithBase64(encryptedText, key)
-}
-
-/**
- * SERVER-SIDE HELPER:
- *  - Reads the 'host' header and removes any port (e.g. "localhost:3000" => "localhost")
- *  - Reads the 'user-agent'
- *  - Encrypts the entire JSON payload as one string
- */
-export function encryptJsonServer(
-    req: NextApiRequest,
-    payload: unknown,
-): string {
-    // Extract domain (strip any :port)
-    const domain = (req.headers.host || '').replace(/:\d+$/, '')
-    // Extract user agent
-    const userAgent = req.headers['user-agent'] || ''
-
-    // Combine them
-    const key = domain + userAgent
-
-    // Stringify and encrypt
-    const jsonString = JSON.stringify(payload)
-    return encrypt(jsonString, key)
 }
 
 /**
