@@ -89,7 +89,8 @@ env:
 jobs:
   guard:
     name: '🛡️ Version + freeze guard'
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ubuntu-devino
     timeout-minutes: 30
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -309,7 +310,8 @@ jobs:
   package:
     name: '📦 Package Extension'
     needs: guard
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ubuntu-devino
     timeout-minutes: 20
     # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
     # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
@@ -444,7 +446,8 @@ jobs:
     name: '🚀 Publish to Chrome Web Store'
     needs: [guard, package]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ubuntu-devino
     timeout-minutes: 60
     # DevinoSolutions/artifact/download@v1 authenticates to the self-hosted store with a
     # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
@@ -567,7 +570,8 @@ jobs:
     name: '🚀 Publish to Firefox Add-ons (AMO)'
     needs: [guard, package]
     if: ${{ !inputs.dry_run && !inputs.only_chrome }}
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ubuntu-devino
     timeout-minutes: 60
     # DevinoSolutions/artifact/download@v1 authenticates to the self-hosted store with a
     # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
@@ -872,7 +876,8 @@ jobs:
     name: '🚀 Publish to Microsoft Edge Add-ons'
     needs: [guard, package]
     if: ${{ !inputs.dry_run && !inputs.only_chrome }}
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ubuntu-devino
     timeout-minutes: 60
     # DevinoSolutions/artifact/download@v1 authenticates to the self-hosted store with a
     # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
@@ -1447,7 +1452,8 @@ jobs:
         publish_edge,
       ]
     if: ${{ !inputs.dry_run && !inputs.only_chrome && github.ref_type == 'tag' }}
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ubuntu-devino
     timeout-minutes: 60
     # DevinoSolutions/artifact/download@v1 authenticates to the self-hosted store with a
     # GitHub OIDC token, so this job needs `id-token: write` on top of the

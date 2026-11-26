@@ -85,7 +85,8 @@ env:
 jobs:
   verify:
     name: Build debug, unit tests, lint
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-devino' }}
     timeout-minutes: 30
     # DevinoSolutions/artifact/upload@v1 authenticates with a GitHub OIDC token (T-7021: GitHub
     # artifacts are blocked org-wide); a job-level block replaces the workflow-level one.
@@ -149,7 +150,8 @@ jobs:
     name: Sign release AAB + APK, upload to Play internal unless dry run
     if: github.event_name != 'pull_request'
     needs: verify
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ubuntu-devino
     timeout-minutes: 45
     # The post-Play evidence upload uses DevinoSolutions/artifact (GitHub OIDC token); a job-level
     # block replaces the workflow-level one.

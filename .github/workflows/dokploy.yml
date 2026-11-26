@@ -48,7 +48,8 @@ jobs:
     name: build web
     # main and dev, on push or by a manual run; any other ref is skipped.
     if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ubuntu-devino-build
     timeout-minutes: 60
     # No `environment:` here on purpose: it would create a GitHub Deployment for the build.
     permissions:
@@ -153,7 +154,8 @@ jobs:
     name: publish the Dokploy release
     needs: build
     if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ubuntu-devino
     timeout-minutes: 10
     # The only job with an environment: its deployment branch policy gates the release and Dokploy re-reads that policy.
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}

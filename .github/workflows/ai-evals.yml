@@ -53,7 +53,8 @@ concurrency:
 jobs:
   eval:
     name: Cart classifier eval
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'ubuntu-latest' || github.event_name == 'schedule' && 'ubuntu-devino-nightly' || 'ubuntu-devino' }}
     # DevinoSolutions/artifact/upload@v1 authenticates to the self-hosted store with a
     # GitHub OIDC token, so this job needs `id-token: write`. A job-level block
     # REPLACES the workflow-level one, hence `contents: read` is restated here.
@@ -145,7 +146,8 @@ jobs:
 
   eval-coupon-box-pick:
     name: Coupon box pick eval
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'ubuntu-latest' || github.event_name == 'schedule' && 'ubuntu-devino-nightly' || 'ubuntu-devino' }}
     # Same reason as the cart job: the artifact upload authenticates with a
     # GitHub OIDC token; a job-level block replaces the workflow-level one.
     permissions:
@@ -221,7 +223,8 @@ jobs:
 
   eval-mcp-tool-choice:
     name: MCP tool choice eval
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'ubuntu-latest' || github.event_name == 'schedule' && 'ubuntu-devino-nightly' || 'ubuntu-devino' }}
     # Same reason as the cart job: the artifact upload authenticates with a
     # GitHub OIDC token; a job-level block replaces the workflow-level one.
     permissions:
@@ -302,7 +305,8 @@ jobs:
     name: Open issue on nightly failure
     needs: [eval, eval-coupon-box-pick, eval-mcp-tool-choice]
     if: failure() && github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    # Self-hosted since 2026-11-26: the org's GitHub-hosted Actions budget ran out and hosted jobs were refused.
+    runs-on: ubuntu-devino-nightly
     timeout-minutes: 30
     permissions:
       contents: read
