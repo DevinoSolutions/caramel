@@ -4,6 +4,7 @@ import ProfileNav, {
     type ProfileNavItem,
 } from '@/components/profile/ProfileNav'
 import SectionSkeleton from '@/components/profile/SectionSkeleton'
+import { guardAuthRedirect } from '@/lib/auth/authRedirectGuard'
 import { useSession } from '@/lib/auth/client'
 import {
     noticeBodyClasses,
@@ -17,6 +18,7 @@ import {
 import type { FavoriteStoreSummary } from '@/lib/profile/types'
 import { useProfileOverview } from '@/lib/profile/useProfileOverview'
 import { useReducedMotion } from '@/lib/reducedMotion'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import AccountDetailsCard from './sections/AccountDetailsCard'
@@ -41,24 +43,50 @@ export default function ProfilePageClient() {
 
     useEffect(() => setMounted(true), [])
 
-    useEffect(() => {
-        if (mounted && !isPending && !session?.user) {
-            // replace, not push: a pushed /login leaves this page behind it in
-            // history, so Back lands here and bounces to /login again (a
-            // back-button trap in a browser, and a ~150 ms /profile <-> /login
-            // loop in the app shells, which step back from /login: CARAMEL-2Y,
-            // CARAMEL-30). `next` brings the shopper back here, fragment
-            // included, once signed in.
-            const here = window.location.pathname + window.location.hash
-            router.replace(`/login?next=${encodeURIComponent(here)}`)
-        }
-    }, [mounted, session, isPending, router])
-
     // Only fetch once we know there IS a session — firing an authenticated
     // request before that turns every signed-out visit into a spurious 401.
     const signedIn = Boolean(mounted && !isPending && session?.user)
     const { overview, status, retry, patchOverview } =
         useProfileOverview(signedIn)
+
+    // Set when the loop guard refused the redirect: the page shows a sign-in
+    // prompt in place instead of bouncing again (T-10055).
+    const [signInPath, setSignInPath] = useState<string | null>(null)
+    // One move to /login per visit. A 401 from the overview and the session
+    // store emptying are the same transition, whichever this page sees first,
+    // so it asks the loop guard once and navigates once.
+    const leftForSignIn = useRef(false)
+
+    useEffect(() => {
+        if (!mounted || isPending || leftForSignIn.current) return
+        // The overview hook is clearing a session the server rejected: wait,
+        // so /login never sees that session and the 401 stays the reason.
+        if (status === 'ending-session') return
+        const serverRejectedSession = status === 'auth-required'
+        // A stale client session the server rejected still needs sign-in.
+        if (session?.user && !serverRejectedSession) return
+        leftForSignIn.current = true
+        // replace, not push: a pushed /login leaves this page behind it in
+        // history, so Back lands here and bounces to /login again (a
+        // back-button trap in a browser, and a ~150 ms /profile <-> /login
+        // loop in the app shells, which step back from /login: CARAMEL-2Y,
+        // CARAMEL-30). `next` brings the shopper back here, fragment
+        // included, once signed in.
+        const here = window.location.pathname + window.location.hash
+        const target = `/login?next=${encodeURIComponent(here)}`
+        const allowed = guardAuthRedirect({
+            from: here,
+            to: target,
+            hasSession: Boolean(session?.user),
+            sessionPending: false,
+            serverRejectedSession,
+        })
+        if (allowed) {
+            router.replace(target)
+        } else {
+            setSignInPath(target)
+        }
+    }, [mounted, isPending, session, status, router])
 
     // Honour a deep link (/profile#savings) ONCE the target section exists.
     //
@@ -99,6 +127,30 @@ export default function ProfilePageClient() {
                         <div className="text-lg font-medium text-gray-500 dark:text-gray-400">
                             Loading...
                         </div>
+                    </div>
+                </div>
+            </main>
+        )
+    }
+
+    // Shown whatever the client session says: a stale session the server
+    // rejected (sign-out failed) must still offer sign-in, not "Try again".
+    if (signInPath) {
+        return (
+            <main className={pageShellClasses}>
+                <div className={pageContainerClasses}>
+                    <div role="alert" className={noticeClasses}>
+                        <p className={noticeTitleClasses}>
+                            Sign in to see your account
+                        </p>
+                        <p className={noticeBodyClasses}>
+                            We tried to open sign-in a few times and it kept
+                            bouncing back here, so we stopped. Sign in below to
+                            continue.
+                        </p>
+                        <Link href={signInPath} className={noticeButtonClasses}>
+                            Sign in
+                        </Link>
                     </div>
                 </div>
             </main>
@@ -224,7 +276,9 @@ export default function ProfilePageClient() {
                             />
                         </div>
 
-                        {status === 'loading' ? (
+                        {status === 'loading' ||
+                        status === 'ending-session' ||
+                        status === 'auth-required' ? (
                             <SectionSkeleton />
                         ) : status === 'error' ? (
                             <div role="alert" className={noticeClasses}>
