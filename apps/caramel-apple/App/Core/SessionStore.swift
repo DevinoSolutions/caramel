@@ -12,6 +12,7 @@ enum SignInError: LocalizedError {
     case stateMismatch
     case unexpectedCallback
     case randomUnavailable
+    case appleCredentialIncomplete
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +23,7 @@ enum SignInError: LocalizedError {
         case .stateMismatch: return "The sign-in response did not match the request. Please try again."
         case .unexpectedCallback: return "The sign-in returned to an unexpected address. Please try again."
         case .randomUnavailable: return "This device could not generate a secure sign-in key. Please try again."
+        case .appleCredentialIncomplete: return "Apple did not return a complete sign-in. Please try again."
         }
     }
 }
@@ -55,7 +57,8 @@ struct PKCE {
     }
 }
 
-/// Runs the web OAuth flow (Apple / Google) in an ASWebAuthenticationSession.
+/// Runs the web OAuth flow (Google; Apple uses NativeAppleSignIn) in an
+/// ASWebAuthenticationSession.
 /// The flow ends with the web app redirecting to AppConfig.signInRedirectURI,
 /// which closes the sheet and hands the callback URL (code + signed state)
 /// back here.
@@ -135,6 +138,111 @@ final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding
     }
 }
 
+/// What Apple's native sheet returned, ready for
+/// POST /api/extension/oauth/apple-id-token (CaramelAPI.appleIdTokenSignIn).
+struct NativeAppleCredential {
+    let identityToken: String
+    /// The nonce the request was made with, before hashing. Only our own POST
+    /// carries it; the identity token carries its SHA-256.
+    let rawNonce: String
+    let authorizationCode: String?
+    /// Apple gives the name on the first authorization only.
+    let fullName: String?
+}
+
+/// Sign in with Apple through the system sheet (ASAuthorizationAppleIDProvider:
+/// Face ID and the device's Apple ID, no web page and no "Caramel Wants to Use
+/// appleid.apple.com" prompt). Google stays on WebSignIn. The request carries
+/// the SHA-256 of a fresh random nonce, so the identity token it returns only
+/// signs in the request that asked for it.
+@MainActor
+final class NativeAppleSignIn: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    private var continuation: CheckedContinuation<ASAuthorizationAppleIDCredential, Error>?
+    private var controller: ASAuthorizationController?
+
+    func authenticate() async throws -> NativeAppleCredential {
+        let rawNonce = try Self.randomNonce()
+        let request = ASAuthorizationAppleIDProvider().createRequest()
+        request.requestedScopes = [.fullName, .email]
+        request.nonce = Self.sha256Hex(rawNonce)
+
+        let credential: ASAuthorizationAppleIDCredential = try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = self
+            controller.presentationContextProvider = self
+            // Retained until the delegate answers: nothing else keeps it alive.
+            self.controller = controller
+            controller.performRequests()
+        }
+
+        guard let tokenData = credential.identityToken,
+              let identityToken = String(data: tokenData, encoding: .utf8),
+              !identityToken.isEmpty
+        else {
+            throw SignInError.appleCredentialIncomplete
+        }
+        let name = credential.fullName.map {
+            PersonNameComponentsFormatter.localizedString(from: $0, style: .default)
+        }
+        return NativeAppleCredential(
+            identityToken: identityToken,
+            rawNonce: rawNonce,
+            authorizationCode: credential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) },
+            fullName: name?.isEmpty == false ? name : nil
+        )
+    }
+
+    // Main-actor methods, like WebSignIn's anchor: AuthenticationServices calls
+    // the delegate and the presentation provider on the main thread.
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
+            finish(.failure(SignInError.appleCredentialIncomplete))
+            return
+        }
+        finish(.success(credential))
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        if let error = error as? ASAuthorizationError, error.code == .canceled {
+            finish(.failure(SignInError.cancelled))
+        } else {
+            finish(.failure(error))
+        }
+    }
+
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+        return windows.first(where: { $0.isKeyWindow }) ?? ASPresentationAnchor()
+    }
+
+    private func finish(_ result: Result<ASAuthorizationAppleIDCredential, Error>) {
+        controller = nil
+        continuation?.resume(with: result)
+        continuation = nil
+    }
+
+    /// 32 random bytes as base64url: the raw nonce, never stored.
+    private static func randomNonce() throws -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw SignInError.randomUnavailable
+        }
+        return Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Lowercase hex SHA-256, the form the server compares with the token's
+    /// `nonce` (appleNonceHash in apps/caramel-app/src/lib/auth/appleNativeSignIn.ts).
+    static func sha256Hex(_ input: String) -> String {
+        SHA256.hash(data: Data(input.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 /// The signed-in state. The bearer lives in the shared keychain
 /// (SharedSessionKeychain). TODO(T-5059): the Safari extension does not read that
 /// item yet (native messaging is not wired), so today it keeps its own sign-in.
@@ -149,6 +257,7 @@ final class SessionStore: ObservableObject {
 
     private let api = CaramelAPI.shared
     private let webSignIn = WebSignIn()
+    private let appleSignIn = NativeAppleSignIn()
 
     init() {
         do {
@@ -184,6 +293,11 @@ final class SessionStore: ObservableObject {
         errorMessage = nil
         defer { isSigningIn = false }
         do {
+            if provider == .apple {
+                let credential = try await appleSignIn.authenticate()
+                try storeSession(try await api.appleIdTokenSignIn(credential))
+                return
+            }
             let pkce = try PKCE.generate()
             let start = try await api.oauthAuthorize(provider: provider, codeChallenge: pkce.challenge)
             guard let url = URL(string: start.authorizationUrl) else {
@@ -197,15 +311,19 @@ final class SessionStore: ObservableObject {
                 state: start.state,
                 codeVerifier: pkce.verifier
             )
-            try SharedSessionKeychain.write(result.token)
-            token = result.token
-            username = result.username
+            try storeSession(result)
         } catch SignInError.cancelled {
             // The shopper backed out: not an error to report.
             return
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func storeSession(_ result: OAuthSessionResult) throws {
+        try SharedSessionKeychain.write(result.token)
+        token = result.token
+        username = result.username
     }
 
     /// Signs out: clears the on-device session (app + extension share it) and
